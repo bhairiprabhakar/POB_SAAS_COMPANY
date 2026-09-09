@@ -1,0 +1,716 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { api, downloadFile, fmtMoney, fmtDate, uploadFile, getSession } from '../../api';
+import {
+  Badge, ErrorBox, Field, Modal, PageHeader, SearchBox, Select, Spinner,
+  StatusBadge, TextArea, TextInput, toast, useAsync,
+} from '../../ui';
+
+const BLANK = {
+  name: '', shop_name: '', owner_name: '', mobile: '', alternate_mobile: '', email: '',
+  gst: '', dl_number: '', upi_id: '', ocid: '', doctor_name: '', category: '', area: '',
+  address: '', city: '', district: '', state: '', pin: '', latitude: '', longitude: '',
+  status: 'active',
+};
+
+const REG_FIELDS = [
+  { name: 'name', label: 'Chemist name', required: true },
+  { name: 'shop_name', label: 'Shop name' },
+  { name: 'owner_name', label: 'Owner name' },
+  { name: 'mobile', label: 'Mobile' },
+  { name: 'alternate_mobile', label: 'Alt mobile' },
+  { name: 'email', label: 'Email', type: 'email' },
+  { name: 'gst', label: 'GST' },
+  { name: 'dl_number', label: 'DL number' },
+  { name: 'upi_id', label: 'UPI ID' },
+  { name: 'ocid', label: 'OCID' },
+  { name: 'doctor_name', label: 'Doctor' },
+  { name: 'category', label: 'Category' },
+  { name: 'area', label: 'Area' },
+];
+
+export default function Chemists() {
+  const navigate = useNavigate();
+  const session = getSession();
+  const canManage = (session?.permissions || []).includes('chemist.manage');
+  const [q, setQ] = useState('');
+  const [status, setStatus] = useState('');
+  const [campaignId, setCampaignId] = useState('');
+  const [editing, setEditing] = useState(null);
+  const [bulk, setBulk] = useState(false);
+  const [actionFor, setActionFor] = useState(null);
+
+  const campaigns = useAsync(() => api('/api/v1/campaigns?status=active&active=1'));
+
+  const buildUrl = useCallback(() => {
+    let url = '/api/v1/chemists?limit=500';
+    if (q) url += `&q=${encodeURIComponent(q)}`;
+    if (status) url += `&status=${status}`;
+    if (campaignId) url += `&campaign_id=${campaignId}`;
+    return url;
+  }, [q, status, campaignId]);
+
+  const { data, loading, error, run } = useAsync(() => api(buildUrl()), [buildUrl]);
+  const rows = data?.items || [];
+
+  return (
+    <div>
+      <PageHeader title="Chemists"
+        subtitle={campaignId
+          ? 'Select a chemist to submit POB or upload invoice proof'
+          : 'Register and manage the retail chemist network'}
+        actions={
+          <>
+            {canManage && <button className="btn" onClick={() => downloadFile('/api/v1/chemists/bulk-template', 'chemists_template.xlsx')}>
+              Template
+            </button>}
+            {canManage && <button className="btn" onClick={() => setBulk(true)}>Bulk Upload</button>}
+            {canManage && <button className="btn btn-primary" onClick={() => navigate('/app/chemists/register')}>
+              Register Chemist
+            </button>}
+          </>
+        } />
+
+      <div className="toolbar">
+        <SearchBox value={q} onChange={setQ} placeholder="Search name / shop / mobile / GST..." />
+        <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
+          <option value="">All statuses</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+        <select className="input" value={campaignId} onChange={(e) => setCampaignId(e.target.value)}>
+          <option value="">All campaigns</option>
+          {(campaigns.data?.items || []).map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+      </div>
+
+      {loading && <Spinner label="Loading chemists..." />}
+      {error && <ErrorBox error={error} onRetry={run} />}
+      {!loading && !error && (
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead><tr>
+              <th>#</th>
+              <th>Name</th>
+              <th>Shop</th>
+              <th>Area / City</th>
+              <th>Mobile</th>
+              {campaignId && <>
+                <th>POB Status</th>
+                <th>Invoice</th>
+                <th>Gratification</th>
+              </>}
+              <th>Registered by</th>
+              <th>Hierarchy</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <ChemistRow key={r.id} row={r} campaignId={campaignId} campaigns={campaigns.data?.items || []}
+                  canManage={canManage}
+                  onAction={(action) => setActionFor({ chemist: r, action })}
+                  onEdit={() => setEditing({ ...r })} />
+              ))}
+              {rows.length === 0 && (
+                <tr><td colSpan={campaignId ? 11 : 8} className="empty-state">No chemists found</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {actionFor && (
+        <InlineAction key={`${actionFor.chemist.id}-${actionFor.action}`}
+          chemist={actionFor.chemist} campaignId={campaignId} campaigns={campaigns.data?.items || []}
+          action={actionFor.action}
+          onClose={() => setActionFor(null)}
+          onDone={() => { setActionFor(null); run(); }} />
+      )}
+
+      {editing && (
+        <RegisterModal key={editing.id ?? 'new'} row={editing} onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); run(); }} />
+      )}
+
+      {bulk && <BulkModal onClose={() => setBulk(false)} onDone={() => { setBulk(false); run(); }} />}
+    </div>
+  );
+}
+
+/* ── Table row ─────────────────────────────────────────────────────────── */
+
+function ChemistRow({ row, campaignId, campaigns, canManage, onAction, onEdit }) {
+  const r = row;
+  const pobStatus = r.pob_status;
+  const invStatus = r.invoice_status;
+  const vState = r.verification_state;
+  const gratCount = r.grat_count || 0;
+  const gratValue = r.grat_total_value || 0;
+  const gratStatus = r.grat_latest_status;
+
+  // POB status rendering
+  let pobCell;
+  if (!campaignId) {
+    pobCell = <span className="muted">Select campaign</span>;
+  } else if (!pobStatus) {
+    pobCell = <span className="muted">--</span>;
+  } else {
+    pobCell = <StatusBadge value={pobStatus} />;
+  }
+
+  // Invoice status rendering
+  let invCell = null;
+  if (campaignId) {
+    if (invStatus === 'uploaded') {
+      invCell = <Badge tone="blue">Uploaded</Badge>;
+    } else if (pobStatus && !invStatus) {
+      invCell = <Badge tone="amber">Pending</Badge>;
+    } else {
+      invCell = <span className="muted">--</span>;
+    }
+  } else {
+    invCell = <span className="muted">--</span>;
+  }
+
+  // Gratification rendering
+  let gratCell = null;
+  if (campaignId) {
+    if (gratCount > 0) {
+      gratCell = (
+        <span>
+          <Badge tone="green">{gratCount} gift{gratCount > 1 ? 's' : ''}</Badge>
+          {gratValue > 0 && <span className="muted" style={{ marginLeft: 4 }}>{fmtMoney(gratValue)}</span>}
+        </span>
+      );
+    } else {
+      gratCell = <span className="muted">--</span>;
+    }
+  } else {
+    gratCell = <span className="muted">--</span>;
+  }
+
+  // Hierarchy chain
+  const chain = r.registered_by_hierarchy;
+  const regName = r.registered_by_name;
+  const regLevel = r.registered_by_level;
+
+  // Determine which actions are available
+  const canSubmitPob = !pobStatus || pobStatus === 'submitted' || pobStatus === 'rejected';
+  const canUploadInvoice = pobStatus && invStatus !== 'uploaded' && vState !== 'auto_verified' && vState !== 'approved' && vState !== 'verified';
+
+  return (
+    <tr>
+      <td><strong>#{r.id}</strong></td>
+      <td>
+        <div><strong>{r.name}</strong></div>
+        {r.owner_name && <small className="muted">{r.owner_name}</small>}
+      </td>
+      <td>{r.shop_name || '--'}</td>
+      <td>{r.area || ''}{r.area && r.city ? ', ' : ''}{r.city || ''}</td>
+      <td className="nowrap">{r.mobile || '--'}</td>
+
+      {campaignId && <td>{pobCell}</td>}
+      {campaignId && <td>{invCell}</td>}
+      {campaignId && <td>{gratCell}</td>}
+
+      <td>
+        {regName ? (
+          <span>
+            {regName}
+            {regLevel && <small className="muted"> ({regLevel})</small>}
+          </span>
+        ) : <span className="muted">--</span>}
+      </td>
+      <td>
+        {chain && chain.length > 1 ? (
+          <span className="hierarchy-chain" title={chain.map((h) => `${h.name} (${h.level || h.role})`).join(' > ')}>
+            {chain.slice(1).map((h) => h.level || h.role).join(' > ')}
+          </span>
+        ) : <span className="muted">--</span>}
+      </td>
+      <td><StatusBadge value={r.status} /></td>
+      <td className="nowrap" style={{ whiteSpace: 'nowrap' }}>
+        {canManage ? (
+          <>
+            {canSubmitPob && (
+              <button className="btn btn-sm btn-primary" onClick={() => onAction('pob')}
+                title={campaignId ? `Submit POB for ${r.name}` : 'Select a campaign first'}>
+                Submit POB
+              </button>
+            )}
+            {canUploadInvoice && (
+              <button className="btn btn-sm" onClick={() => onAction('invoice')}
+                title={campaignId ? `Upload invoice for ${r.name}` : 'Select a campaign first'}>
+                Upload Invoice
+              </button>
+            )}
+            {!canSubmitPob && !canUploadInvoice && (
+              <span className="muted" style={{ fontSize: 12 }}>No action needed</span>
+            )}
+          </>
+        ) : (
+          <button className="btn-link" onClick={onEdit}>Edit</button>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function del(r, run) {
+  if (!window.confirm(`Delete ${r.name}? This fails if the chemist already has POB activity.`)) return;
+  api(`/api/v1/chemists/${r.id}`, { method: 'DELETE' })
+    .then(() => { toast('Chemist deleted', 'success'); run(); })
+    .catch((err) => toast(err.message, 'error'));
+}
+
+/* ── Inline POB / Invoice action modals ────────────────────────────────── */
+
+function InlineAction({ chemist, campaignId, campaigns, action, onClose, onDone }) {
+  return (
+    <Modal open wide title={action === 'pob' ? 'Submit POB' : 'Upload Invoice Proof'} onClose={onClose}>
+      {action === 'pob'
+        ? <InlinePOBForm chemist={chemist} campaignId={campaignId} campaigns={campaigns} onDone={onDone} />
+        : <InlineInvoiceForm chemist={chemist} campaignId={campaignId} campaigns={campaigns} onDone={onDone} />}
+    </Modal>
+  );
+}
+
+function InlinePOBForm({ chemist, campaignId, campaigns, onDone }) {
+  const [selectedCampaignId, setSelectedCampaignId] = useState(campaignId || '');
+  const [products, setProducts] = useState([]);
+  const [qty, setQty] = useState({});
+  const [remarks, setRemarks] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [campaignInfo, setCampaignInfo] = useState(null);
+
+  useEffect(() => {
+    if (!selectedCampaignId) { setProducts([]); setCampaignInfo(null); return; }
+    api(`/api/v1/products?campaign_id=${selectedCampaignId}`).then((d) => {
+      const items = (d.items || []).filter((p) => p.status !== 'inactive');
+      setProducts(items);
+      setQty(Object.fromEntries(items.map((p) => [p.id, 1])));
+    }).catch(() => {});
+    api(`/api/v1/campaigns/${selectedCampaignId}`).then(setCampaignInfo).catch(() => {});
+  }, [selectedCampaignId]);
+
+  const line = (p) => {
+    const q = Number(qty[p.id]) || 0;
+    const minQ = p.min_quantity || 0;
+    const minPob = p.min_pob || 0;
+    const maxPob = p.max_pob;
+    const amount = Math.round(q * (Number(p.ptr) || 0) * 100) / 100;
+    return {
+      ...p, q, amount, minQ, minPob, maxPob,
+      lowQty: q > 0 && minQ > 0 && q < minQ,
+      lowPob: q > 0 && minPob > 0 && amount < minPob,
+      highPob: q > 0 && maxPob != null && amount > maxPob,
+    };
+  };
+  const lines = products.map(line);
+  const total = lines.reduce((s, l) => s + l.amount, 0);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!selectedCampaignId) { toast('Select a campaign', 'error'); return; }
+    const items = lines.filter((l) => l.q > 0).map((l) => ({ product_id: l.id, quantity: l.q }));
+    if (items.length === 0) { toast('Enter quantity for at least one product', 'error'); return; }
+    const below = lines.filter((l) => l.q > 0 && (l.lowQty || l.lowPob || l.highPob));
+    if (below.length > 0) {
+      const reasons = below.map((l) => {
+        const msgs = [];
+        if (l.lowQty) msgs.push(`min qty ${l.minQ}`);
+        if (l.lowPob) msgs.push(`min POB ${fmtMoney(l.minPob)}`);
+        if (l.highPob) msgs.push(`max POB ${fmtMoney(l.maxPob)}`);
+        return `${l.name}: ${msgs.join(', ')}`;
+      });
+      toast(`Cannot submit — ${reasons.join('; ')}`, 'error');
+      return;
+    }
+    setBusy(true);
+    try {
+      await api('/api/v1/pob/visit', {
+        method: 'POST',
+        body: { campaign_id: Number(selectedCampaignId), chemist_id: Number(chemist.id), items, remarks },
+      });
+      toast(`POB submitted for ${chemist.name}`, 'success');
+      onDone();
+    } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
+  };
+
+  return (
+    <form onSubmit={submit}>
+      <p style={{ marginBottom: 12 }}>
+        <strong>{chemist.name}</strong>{chemist.shop_name ? ` — ${chemist.shop_name}` : ''}
+      </p>
+      {!campaignId && (
+        <Field label="Campaign" required>
+          <select className="input" value={selectedCampaignId} onChange={(e) => setSelectedCampaignId(e.target.value)}>
+            <option value="">-- Select campaign --</option>
+            {(campaigns || []).map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </Field>
+      )}
+      {selectedCampaignId && products.length === 0 && <Spinner label="Loading products..." />}
+      {selectedCampaignId && products.length > 0 && (
+        <>
+          {campaignInfo && <p className="muted" style={{ marginBottom: 8 }}>{campaignInfo.name}</p>}
+          {campaignInfo && (campaignInfo.start_date || campaignInfo.end_date || campaignInfo.terms_conditions || products.some((p) => p.min_pob > 0)) && (
+            <div className="campaign-criteria-card">
+              <div className="criteria-header">
+                <span className="criteria-icon">📋</span>
+                <h4>Campaign Requirements</h4>
+              </div>
+              <div className="criteria-grid">
+                {(campaignInfo.start_date || campaignInfo.end_date) && (
+                  <div className="criteria-item">
+                    <span className="criteria-label">Period</span>
+                    <span className="criteria-value">{fmtDate(campaignInfo.start_date)} → {fmtDate(campaignInfo.end_date)}</span>
+                  </div>
+                )}
+                {campaignInfo.grace_days > 0 && (
+                  <div className="criteria-item">
+                    <span className="criteria-label">Grace Period</span>
+                    <span className="criteria-value">{campaignInfo.grace_days}d{campaignInfo.grace_months ? ` + ${campaignInfo.grace_months}mo` : ''}</span>
+                  </div>
+                )}
+                {products.filter((p) => p.min_pob > 0 || (p.min_quantity && p.min_quantity > 1)).length > 0 && (
+                  <div className="criteria-item criteria-wide">
+                    <span className="criteria-label">Product Minimums</span>
+                    <div className="criteria-table-mini">
+                      {products.filter((p) => p.min_pob > 0 || (p.min_quantity && p.min_quantity > 1)).map((p) => (
+                        <div key={p.id} className="criteria-table-row">
+                          <span>{p.name}</span>
+                          <span>
+                            {p.min_quantity > 1 && <>Min qty: <strong>{p.min_quantity}</strong>{' · '}</>}
+                            {p.min_pob > 0 && <>Min POB: <strong>{fmtMoney(p.min_pob)}</strong></>}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {campaignInfo.terms_conditions && (
+                  <div className="criteria-item criteria-wide">
+                    <span className="criteria-label">Terms &amp; Conditions</span>
+                    <span className="criteria-value criteria-terms">{campaignInfo.terms_conditions}</span>
+                  </div>
+                )}
+              </div>
+              <p className="criteria-note">POB will be rejected if these criteria are not met.</p>
+            </div>
+          )}
+          <p className="pob-form-hint">Enter quantity for each product. POB value = Qty x PTR. Minimums shown per product.</p>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead><tr>
+                <th>Product</th><th>PTR</th><th>Min Qty</th><th>Min POB</th>
+                <th style={{ width: 90 }}>Quantity</th><th>POB Value</th>
+              </tr></thead>
+              <tbody>
+                {lines.map((l) => (
+                  <tr key={l.id} className={l.q > 0 && (l.lowQty || l.lowPob || l.highPob) ? 'row-warning' : ''}>
+                    <td><strong>{l.name}</strong></td>
+                    <td>{fmtMoney(l.ptr)}</td>
+                    <td>{l.minQ > 0 ? l.minQ : '--'}</td>
+                    <td>{l.minPob > 0 ? fmtMoney(l.minPob) : '--'}</td>
+                    <td>
+                      <input className="input input-sm" type="number" min="0"
+                        value={qty[l.id] || ''}
+                        onChange={(e) => setQty((p) => ({ ...p, [l.id]: e.target.value }))}
+                        style={{ width: 80 }} />
+                    </td>
+                    <td>
+                      <strong>{fmtMoney(l.amount)}</strong>
+                      {l.lowPob && <div className="warning-text">Min POB is {fmtMoney(l.minPob)}</div>}
+                      {l.highPob && <div className="warning-text">Max POB is {fmtMoney(l.maxPob)}</div>}
+                      {l.lowQty && !l.lowPob && <div className="warning-text">Min qty is {l.minQ}</div>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot><tr><td colSpan={5} style={{ textAlign: 'right' }}><strong>Total</strong></td><td><strong>{fmtMoney(total)}</strong></td></tr></tfoot>
+            </table>
+          </div>
+          <Field label="Remarks" style={{ marginTop: 12 }}>
+            <TextArea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} placeholder="Optional notes" />
+          </Field>
+        </>
+      )}
+      <div style={{ marginTop: 12, textAlign: 'right' }}>
+        <button className="btn btn-primary" type="submit" disabled={busy || !selectedCampaignId}>
+          {busy ? 'Submitting...' : 'Submit POB'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function InlineInvoiceForm({ chemist, campaignId, campaigns, onDone }) {
+  const [selectedCampaignId, setSelectedCampaignId] = useState(campaignId || '');
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const inputRef = useRef(null);
+
+  const setFileFrom = (f) => {
+    if (!f) return;
+    if (!/^(application\/pdf|image\/)/.test(f.type)) {
+      toast('Choose a PDF or image of the invoice', 'error');
+      return;
+    }
+    setFile(f);
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    setDragging(false);
+    setFileFrom(e.dataTransfer?.files?.[0]);
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!selectedCampaignId) { toast('Select a campaign', 'error'); return; }
+    if (!file) { toast('Choose an invoice file', 'error'); return; }
+    setBusy(true);
+    try {
+      await uploadFile('/api/v1/pob/invoice-proof', file, {
+        campaign_id: selectedCampaignId,
+        chemist_id: chemist.id,
+      });
+      toast(`Invoice uploaded for ${chemist.name}`, 'success');
+      onDone();
+    } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
+  };
+
+  return (
+    <form onSubmit={submit}>
+      <p style={{ marginBottom: 12 }}>
+        <strong>{chemist.name}</strong>{chemist.shop_name ? ` — ${chemist.shop_name}` : ''}
+      </p>
+      {!campaignId && (
+        <Field label="Campaign" required>
+          <select className="input" value={selectedCampaignId} onChange={(e) => setSelectedCampaignId(e.target.value)}>
+            <option value="">-- Select campaign --</option>
+            {(campaigns || []).map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </Field>
+      )}
+      <div
+        className={`pob-invoice-upload-area${dragging ? ' dragging' : ''}`}
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+        onClick={() => inputRef.current?.click()}
+        style={{ cursor: 'pointer', padding: 32, border: '2px dashed #d1d5db', borderRadius: 8, textAlign: 'center', marginBottom: 12 }}>
+        <input ref={inputRef} type="file" accept="application/pdf,image/*" hidden
+          onChange={(e) => setFileFrom(e.target.files?.[0])} />
+        {file ? (
+          <div>
+            <strong>{file.name}</strong>
+            <div className="muted">{(file.size / 1024).toFixed(0)} KB</div>
+          </div>
+        ) : (
+          <div className="muted">
+            Drag & drop invoice here, or click to browse
+            <div style={{ marginTop: 4 }}>PDF or image</div>
+          </div>
+        )}
+      </div>
+      <p className="field-hint" style={{ marginBottom: 12 }}>
+        Invoice number and date are auto-extracted by AI. After upload, the POB goes to pending verification.
+      </p>
+      <div style={{ textAlign: 'right' }}>
+        <button className="btn btn-primary" type="submit" disabled={busy || !file || !selectedCampaignId}>
+          {busy ? 'Uploading...' : 'Upload Invoice Proof'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/* ── Register / Edit modal ─────────────────────────────────────────────── */
+
+function RegisterModal({ row, onClose, onSaved }) {
+  const isEdit = !!row.id;
+  const [f, setF] = useState({ ...BLANK, ...row });
+  const [busy, setBusy] = useState(false);
+  const [posts, setPosts] = useState(null);
+  const [lookup, setLookup] = useState('idle');
+  const [looking, setLooking] = useState(null);
+  const set = (k) => (e) => setF((p) => ({ ...p, [k]: e.target.value }));
+
+  const lookupPin = async (pin) => {
+    const value = (pin ?? f.pin ?? '').trim();
+    if (!/^\d{6}$/.test(value)) { toast('Enter a valid 6-digit PIN code', 'error'); return; }
+    setLookup('loading');
+    try {
+      const r = await api(`/api/v1/pincode/${value}`);
+      setPosts(r.items || []);
+      setLooking(value);
+      setLookup(r.items.length ? 'done' : 'error');
+      if (r.items.length >= 1) {
+        const po = r.items[0];
+        setF((p) => ({ ...p, city: po.city, district: po.district, state: po.state }));
+      }
+    } catch (err) {
+      setPosts(null); setLookup('error');
+      toast(err.message, 'error');
+    }
+  };
+
+  const detectLocation = () => {
+    if (!navigator.geolocation) { toast('Geolocation not supported', 'error'); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setF((p) => ({
+          ...p,
+          latitude: pos.coords.latitude.toFixed(6),
+          longitude: pos.coords.longitude.toFixed(6),
+        }));
+        toast('Location captured', 'success');
+      },
+      () => toast('Could not detect location', 'error'),
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!f.name.trim()) { toast('Name is required', 'error'); return; }
+    setBusy(true);
+    try {
+      await api(`/api/v1/chemists${isEdit ? `/${row.id}` : ''}`, {
+        method: isEdit ? 'PUT' : 'POST',
+        body: { ...f, latitude: f.latitude === '' ? null : f.latitude, longitude: f.longitude === '' ? null : f.longitude },
+      });
+      toast(isEdit ? 'Chemist updated' : 'Chemist registered', 'success');
+      onSaved();
+    } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
+  };
+
+  return (
+    <Modal open wide title={isEdit ? `Edit chemist #${row.id}` : 'Register chemist'} onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" form="chemist-form" disabled={busy}>
+            {busy ? 'Saving...' : isEdit ? 'Save changes' : 'Register'}
+          </button>
+        </>
+      }>
+      <form id="chemist-form" onSubmit={submit}>
+        <h4 className="section-title">Details</h4>
+        <div className="grid-2">
+          {REG_FIELDS.map((fld) => (
+            <Field key={fld.name} label={fld.label} required={fld.required}>
+              <TextInput type={fld.type || 'text'} value={f[fld.name] || ''} onChange={set(fld.name)} required={fld.required} />
+            </Field>
+          ))}
+        </div>
+
+        <h4 className="section-title" style={{ marginTop: 18 }}>Address & location</h4>
+        <div className="grid-2">
+          <Field label="Address" className="span-2">
+            <TextInput value={f.address || ''} onChange={set('address')} />
+          </Field>
+          <Field label="PIN code" hint="6-digit PIN auto-fetches city, district & state">
+            <TextInput value={f.pin || ''} maxLength={6} placeholder="e.g. 500001"
+              onChange={set('pin')}
+              onBlur={(e) => { const v = e.target.value.trim(); if (/^\d{6}$/.test(v) && v !== looking) lookupPin(v); }} />
+          </Field>
+          {posts && posts.length > 1 && (
+            <Field label="Location (post office)">
+              <Select value={f.city || ''} onChange={(e) => {
+                const po = posts.find((p) => p.city === e.target.value);
+                setF((p) => ({ ...p, city: e.target.value, district: po?.district || p.district, state: po?.state || p.state }));
+              }} options={posts.map((p) => ({ value: p.city, label: `${p.city} — ${p.district}` }))} />
+            </Field>
+          )}
+          <Field label="City"><TextInput value={f.city || ''} onChange={set('city')} /></Field>
+          <Field label="District"><TextInput value={f.district || ''} onChange={set('district')} /></Field>
+          <Field label="State"><TextInput value={f.state || ''} onChange={set('state')} /></Field>
+          <Field label="Area"><TextInput value={f.area || ''} onChange={set('area')} /></Field>
+          <Field label="Latitude"><TextInput type="number" step="any" value={f.latitude || ''} onChange={set('latitude')} /></Field>
+          <Field label="Longitude"><TextInput type="number" step="any" value={f.longitude || ''} onChange={set('longitude')} /></Field>
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+          <button type="button" className="btn" onClick={() => lookupPin()} disabled={lookup === 'loading'}>
+            {lookup === 'loading' ? 'Fetching...' : 'Fetch from PIN'}
+          </button>
+          <button type="button" className="btn" onClick={detectLocation}>Use my location</button>
+        </div>
+
+        <h4 className="section-title" style={{ marginTop: 18 }}>Status</h4>
+        <div className="grid-2">
+          <Field label="Status">
+            <Select value={f.status} onChange={set('status')}
+              options={['active', 'inactive'].map((o) => ({ value: o, label: o }))} />
+          </Field>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/* ── Bulk upload modal ─────────────────────────────────────────────────── */
+
+function BulkModal({ onClose, onDone }) {
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const upload = async (e) => {
+    e.preventDefault();
+    if (!file) { toast('Choose an Excel file first', 'error'); return; }
+    setBusy(true);
+    try {
+      const r = await uploadFile('/api/v1/chemists/bulk-upload', file);
+      setResult(r);
+      if (!r.errors?.length) {
+        toast(`${r.created} chemist(s) imported`, 'success');
+        onDone();
+      } else {
+        toast(`${r.created} imported, ${r.errors.length} failed`, 'error');
+      }
+    } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
+  };
+  return (
+    <Modal open title="Bulk register chemists" onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>Close</button>
+          <button className="btn btn-primary" form="bulk-form" disabled={busy || !file}>
+            {busy ? 'Uploading...' : 'Upload'}
+          </button>
+        </>
+      }>
+      <form id="bulk-form" onSubmit={upload}>
+        <p className="muted">
+          Use the template with one chemist per row. Columns: name (required), shop_name, gst, dl_number,
+          owner_name, mobile, alternate_mobile, email, address, city, district, state, pin, latitude,
+          longitude, ocid, doctor_name, category, area, upi_id, status.
+        </p>
+        <button type="button" className="btn-link" onClick={() => downloadFile('/api/v1/chemists/bulk-template', 'chemists_template.xlsx')}>
+          Download template
+        </button>
+        <Field label="Excel file (.xlsx)">
+          <TextInput type="file" accept=".xlsx" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+        </Field>
+      </form>
+      {result && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <p><strong>{result.created}</strong> chemist(s) imported, <strong>{result.errors?.length || 0}</strong> error(s).</p>
+          {result.errors?.length > 0 && (
+            <ul className="err-list">{result.errors.map((m, i) => <li key={i}>{m}</li>)}</ul>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}

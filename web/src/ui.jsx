@@ -1,0 +1,1183 @@
+// Shared UI primitives: layout shell, data table, modal, form fields,
+// stat cards, badges, toasts and a tiny data-fetching hook.
+
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { api, fmtDateTime, fmtMoney, getSession, tenantLoginPath } from './api';
+
+// ── Toasts ─────────────────────────────────────────────────────────────────
+
+let toastId = 0;
+const listeners = new Set();
+
+export function toast(message, tone = 'info') {
+  listeners.forEach((fn) => fn({ id: ++toastId, message, tone }));
+}
+
+export function Toaster() {
+  const [items, setItems] = useState([]);
+  useEffect(() => {
+    const fn = (t) => {
+      setItems((prev) => [...prev, t]);
+      setTimeout(() => setItems((prev) => prev.filter((x) => x.id !== t.id)), 4200);
+    };
+    listeners.add(fn);
+    return () => listeners.delete(fn);
+  }, []);
+  return (
+    <div className="toaster">
+      {items.map((t) => (
+        <div key={t.id} className={`toast toast-${t.tone}`}>{t.message}</div>
+      ))}
+    </div>
+  );
+}
+
+// ── Data fetching hook ─────────────────────────────────────────────────────
+
+export function useAsync(fn, deps = []) {
+  const [state, setState] = useState({ loading: true, error: null, data: null });
+  const [tick, setTick] = useState(0);
+  const run = useCallback(() => setTick((t) => t + 1), []);
+  useEffect(() => {
+    let alive = true;
+    setState({ loading: true, error: null, data: null });
+    fn()
+      .then((data) => alive && setState({ loading: false, error: null, data }))
+      .catch((err) => alive && setState({ loading: false, error: err.message, data: null }));
+    return () => { alive = false; };
+  }, [tick, ...deps]);
+  return { ...state, run };
+}
+
+export function Spinner({ label }) {
+  return (
+    <div className="spinner-wrap">
+      <div className="spinner" />
+      {label && <span>{label}</span>}
+    </div>
+  );
+}
+
+// ── Skeleton loading: keep the page's structure visible while data loads ──
+
+export function Skeleton({ w = '100%', h = 14, r = 6, className = '', style }) {
+  return <div className={`skeleton ${className}`} style={{ width: w, height: h, borderRadius: r, ...style }} aria-hidden="true" />;
+}
+
+export function TableSkeleton({ cols = 6, rows = 6 }) {
+  return (
+    <div className="table-wrap">
+      <table className="data-table">
+        <thead>
+          <tr>{Array.from({ length: cols }).map((_, i) => <th key={i}><Skeleton h={10} w="72%" /></th>)}</tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: rows }).map((_, r) => (
+            <tr key={r}>
+              {Array.from({ length: cols }).map((_, c) => (
+                <td key={c}><Skeleton h={13} w={c === 0 ? '55%' : c % 2 ? '86%' : '70%'} /></td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export function StatSkeleton({ n = 3 }) {
+  return (
+    <div className="stats-grid compact">
+      {Array.from({ length: n }).map((_, i) => (
+        <div className="stat-card" key={i}>
+          <Skeleton h={12} w={96} />
+          <div style={{ marginTop: 8 }}><Skeleton h={22} w={64} /></div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function ErrorBox({ error, onRetry }) {
+  return (
+    <div className="error-box">
+      <strong>Error</strong>
+      <span>{error}</span>
+      {onRetry && <button className="btn" onClick={onRetry}>Retry</button>}
+    </div>
+  );
+}
+
+export function EmptyState({ text = 'Nothing here yet' }) {
+  return <div className="empty-state">{text}</div>;
+}
+
+// ── Badges ─────────────────────────────────────────────────────────────────
+
+const TONES = {
+  active: 'green', approved: 'green', verified: 'green', delivered: 'green',
+  completed: 'green', paid: 'green', redeemed: 'green', sent: 'blue',
+  pending: 'amber', pending_verification: 'amber', eligible: 'amber',
+  needs_review: 'amber', generated: 'amber', dispatched: 'blue',
+  rejected: 'red', duplicate: 'red', inactive: 'gray', disabled: 'gray',
+  draft: 'gray', paused: 'gray', provisioning: 'amber', trial: 'amber',
+  submitted: 'amber', default: 'gray', green: 'green',
+};
+
+export function Badge({ children, tone }) {
+  const t = TONES[tone] || TONES[tone?.toLowerCase()] || TONES.default;
+  return <span className={`badge badge-${t}`}>{children}</span>;
+}
+
+export function StatusBadge({ value }) {
+  const label = String(value || '').replaceAll('_', ' ').replaceAll('pending_verification', 'pending verification');
+  return <Badge tone={String(value || '').toLowerCase()}>{label}</Badge>;
+}
+
+// ── Layout ─────────────────────────────────────────────────────────────────
+
+const PERM_GATE = {
+  '/app': 'dashboard.view',
+  '/app/admin': 'dashboard.view',
+  '/app/pob/submit': 'pob.submit',
+  '/app/pob/mine': 'pob.submit',
+  '/app/pob/invoice': 'pob.submit',
+  '/app/pob': 'pob.view',
+  '/app/verification': 'verification.view',
+  '/app/gratification': 'gratification.view',
+  '/app/visits': 'visit.view',
+  '/app/reports': 'report.view',
+  '/app/notifications': 'notification.view',
+  '/app/chemists': 'chemist.view',
+  '/app/chemists/register': 'chemist.manage',
+  '/app/audit': 'audit.view',
+  '/app/security': 'apikey.view',
+  '/app/jobs': 'job.view',
+};
+
+function hasPerm(perms, perm) {
+  if (!perm) return true;
+  return Array.isArray(perms) && perms.includes(perm);
+}
+
+// ── Verification status badge (nav bar) ─────────────────────────────────────
+export function useMyPobStats() {
+  const session = getSession();
+  const canSubmit = session?.kind === 'tenant' && (session.permissions || []).includes('pob.submit');
+  const [stats, setStats] = useState({ pending: 0, approved: 0, rejected: 0, submitted: 0 });
+  const load = useCallback(() => {
+    if (!canSubmit) return;
+    api('/api/v1/pob/my-stats').then(setStats).catch(() => {});
+  }, [canSubmit]);
+  useEffect(() => {
+    load();
+    const iv = setInterval(load, 30000);
+    return () => clearInterval(iv);
+  }, [load]);
+  return { stats, reload: load };
+}
+
+function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, onToggleCollapse }) {
+  const p = session.permissions || [];
+  const isDataEntry = !!session.user?.data_entry;
+  const company = session.division || {};
+  const companyLogo = company.logo_path ? `/api/v1/auth/division-logo/${company.id}` : null;
+  const role = (session.user?.role || '').toLowerCase();
+  const isVerifier = role === 'verification_agent' || role === 'verifier';
+  const isAdmin = role === 'company_admin' || role === 'division_admin';
+  const badges = {
+    '/app/pob/mine': { n: stats?.pending || 0, tone: 'amber', title: 'POBs pending verification' },
+    '/app/verification': { n: stats?.pending || 0, tone: 'amber', title: 'Verification queue' },
+  };
+  const canSee = (i) => hasPerm(p, i.perm) && (!i.entry || isDataEntry);
+
+  // Role-based navigation: three distinct experiences.
+  // `group` drives the section headers, `tone` the coloured icon tile.
+  const items = isVerifier ? [
+    // ── Verification Agent ──
+    { to: '/app', label: 'Dashboard', icon: '▦', perm: 'dashboard.view', end: true, group: 'Core modules', tone: 'primary' },
+    { to: '/app/verification', label: 'Verification Queue', icon: '✓', perm: 'verification.view', group: 'Core modules', tone: 'blue' },
+    { to: '/app/pob', label: 'All POB Records', icon: '≣', perm: 'pob.view', group: 'Core modules', tone: 'teal' },
+    { to: '/app/analytics', label: 'Analytics', icon: '📈', perm: 'dashboard.view', group: 'Core modules', tone: 'green' },
+    { to: '/app/notifications', label: 'Notifications', icon: '🔔', perm: 'notification.view', group: 'Quick access', tone: 'amber' },
+    { to: '/app/profile', label: 'My Profile', icon: '👤', group: 'Quick access', tone: 'gray' },
+  ] : isAdmin ? [
+    // ── Admin / HO ──
+    { to: '/app/admin', label: 'Campaign Dashboard', icon: '▦', perm: 'dashboard.view', end: true, group: 'Core modules', tone: 'primary' },
+    { to: '/app/pob', label: 'POB Management', icon: '≣', perm: 'pob.view', group: 'Core modules', tone: 'blue' },
+    { to: '/app/verification', label: 'Verification Queue', icon: '✓', perm: 'verification.view', group: 'Core modules', tone: 'green' },
+    { to: '/app/campaigns', label: 'Campaigns', icon: '◎', perm: 'campaign.view', group: 'Core modules', tone: 'teal' },
+    { to: '/app/brands', label: 'Brands', icon: '◉', perm: 'brand.view', group: 'Core modules', tone: 'amber' },
+    { to: '/app/user-management', label: 'User Management', icon: '👥', perm: 'user.view', group: 'Core modules', tone: 'blue' },
+    { to: '/app/chemists', label: 'Chemists', icon: '◉', perm: 'chemist.view', group: 'Core modules', tone: 'amber' },
+    { to: '/app/analytics', label: 'Analytics', icon: '📈', perm: 'dashboard.view', group: 'Core modules', tone: 'red' },
+    { to: '/app/gratification', label: 'Gratification', icon: '🎁', perm: 'gratification.view', group: 'Core modules', tone: 'gray' },
+    { to: '/app/notifications', label: 'Notifications', icon: '🔔', perm: 'notification.view', group: 'Quick access', tone: 'blue' },
+    { to: '/app/audit', label: 'Audit Logs', icon: '✎', perm: 'audit.view', group: 'Quick access', tone: 'gray' },
+    { to: '/app/security', label: 'Security', icon: '🔐', perm: 'apikey.view', group: 'Quick access', tone: 'green' },
+    { to: '/app/jobs', label: 'Background Jobs', icon: '⚙', perm: 'job.view', group: 'Quick access', tone: 'amber' },
+  ] : [
+    // ── Campaign Users (PSR / ASM / RSM / SM / MR / etc.) ──
+    { to: '/app', label: 'Dashboard', icon: '▦', perm: 'dashboard.view', end: true, group: 'Core modules', tone: 'primary' },
+    { to: '/app/pob/submit', label: 'Submit POB', icon: '📋', perm: 'pob.submit', group: 'Core modules', tone: 'blue' },
+    { to: '/app/pob/invoice', label: 'Submit Invoice', icon: '🧾', perm: 'pob.submit', group: 'Core modules', tone: 'green' },
+    { to: '/app/pob/mine', label: 'My Submissions', icon: '≣', perm: 'pob.submit', group: 'Core modules', tone: 'teal' },
+    { to: '/app/chemists', label: 'Chemists', icon: '◉', perm: 'chemist.view', group: 'Core modules', tone: 'amber' },
+    { to: '/app/gratification', label: 'Gratification', icon: '🎁', perm: 'gratification.view', group: 'Core modules', tone: 'red' },
+    { to: '/app/analytics', label: 'Analytics', icon: '📈', perm: 'dashboard.view', group: 'Core modules', tone: 'green' },
+    { to: '/app/chemists/register', label: 'Register Chemist', icon: '✚', perm: 'chemist.manage', entry: true, group: 'Quick access', tone: 'green' },
+    { to: '/app/visits', label: 'Chemist Visits', icon: '📅', perm: 'visit.view', entry: true, group: 'Quick access', tone: 'blue' },
+    { to: '/app/notifications', label: 'Notifications', icon: '🔔', perm: 'notification.view', group: 'Quick access', tone: 'amber' },
+    { to: '/app/profile', label: 'My Profile', icon: '👤', group: 'Quick access', tone: 'gray' },
+  ];
+  return (
+    <aside className={`sidebar${open ? ' open' : ''}${collapsed ? ' collapsed' : ''}`}>
+      <div className="brand">
+        {companyLogo
+          ? <img src={companyLogo} className="brand-logo" alt={`${company.name} logo`}
+              onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+          : <>
+              <span className="brand-mark">{(company.name || 'C').charAt(0)}</span>
+              <div>
+                <strong>{company.name || 'CampaignOS'}</strong>
+                <small>{company.code || ''}</small>
+              </div>
+            </>}
+      </div>
+      <SideNav items={items.filter(canSee)} badges={badges} onNavigate={onNavigate} />
+      <SideCollapse collapsed={collapsed} onToggle={onToggleCollapse} />
+    </aside>
+  );
+}
+
+/* Grouped navigation list: emits a section header whenever `group` changes and
+   gives every item a tone-coloured icon tile. */
+function SideNav({ items, badges = {}, onNavigate }) {
+  let lastGroup = null;
+  return (
+    <nav>
+      {items.map((i) => {
+        const b = badges[i.to];
+        const header = i.group && i.group !== lastGroup ? i.group : null;
+        lastGroup = i.group || lastGroup;
+        return (
+          <Fragment key={i.to}>
+            {header && <div className="side-group">{header}</div>}
+            <NavLink to={i.to} end={i.end} onClick={onNavigate} title={i.label}
+              className={({ isActive }) => `side-link ${isActive ? 'active' : ''}`}>
+              <span className="side-icon" data-tone={i.tone || 'gray'}>{i.icon}</span>
+              <span className="side-label">{i.label}</span>
+              {b && b.n > 0 && <span className={`side-badge ${b.tone}`} title={b.title}>{b.n}</span>}
+            </NavLink>
+          </Fragment>
+        );
+      })}
+    </nav>
+  );
+}
+
+function SideCollapse({ collapsed, onToggle }) {
+  if (!onToggle) return null;
+  return (
+    <button type="button" className="side-collapse" onClick={onToggle}
+      title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+      <span className="side-collapse-icon">{collapsed ? '›' : '‹'}</span>
+      <span className="side-label">Collapse</span>
+    </button>
+  );
+}
+
+function SuperSidebar({ onNavigate, open, collapsed, onToggleCollapse }) {
+  const items = [
+    { to: '/superadmin', label: 'Dashboard', icon: '▦', end: true, group: 'Core modules', tone: 'primary' },
+    { to: '/superadmin/divisions', label: 'Divisions', icon: '▣', group: 'Core modules', tone: 'blue' },
+    { to: '/superadmin/analytics', label: 'Analytics', icon: '📈', group: 'Core modules', tone: 'amber' },
+    { to: '/superadmin/settings', label: 'Settings', icon: '⚙', group: 'Quick access', tone: 'gray' },
+    { to: '/superadmin/audit', label: 'Audit Log', icon: '✎', group: 'Quick access', tone: 'gray' },
+  ];
+  const [brand, setBrand] = useState({ platform_name: 'CampaignOS', has_logo: false });
+  useEffect(() => {
+    api('/api/v1/auth/platform-branding').then(setBrand).catch(() => {});
+  }, []);
+  return (
+    <aside className={`sidebar${open ? ' open' : ''}${collapsed ? ' collapsed' : ''}`}>
+      <div className="brand">
+        {brand.has_logo
+          ? <img src="/api/v1/auth/platform-logo" alt="" className="brand-logo" />
+          : <span className="brand-mark">C</span>}
+        <div><strong>{brand.platform_name}</strong><small>Platform Console</small></div>
+      </div>
+      <SideNav items={items} onNavigate={onNavigate} />
+      <SideCollapse collapsed={collapsed} onToggle={onToggleCollapse} />
+    </aside>
+  );
+}
+
+export function AppShell({ children, kind }) {
+  const session = getSession();
+  const navigate = useNavigate();
+  const [unread, setUnread] = useState(0);
+  const [menu, setMenu] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('pob_sidebar_collapsed') === '1');
+  const { stats } = useMyPobStats();
+
+  const toggleCollapse = useCallback(() => {
+    setCollapsed((c) => {
+      localStorage.setItem('pob_sidebar_collapsed', c ? '0' : '1');
+      return !c;
+    });
+  }, []);
+
+  const loadUnread = useCallback(() => {
+    if (kind === 'tenant') {
+      api('/api/v1/notifications/unread-count').then((d) => setUnread(d.unread)).catch(() => {});
+    }
+  }, [kind]);
+  useEffect(() => {
+    loadUnread();
+    const iv = setInterval(loadUnread, 30000);
+    return () => clearInterval(iv);
+  }, [loadUnread]);
+
+  const closeMenu = useCallback(() => setMenu(false), []);
+
+  const logout = async () => {
+    const s = getSession();
+    const ep = s?.kind === 'sa' ? '/api/v1/auth/superadmin/logout' : '/api/v1/auth/logout';
+    const body = s?.kind === 'sa'
+      ? { refresh_token: s.refresh }
+      : { refresh_token: s.refresh, division_slug: s?.division?.code };
+    try { await api(ep, { method: 'POST', body }); } catch { /* ignore */ }
+    const dest = kind === 'sa' ? '/superadmin-login' : tenantLoginPath(s);
+    localStorage.removeItem('pob_saas_session');
+    navigate(dest);
+  };
+
+  return (
+    <div className="shell">
+      {kind === 'sa'
+        ? <SuperSidebar onNavigate={closeMenu} open={menu} collapsed={collapsed} onToggleCollapse={toggleCollapse} />
+        : <TenantSidebar session={session} onLogout={logout} stats={stats} onNavigate={closeMenu} open={menu}
+            collapsed={collapsed} onToggleCollapse={toggleCollapse} />}
+      {menu && <div className="side-backdrop" onClick={closeMenu} />}
+      <div className="main-col">
+        <header className="topbar">
+          <div className="topbar-left">
+            <button className="menu-btn" onClick={() => setMenu((v) => !v)} aria-label="Toggle navigation">☰</button>
+            <div className="topbar-title">
+              {kind === 'sa' ? 'Platform Console' : `${session?.division?.code || ''} · ${session?.user?.role || ''}`}
+            </div>
+          </div>
+          <div className="topbar-right">
+            {kind === 'tenant' && (
+              <>
+                {stats.pending > 0 && (
+                  <Link to="/app/pob/mine" className="ver-chip" title="Your POBs awaiting verification">
+                    <span className="ver-chip-dot" /> {stats.pending} pending
+                  </Link>
+                )}
+                <Link to="/app/notifications" className="bell" title="Notifications">
+                  🔔{unread > 0 && <span className="bell-dot">{unread > 99 ? '99+' : unread}</span>}
+                </Link>
+              </>
+            )}
+            <Link to={kind === 'sa' ? '/superadmin' : '/app/profile'} className="user-chip" title="View profile">
+              {session?.user?.full_name || session?.user?.username}
+            </Link>
+            <button className="btn btn-ghost btn-sm" onClick={logout}>Logout</button>
+          </div>
+        </header>
+        <main className="content">{children}</main>
+      </div>
+    </div>
+  );
+}
+
+// ── Page header / stat cards ───────────────────────────────────────────────
+
+export function PageHeader({ title, subtitle, actions }) {
+  return (
+    <div className="page-header">
+      <div>
+        <h1>{title}</h1>
+        {subtitle && <p>{subtitle}</p>}
+      </div>
+      {actions && <div className="page-actions">{actions}</div>}
+    </div>
+  );
+}
+
+export function StatCard({ label, value, sub, icon, tone }) {
+  return (
+    <div className="stat-card" data-tone={tone || 'default'}>
+      {icon && <div className="stat-icon">{icon}</div>}
+      <div>
+        <div className="stat-label">{label}</div>
+        <div className="stat-value">{value}</div>
+        {sub && <div className="stat-sub">{sub}</div>}
+      </div>
+    </div>
+  );
+}
+
+// BI-style KPI card: label, big value, inline sparkline and a vs-period delta.
+export function KpiCard({ label, value, icon, tone = 'blue', spark = [], delta, sub }) {
+  return (
+    <div className="kpi-card" data-tone={tone}>
+      <div className="kpi-head">
+        <span className="kpi-label">{label}</span>
+        {icon && <span className="kpi-icon">{icon}</span>}
+      </div>
+      <div className="kpi-value">{value}</div>
+      {(spark.length > 0 || delta) && (
+        <div className="kpi-foot">
+          {spark.length > 0 && <Sparkline values={spark} tone={tone} height={30} />}
+          {delta && <span className="kpi-delta">{delta}</span>}
+        </div>
+      )}
+      {sub && <div className="kpi-sub">{sub}</div>}
+    </div>
+  );
+}
+
+/* ── Dashboard primitives ──────────────────────────────────────────────────
+   The building blocks every role dashboard is assembled from: a greeting
+   banner, metric tiles with a real period-over-period delta, panel cards with
+   a header action, progress bars and an insight feed. */
+
+export function DashHero({ title, subtitle, actions, art = true }) {
+  return (
+    <section className="dash-hero">
+      <div className="dash-hero-copy">
+        <h2>{title}</h2>
+        {subtitle && <p>{subtitle}</p>}
+      </div>
+      {art && <HeroArt />}
+      {actions && <div className="dash-hero-actions">{actions}</div>}
+    </section>
+  );
+}
+
+/* Inline, theme-aware decoration. Drawn rather than shipped as an image so it
+   recolours with the palette and costs no extra request. */
+function HeroArt() {
+  return (
+    <svg className="dash-hero-art" viewBox="0 0 220 96" aria-hidden="true" focusable="false">
+      <rect x="6" y="60" width="26" height="30" rx="4" fill="var(--primary)" opacity=".18" />
+      <rect x="38" y="44" width="26" height="46" rx="4" fill="var(--primary)" opacity=".30" />
+      <rect x="70" y="26" width="26" height="64" rx="4" fill="var(--primary)" opacity=".45" />
+      <rect x="102" y="50" width="26" height="40" rx="4" fill="var(--teal)" opacity=".35" />
+      <rect x="134" y="34" width="26" height="56" rx="4" fill="var(--green)" opacity=".35" />
+      <path d="M12 54 L51 38 L83 20 L115 44 L147 28 L186 14" fill="none"
+        stroke="var(--primary)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" opacity=".8" />
+      <circle cx="186" cy="14" r="5" fill="var(--primary)" />
+      <circle cx="115" cy="44" r="3.5" fill="var(--teal)" />
+      <circle cx="51" cy="38" r="3.5" fill="var(--green)" />
+    </svg>
+  );
+}
+
+/* value + optional delta. `delta` is a percentage number; pass null when the
+   API gives no comparable prior period so we never show an invented trend. */
+export function MetricTile({ label, value, icon, tone = 'blue', delta = null,
+                             deltaLabel = 'vs previous period', sub, goodWhen = 'up' }) {
+  const has = delta !== null && delta !== undefined && Number.isFinite(Number(delta));
+  const n = Number(delta);
+  const dir = !has || Math.abs(n) < 0.05 ? 'flat' : n > 0 ? 'up' : 'down';
+  const good = dir === 'flat' ? 'flat' : (dir === 'up') === (goodWhen === 'up') ? 'up' : 'down';
+  return (
+    <div className="metric-tile" data-tone={tone}>
+      {icon && <span className="metric-icon">{icon}</span>}
+      <div className="metric-body">
+        <div className="metric-label">{label}</div>
+        <div className="metric-value">{value}</div>
+        {has ? (
+          <div className="metric-foot">
+            <span className={`delta ${good}`}>
+              {dir === 'up' ? '↑' : dir === 'down' ? '↓' : '·'} {Math.abs(n).toFixed(1)}%
+            </span>
+            <span className="metric-since">{deltaLabel}</span>
+          </div>
+        ) : sub ? <div className="metric-foot"><span className="metric-since">{sub}</span></div> : null}
+      </div>
+    </div>
+  );
+}
+
+export function PanelCard({ title, sub, action, children, span, className = '' }) {
+  return (
+    <section className={`bi-card${span ? ' span-' + span : ''} ${className}`.trim()}>
+      <div className="bi-card-head">
+        <div><h3>{title}</h3>{sub && <span className="muted">{sub}</span>}</div>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+export function ProgressBar({ value = 0, tone = 'blue', showLabel = true }) {
+  const pct = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+  return (
+    <div className="progress-row">
+      {showLabel && <span className="progress-num">{pct}%</span>}
+      <span className="progress-track" role="img" aria-label={`${pct} percent`}>
+        <span className="progress-fill" data-tone={tone} style={{ width: `${pct}%` }} />
+      </span>
+    </div>
+  );
+}
+
+export function InsightList({ items = [], empty = 'Nothing noteworthy yet' }) {
+  if (!items.length) return <EmptyState text={empty} />;
+  return (
+    <ul className="insight-list">
+      {items.map((it, i) => (
+        <li key={i} className="insight-row">
+          <span className="insight-icon" data-tone={it.tone || 'blue'}>{it.icon || '●'}</span>
+          <div>
+            <div className="insight-title">{it.title}</div>
+            {it.detail && <div className="insight-detail">{it.detail}</div>}
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/* Period selector shaped like the mockup's "This Week" control. */
+export function PeriodSelect({ value, onChange, options }) {
+  return (
+    <select className="period-select" value={value} onChange={(e) => onChange(Number(e.target.value))}>
+      {options.map((o) => <option key={o.days} value={o.days}>{o.label}</option>)}
+    </select>
+  );
+}
+
+export function MiniBarChart({ rows, getLabel, getValue }) {
+  const max = Math.max(1, ...rows.map((r) => Number(getValue(r)) || 0));
+  return (
+    <div className="mini-chart">
+      {rows.map((r, i) => (
+        <div key={i} className="mini-bar-row">
+          <span className="mini-bar-label">{getLabel(r)}</span>
+          <div className="mini-bar-track">
+            <div className="mini-bar-fill" style={{ width: `${(Number(getValue(r)) || 0) / max * 100}%` }} />
+          </div>
+          <span className="mini-bar-value">{fmtMoney(getValue(r))}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── BI chart kit (SVG, dependency-free) ─────────────────────────────────────
+// Small reusable visuals used by the dashboard / analytics pages: sparklines,
+// hoverable line charts, donuts and horizontal bar rankings.
+
+// "goodWhen" controls which direction is green: 'up' for amounts/approvals,
+// 'down' for TAT / rejection rates.
+export function Delta({ value, suffix = '%', goodWhen = 'up', className = '' }) {
+  const v = Number(value);
+  if (value == null || !Number.isFinite(v)) return null;
+  if (v === 0) return <span className={`delta flat ${className}`}>—</span>;
+  const up = v > 0;
+  const good = goodWhen === 'down' ? !up : up;
+  return (
+    <span className={`delta ${good ? 'up' : 'down'} ${className}`}
+      title={goodWhen === 'down' ? 'Lower is better' : 'Higher is better'}>
+      {up ? '▲' : '▼'}{Math.abs(v).toFixed(1)}{suffix}
+    </span>
+  );
+}
+
+export function Sparkline({ values = [], tone = 'blue', height = 36 }) {
+  const data = values.map(Number).filter(Number.isFinite);
+  if (data.length === 0) return null;
+  const w = 120, h = height;
+  const max = Math.max(...data, 1);
+  const min = Math.min(...data, 0);
+  const range = max - min || 1;
+  const px = (i) => (data.length === 1 ? w / 2 : (i / (data.length - 1)) * w);
+  const py = (v) => h - 3 - ((v - min) / range) * (h - 6);
+  const pts = data.map((v, i) => `${px(i).toFixed(1)},${py(v).toFixed(1)}`).join(' ');
+  const last = data[data.length - 1];
+  return (
+    <svg className={`spark c-${tone}`} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" width="100%" height={h}
+      aria-hidden="true">
+      <polyline className="spark-line" points={pts} fill="none" vectorEffect="non-scaling-stroke" />
+      <circle className="spark-dot" cx={px(data.length - 1).toFixed(1)} cy={py(last).toFixed(1)} r="2.4" />
+    </svg>
+  );
+}
+
+// Multi-series line/area chart. series = [{ name, values, color }] where color
+// is a design tone key (green/amber/red/blue/teal/gray). Hover shows a guide
+// + tooltip with every series value at that point.
+export function LineChart({ labels = [], series = [], fmt = (n) => n, height = 200 }) {
+  const plotRef = useRef(null);
+  const [hover, setHover] = useState(null);
+  const n = labels.length;
+  const all = series.flatMap((s) => (s.values || []).map(Number)).filter(Number.isFinite);
+  if (n === 0) return <div className="chart-empty">No data yet</div>;
+  const max = Math.max(1, ...all) * 1.1;
+  const pct = (i) => (n === 1 ? 50 : (i / (n - 1)) * 100);
+  const pctY = (v) => Math.max(0, Math.min(100, 100 - (Number(v) || 0) / max * 100));
+  const ticks = 4;
+  const yTicks = Array.from({ length: ticks + 1 }, (_, t) => (max / ticks) * t);
+  const step = Math.max(1, Math.ceil(n / 6));
+  const xShown = labels.map((l, i) => (i % step === 0 || i === n - 1 ? { i, l } : null)).filter(Boolean);
+
+  const onMove = (e) => {
+    const rect = plotRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const p = Math.max(0, Math.min(100, (e.clientX - rect.left) / rect.width * 100));
+    setHover(Math.round(p / (100 / (n - 1 || 1))));
+  };
+
+  return (
+    <div className="lc" style={{ ['--lc-h']: `${height}px` }}>
+      <div className="lc-y">
+        {yTicks.map((t) => (
+          <span key={t} style={{ bottom: `${(t / max) * 100}%` }}>{fmt(Number(t.toFixed(1)))}</span>
+        ))}
+      </div>
+      <div className="lc-plot" ref={plotRef} onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="lc-svg">
+          {yTicks.map((t) => (
+            <line key={t} x1="0" x2="100" y1={100 - (t / max) * 100} y2={100 - (t / max) * 100} className="lc-grid" />
+          ))}
+          {series.map((s) => {
+            const pts = (s.values || []).map((v, i) => `${pct(i).toFixed(2)},${pctY(v).toFixed(2)}`).join(' ');
+            return (
+              <g key={s.name}>
+                <polygon className={`lc-area c-${s.color || 'blue'}`} points={`0,100 ${pts} 100,100`} />
+                <polyline className={`lc-line c-${s.color || 'blue'}`} points={pts}
+                  vectorEffect="non-scaling-stroke" />
+              </g>
+            );
+          })}
+          {hover != null && (
+            <line x1={pct(hover)} x2={pct(hover)} y1="0" y2="100" className="lc-guide" />
+          )}
+        </svg>
+        {hover != null && (
+          <div className="lc-tip" style={{ left: `${pct(hover)}%` }}>
+            <strong>{labels[hover]}</strong>
+            {series.map((s) => (
+              <div key={s.name} className="lc-tip-row">
+                <span className={`dot c-${s.color || 'blue'}`} />
+                <span>{s.name}</span>
+                <strong>{fmt(Number(s.values?.[hover]) || 0)}</strong>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="lc-x">
+        {xShown.map(({ i, l }) => (
+          <span key={i} style={{ left: `${pct(i)}%` }}>{l}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Donut (status / distribution mix). segments = [{label, value, color}].
+export function DonutChart({ segments = [], size = 150, thickness = 20, centerValue, centerLabel }) {
+  const total = segments.reduce((s, x) => s + (Number(x.value) || 0), 0);
+  if (total <= 0) return <div className="chart-empty">No data yet</div>;
+  const R = (size - thickness) / 2;
+  const C = 2 * Math.PI * R;
+  let acc = 0;
+  return (
+    <div className="donut-wrap">
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle className="donut-track" cx={size / 2} cy={size / 2} r={R} strokeWidth={thickness} />
+        {segments.map((s, i) => {
+          const len = ((Number(s.value) || 0) / total) * C;
+          const el = (
+            <circle key={i} className={`donut-seg c-${s.color || 'blue'}`} cx={size / 2} cy={size / 2} r={R}
+              strokeWidth={thickness} strokeDasharray={`${Math.max(0, len - 1.5)} ${C}`}
+              strokeDashoffset={-acc} transform={`rotate(-90 ${size / 2} ${size / 2})`} />
+          );
+          acc += len;
+          return el;
+        })}
+      </svg>
+      {(centerLabel || centerValue != null) && (
+        <div className="donut-center">
+          {centerValue != null && <strong>{centerValue}</strong>}
+          {centerLabel && <span>{centerLabel}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Legend used next to donuts.
+export function DonutLegend({ segments = [], fmt = (n) => n }) {
+  const total = segments.reduce((s, x) => s + (Number(x.value) || 0), 0);
+  return (
+    <div className="donut-legend">
+      {segments.map((s) => (
+        <div key={s.label} className="dl-row">
+          <span className={`dot c-${s.color || 'blue'}`} />
+          <span className="dl-label">{s.label}</span>
+          <strong>{fmt(s.value)}</strong>
+          <em>{total ? Math.round((Number(s.value) || 0) / total * 100) : 0}%</em>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Horizontal bar ranking (top campaigns / brands / regions, leaderboards).
+export function HBarChart({ rows = [], getLabel, getValue, fmt = (n) => n, limit = 8, color = 'blue' }) {
+  const data = rows.slice(0, limit);
+  const max = Math.max(1, ...data.map((r) => Number(getValue(r)) || 0));
+  return (
+    <div className="hbar">
+      {data.length === 0 && <div className="chart-empty">No data yet</div>}
+      {data.map((r, i) => (
+        <div className="hbar-row" key={i}>
+          <span className="hbar-label" title={getLabel(r)}>{getLabel(r)}</span>
+          <div className="hbar-track">
+            <div className={`hbar-fill c-${color}`} style={{ width: `${(Number(getValue(r)) || 0) / max * 100}%` }} />
+          </div>
+          <span className="hbar-value">{fmt(getValue(r))}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Modal ──────────────────────────────────────────────────────────────────
+
+/* ── Vertical bar chart (grouped or stacked) ───────────────────────────────
+   The one chart shape the kit was missing. Same axis/grid furniture as
+   LineChart so the two read as one family. */
+export function BarChart({ labels = [], series = [], stacked = false, fmt = (n) => n,
+                           height = 220, showLegend = true }) {
+  const [hover, setHover] = useState(null);
+  const n = labels.length;
+  if (!n || !series.length) return <div className="chart-empty">No data yet</div>;
+
+  const totals = labels.map((_, i) =>
+    stacked ? series.reduce((s, se) => s + (Number(se.values?.[i]) || 0), 0)
+            : Math.max(...series.map((se) => Number(se.values?.[i]) || 0)));
+  const max = Math.max(1, ...totals) * 1.12;
+  const ticks = 4;
+  const step = Math.max(1, Math.ceil(n / 8));
+
+  return (
+    <div className="bc" style={{ '--bc-h': height + 'px' }}>
+      <div className="bc-y">
+        {Array.from({ length: ticks + 1 }, (_, t) => {
+          const v = (max / ticks) * (ticks - t);
+          return <span key={t} style={{ top: `${(t / ticks) * 100}%` }}>{fmt(Math.round(v))}</span>;
+        })}
+      </div>
+      <div className="bc-plot" onMouseLeave={() => setHover(null)}>
+        <div className="bc-grid" aria-hidden="true">
+          {Array.from({ length: ticks + 1 }, (_, t) => <i key={t} style={{ top: `${(t / ticks) * 100}%` }} />)}
+        </div>
+        <div className="bc-bars">
+          {labels.map((lab, i) => (
+            <div key={i} className={'bc-slot' + (hover === i ? ' is-hover' : '')}
+              onMouseEnter={() => setHover(i)}>
+              <div className={'bc-stack' + (stacked ? ' stacked' : '')}>
+                {series.map((se, si) => {
+                  const v = Number(se.values?.[i]) || 0;
+                  return (
+                    <span key={si} className={`bc-bar c-${se.color || 'blue'}`}
+                      style={{ height: `${Math.max(v <= 0 ? 0 : 1.5, (v / max) * 100)}%` }}
+                      title={`${se.label}: ${fmt(v)}`} />
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+        {hover !== null && (
+          <div className="lc-tip" style={{ left: `${((hover + 0.5) / n) * 100}%` }}>
+            <strong>{labels[hover]}</strong>
+            {series.map((se, si) => (
+              <span key={si} className="lc-tip-row">
+                <span><i className={`dot c-${se.color || 'blue'}`} />{se.label}</span>
+                <strong>{fmt(Number(se.values?.[hover]) || 0)}</strong>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="bc-x">
+        {labels.map((l, i) => (i % step === 0 || i === n - 1
+          ? <span key={i} style={{ left: `${((i + 0.5) / n) * 100}%` }}>{l}</span> : null))}
+      </div>
+      {showLegend && series.length > 1 && (
+        <div className="bc-legend">
+          {series.map((se, si) => (
+            <span key={si}><i className={`dot c-${se.color || 'blue'}`} />{se.label}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Ranked breakdown: label, share bar, value — the workhorse for top-N views. */
+export function RankList({ rows = [], getLabel, getValue, getSub, fmt = (n) => n,
+                           limit = 8, color = 'blue', empty = 'No data yet' }) {
+  const data = rows.slice(0, limit);
+  if (!data.length) return <div className="chart-empty">{empty}</div>;
+  const max = Math.max(1, ...data.map((r) => Number(getValue(r)) || 0));
+  return (
+    <ol className="rank-list">
+      {data.map((r, i) => {
+        const v = Number(getValue(r)) || 0;
+        return (
+          <li key={i} className="rank-row">
+            <span className="rank-num">{i + 1}</span>
+            <div className="rank-body">
+              <div className="rank-head">
+                <span className="rank-label" title={getLabel(r)}>{getLabel(r)}</span>
+                <strong className="rank-value">{fmt(v)}</strong>
+              </div>
+              <span className="rank-track">
+                <span className={`rank-fill c-${color}`} style={{ width: `${(v / max) * 100}%` }} />
+              </span>
+              {getSub && <div className="rank-sub">{getSub(r)}</div>}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+export function Modal({ open, onClose, title, children, wide, xwide, full, footer }) {
+  if (!open) return null;
+  return (
+    <div className={`modal-overlay${full ? ' full' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className={`modal ${wide ? 'wide' : ''}${xwide ? ' xwide' : ''}${full ? ' full' : ''}`}>
+        <div className="modal-head">
+          <h3>{title}</h3>
+          <button className="modal-x" onClick={onClose}>×</button>
+        </div>
+        <div className="modal-body">{children}</div>
+        {footer && <div className="modal-foot">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
+// ── Form fields ────────────────────────────────────────────────────────────
+
+export function Field({ label, required, hint, children, ...rest }) {
+  return (
+    <label className="field" {...rest}>
+      <span className="field-label">{label}{required && <em>*</em>}</span>
+      {children}
+      {hint && <small className="field-hint">{hint}</small>}
+    </label>
+  );
+}
+
+export function TextInput(props) {
+  return <input {...props} className={`input ${props.className || ''}`} />;
+}
+
+export function Select({ options = [], placeholder, ...props }) {
+  return (
+    <select {...props} className={`input ${props.className || ''}`}>
+      {placeholder !== false && <option value="">{placeholder || '— select —'}</option>}
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>{o.label}</option>
+      ))}
+    </select>
+  );
+}
+
+export function TextArea(props) {
+  return <textarea {...props} className={`input ${props.className || ''}`} />;
+}
+
+// ── Table ──────────────────────────────────────────────────────────────────
+
+export function Table({ cols, rows = [], keyOf, onRowClick, empty }) {
+  return (
+    <div className="table-wrap">
+      <table className="data-table">
+        <thead>
+          <tr>{cols.map((c) => <th key={c.key} className={c.thClass || ''}>{c.label}</th>)}</tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 && (
+            <tr><td colSpan={cols.length}><EmptyState text={empty || 'No records'} /></td></tr>
+          )}
+          {rows.map((row) => (
+            <tr key={keyOf ? keyOf(row) : row.id} className={onRowClick ? 'clickable' : ''}
+              onClick={onRowClick ? () => onRowClick(row) : undefined}>
+              {cols.map((c) => (
+                <td key={c.key} className={c.tdClass || ''}>
+                  {c.render ? c.render(row) : row[c.key] ?? '—'}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export function SearchBox({ value, onChange, placeholder }) {
+  return (
+    <div className="search-box">
+      <span>⌕</span>
+      <input value={value} onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder || 'Search…'} />
+    </div>
+  );
+}
+
+export function Tabs({ items, active, onChange }) {
+  return (
+    <div className="tabs">
+      {items.map((t) => (
+        <button key={t.value} className={`tab ${active === t.value ? 'active' : ''}`}
+          onClick={() => onChange(t.value)}>{t.label}</button>
+      ))}
+    </div>
+  );
+}
+
+// ── File URL helper (auth-aware) ───────────────────────────────────────────
+
+export function useFileUrl(rel) {
+  const [url, setUrl] = useState(null);
+  useEffect(() => {
+    if (!rel) { setUrl(null); return; }
+    let alive = true;
+    api(`/api/v1/storage/${rel}`)
+      .then((blob) => {
+        if (alive) setUrl(URL.createObjectURL(blob));
+      })
+      .catch(() => { if (alive) setUrl(null); });
+    return () => { alive = false; };
+  }, [rel]);
+  return url;
+}
+
+// ── Split-pane detail layout: proof (left) + details (right) ───────────────
+
+export function SplitDetail({ left, right, className = '' }) {
+  return (
+    <div className={`split-detail ${className}`}>
+      <div className="split-left">{left}</div>
+      <div className="split-right">{right}</div>
+    </div>
+  );
+}
+
+// Two-column "label / value" table, used for campaign + POB detail summaries
+// that used to render as a loose kv-grid -- a real <table> reads better
+// alongside the product-line and extraction tables next to it.
+export function DetailTable({ rows, title }) {
+  const visible = rows.filter(Boolean);
+  if (!visible.length) return null;
+  return (
+    <>
+      {title && <h4 className="section-title">{title}</h4>}
+      <div className="table-wrap">
+        <table className="data-table detail-table">
+          <tbody>
+            {visible.map(([label, value], i) => (
+              <tr key={i}><th>{label}</th><td>{value ?? '—'}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+// ── Detail hero: a colored summary banner for campaign / POB / verification
+// detail views -- replaces the old plain label/value table with a visual
+// summary (big amount, status, and a grid of fact pills). Tone tints the
+// left accent and the amount.
+export function DetailHero({ title, subtitle, badge, primaryLabel, primary, secondary, facts = [], tone = 'blue' }) {
+  return (
+    <div className="detail-hero" data-tone={tone}>
+      <div className="detail-hero-top">
+        <div className="detail-hero-title">
+          <h2>{title}</h2>
+          {subtitle && <p>{subtitle}</p>}
+          {badge && <div className="detail-hero-badges">{badge}</div>}
+        </div>
+        {primary != null && (
+          <div className="detail-hero-amount">
+            <span className="stat-label">{primaryLabel}</span>
+            <span className="detail-hero-value">{primary}</span>
+            {secondary && <span className="stat-sub">{secondary}</span>}
+          </div>
+        )}
+      </div>
+      {facts.length > 0 && (
+        <div className="detail-hero-facts">
+          {facts.filter(Boolean).map(([label, value]) => (
+            <div className="fact-pill" key={label}>
+              <span>{label}</span>
+              <strong>{value ?? '—'}</strong>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// AI confidence meter -- green/amber/red bar based on the extraction score.
+export function AiConfidenceBar({ value }) {
+  const pct = Math.round((Number(value) || 0) * 100);
+  const cls = pct >= 90 ? 'high' : pct >= 60 ? 'mid' : 'low';
+  return (
+    <div className="conf-wrap">
+      <div className="conf-head"><span>AI confidence</span><strong className={`conf-pct ${cls}`}>{pct}%</strong></div>
+      <div className="conf-bar"><div className={`conf-fill ${cls}`} style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} /></div>
+    </div>
+  );
+}
+
+// AI-extracted invoice rendered like the document the AI actually read: a
+// receipt-style card with header fields, a line-item table and a total --
+// much easier to scan than a flat list of key/value pairs.
+export function AiInvoiceCard({ fields = {}, items = [], confidence, title = 'AI-extracted invoice data' }) {
+  const f = fields || {};
+  const amtRaw = f.invoice_amount ?? f.total_amount ?? f.grand_total ?? f.amount;
+  const amt = amtRaw != null && amtRaw !== '' ? Number(amtRaw) : null;
+  const list = Array.isArray(items) ? items : [];
+  const total = list.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+  const meta = [
+    ['Invoice no.', f.invoice_number != null ? String(f.invoice_number) : ''],
+    ['Date', f.invoice_date != null ? String(f.invoice_date) : ''],
+    ['Party / chemist', f.chemist_name != null ? String(f.chemist_name) : ''],
+  ];
+  return (
+    <div className="ai-invoice">
+      <div className="ai-invoice-head">
+        <div>
+          <span className="ai-invoice-tag">AI EXTRACTION</span>
+          <strong>{title}</strong>
+        </div>
+        <AiConfidenceBar value={confidence} />
+      </div>
+      <div className="ai-invoice-meta">
+        {meta.map(([label, v]) => (
+          <div className="kv-pair" key={label}><span>{label}</span><strong>{v || '—'}</strong></div>
+        ))}
+        <div className="kv-pair kv-total"><span>Total</span><strong>{amt != null ? fmtMoney(amt) : '—'}</strong></div>
+      </div>
+      {list.length > 0 ? (
+        <table className="ai-invoice-table">
+          <thead>
+            <tr><th>#</th><th>Item</th><th>Qty</th><th>Rate</th><th>Amount</th></tr>
+          </thead>
+          <tbody>
+            {list.map((it, i) => (
+              <tr key={i}>
+                <td className="ai-inv-idx">{i + 1}</td>
+                <td>{it.description}</td>
+                <td>{it.qty ?? 0}</td>
+                <td>{fmtMoney(it.rate)}</td>
+                <td><strong>{fmtMoney(it.amount)}</strong></td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr><td colSpan="4">Invoice total</td><td><strong>{fmtMoney(total)}</strong></td></tr>
+          </tfoot>
+        </table>
+      ) : (
+        <div className="empty-state">No line items extracted from the document.</div>
+      )}
+    </div>
+  );
+}
+
+export function ProofPane({ url, name, hint = 'Proof document', empty = 'No document attached' }) {
+  const isPdf = /\.pdf$/i.test(name || '');
+  const [zoom, setZoom] = useState(1);
+  const [size, setSize] = useState(null);
+  const bodyRef = useRef(null);
+  const dragRef = useRef(null);
+  const [panning, setPanning] = useState(false);
+  useEffect(() => { setZoom(1); setSize(null); }, [url]);
+  useEffect(() => {
+    if (!url || isPdf) return;
+    const img = new Image();
+    img.onload = () => setSize({ w: img.naturalWidth, h: img.naturalHeight });
+    img.src = url;
+  }, [url, isPdf]);
+
+  const zoomIn = () => setZoom((z) => Math.min(3, +(z + 0.25).toFixed(2)));
+  const zoomOut = () => setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)));
+  const zoomReset = () => setZoom(1);
+
+  const onPanStart = (e) => {
+    if (e.button !== 0 || !bodyRef.current) return;
+    dragRef.current = {
+      x: e.clientX, y: e.clientY,
+      sl: bodyRef.current.scrollLeft, st: bodyRef.current.scrollTop,
+    };
+    setPanning(true);
+    e.preventDefault();
+  };
+  const onPanMove = (e) => {
+    if (!dragRef.current || !bodyRef.current) return;
+    bodyRef.current.scrollLeft = dragRef.current.sl - (e.clientX - dragRef.current.x);
+    bodyRef.current.scrollTop = dragRef.current.st - (e.clientY - dragRef.current.y);
+  };
+  const onPanEnd = () => { dragRef.current = null; setPanning(false); };
+
+  const scaled = zoom > 1 && size;
+  const bodyStyle = scaled ? { width: size.w * zoom, height: size.h * zoom } : undefined;
+  return (
+    <div className="proof-pane">
+      <div className="proof-pane-head">
+        <div className="proof-pane-title">
+          <strong>{name || hint}</strong>
+          {name && <span className="muted">{hint}</span>}
+        </div>
+        <div className="proof-pane-actions">
+          {url && !isPdf && (
+            <div className="zoom-controls">
+              <button type="button" className="btn btn-sm" onClick={zoomOut} disabled={zoom <= 0.5} title="Zoom out">−</button>
+              <button type="button" className="zoom-pct" onClick={zoomReset} title="Reset zoom">{Math.round(zoom * 100)}%</button>
+              <button type="button" className="btn btn-sm" onClick={zoomIn} disabled={zoom >= 3} title="Zoom in">+</button>
+            </div>
+          )}
+          {url && (
+            <a className="btn btn-sm" href={url} target="_blank" rel="noreferrer">Open original</a>
+          )}
+        </div>
+      </div>
+      <div className={`proof-pane-body${scaled ? ' pannable' : ''}${panning ? ' panning' : ''}`} ref={bodyRef}
+        onMouseDown={onPanStart} onMouseMove={onPanMove} onMouseUp={onPanEnd} onMouseLeave={onPanEnd}>
+        {url ? (
+          isPdf
+            ? <iframe src={url} title={name || hint} className="proof-frame" />
+            : (
+              <img src={url} alt={name || hint} className="proof-img" loading="lazy" draggable={false}
+                style={scaled ? { width: '100%', height: '100%', maxWidth: 'none', maxHeight: 'none', objectFit: 'fill' } : { transform: `scale(${zoom})` }} />
+            )
+        ) : (
+          <span className="proof-empty">{empty}</span>
+        )}
+      </div>
+    </div>
+  );
+}

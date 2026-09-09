@@ -1,0 +1,2708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Data Extraction</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --navy:#1D1D1F;
+  --bg0:#F5F5F7;--bg1:#FFFFFF;--bg2:#F5F5F7;--bg3:#E8E8ED;--bg4:#D2D2D7;
+  --border:#E5E5EA;--border2:#D2D2D7;
+  --t0:#1D1D1F;--t1:#48484D;--t2:#68686D;
+  --blue:#0071E3;--blue-d:#E8F1FD;--blue-g:rgba(0,113,227,0.08);
+  --green:#248A3D;--green-d:#E3F6E9;
+  --amber:#B4650A;--amber-d:#FDEDD6;
+  --red:#D70015;--red-d:#FDE7E6;
+  --purple:#8944C7;--purple-d:#F2E8FB;
+  --teal:#0C7DA0;--teal-d:#E1F3F8;
+  --mono:'JetBrains Mono',monospace;
+  --disp:'Inter',system-ui,sans-serif;
+  --r4:6px;--r8:10px;--r12:14px;--r16:18px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,0.04),0 2px 10px rgba(0,0,0,0.04);
+  --glass-bg:rgba(255,255,255,0.72);
+  --glass-bg-strong:rgba(255,255,255,0.86);
+  --glass-border:rgba(255,255,255,0.6);
+  --glass-blur:20px;
+  --glass-dark:rgba(29,29,31,0.82);
+}
+
+/* ═══ Visual polish -- colored ambient glow (cards / headings / charts) ═══
+   Flat light-mode UI reads as dull without some tinted depth. This adds a
+   soft colored shadow (not literal neon) so cards/headings/charts feel
+   lifted instead of flat, while keeping the existing light theme. */
+.card,.chart-card{
+  box-shadow:0 1px 2px rgba(0,0,0,0.04),0 4px 20px rgba(0,113,227,0.06);
+  transition:box-shadow .25s ease,transform .2s ease;
+}
+.chart-card{
+  background:var(--bg1);border:0.5px solid var(--border);
+  border-radius:var(--r12);padding:16px 20px;
+}
+.card:hover,.chart-card:hover{
+  box-shadow:0 2px 4px rgba(0,0,0,0.05),0 10px 32px rgba(0,113,227,0.13);
+  transform:translateY(-1px);
+}
+h1{text-shadow:0 0 32px rgba(0,113,227,0.14)}
+.stat-glow,.kpi-value{text-shadow:0 0 24px rgba(0,113,227,0.18)}
+canvas{filter:drop-shadow(0 2px 10px rgba(0,113,227,0.08))}
+html{background:var(--bg0);color-scheme:light}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg0);color:var(--t0);min-height:100vh;font-size:14px}
+h1,h2,h3,.sb-logo h2,.dh h2,.ph h1{font-family:var(--disp);font-weight:700;letter-spacing:-.02em}
+a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
+.shell{display:flex;min-height:100vh}
+.sb{width:230px;background:var(--bg1);border-right:0.5px solid var(--border);display:flex;flex-direction:column;position:fixed;top:0;left:0;height:100vh;z-index:100;overflow-y:auto;transition:width .2s ease}
+.sb.collapsed{width:48px;overflow:hidden}
+.sb.collapsed .sb-logo h2,.sb.collapsed .sb-logo p,.sb.collapsed .ni-label,.sb.collapsed .sb-foot-inner,.sb.collapsed .ni .badge,.sb.collapsed .sb-sect{display:none}
+.sb.collapsed .sb-logo{padding:12px 8px;justify-content:center}
+.sb.collapsed .ni{padding:8px;justify-content:center;gap:0}
+.sb.collapsed .ni svg{margin:0}
+.sb-toggle{position:fixed;left:218px;top:50%;transform:translateY(-50%);z-index:101;width:18px;height:36px;background:var(--bg1);border:1px solid var(--border2);border-left:none;color:var(--t1);border-radius:0 var(--r4) var(--r4) 0;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10px;box-shadow:1px 0 3px rgba(0,0,0,0.04);transition:left .2s ease}
+.sb-toggle:hover{background:var(--bg3);color:var(--t0)}
+.sb-toggle.collapsed{left:36px}
+.main{margin-left:230px;flex:1;padding:26px 30px;max-width:1280px;transition:margin-left .2s ease}
+.main.sb-collapsed{margin-left:48px}
+.sb-logo{padding:20px 16px 16px;border-bottom:1px solid var(--border);background:var(--bg1);position:relative}
+.sb-logo::after{content:'';position:absolute;left:16px;right:16px;bottom:-1px;height:2px;background:linear-gradient(90deg,var(--blue) 0%,rgba(0,113,227,0) 70%)}
+.sb-mark{width:34px;height:34px;background:linear-gradient(150deg,#3395F0 0%,var(--blue) 100%);border-radius:9px;display:flex;align-items:center;justify-content:center;margin-bottom:11px;box-shadow:0 4px 10px rgba(0,113,227,0.28)}
+.sb-logo h2{font-size:17px;font-weight:800;color:var(--t0);line-height:1.25;letter-spacing:-.02em}
+.co-tag{font-size:10px;color:var(--blue);font-family:var(--mono);margin-top:6px;background:var(--blue-d);padding:2px 7px;border-radius:4px;display:inline-block;font-weight:600;letter-spacing:.02em}
+.sb-user{padding:12px 16px;border-bottom:0.5px solid var(--border)}
+.s-av{width:32px;height:32px;border-radius:50%;background:var(--blue-d);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:var(--blue);font-family:var(--mono);margin-bottom:6px}
+.s-name{font-size:12px;font-weight:500;color:var(--t0)}
+.s-role{font-size:10px;color:var(--blue);font-family:var(--mono);text-transform:uppercase;letter-spacing:.05em;margin-top:1px}
+.s-area{font-size:10px;color:var(--t2);margin-top:1px}
+.sb-nav{padding:10px 8px;flex:1}
+.sb-sec{font-size:9px;color:var(--t2);font-family:var(--mono);text-transform:uppercase;letter-spacing:.1em;padding:6px 8px 3px;margin-top:6px}
+.ni{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:var(--r8);color:var(--t1);cursor:pointer;font-size:12px;margin-bottom:1px;transition:all .15s}
+.ni:hover{background:var(--bg3);color:var(--t0)}.ni.on{background:var(--blue-d);color:var(--blue);border-left:3px solid var(--blue);font-weight:600}
+.sb-foot{padding:12px 16px;border-top:0.5px solid var(--border);margin-top:auto}
+.sb-foot a{font-size:11px;color:var(--t2)}.sb-foot a:hover{color:var(--red)}
+.badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:500;font-family:var(--mono);text-transform:uppercase;letter-spacing:.04em}
+.bd{background:var(--blue-d);color:var(--blue)}.bc{background:var(--green-d);color:var(--green)}.br{background:var(--amber-d);color:var(--amber)}.bsh{background:var(--bg3);color:var(--t1)}
+.b-done{background:var(--green-d);color:var(--green)}.b-processing{background:var(--amber-d);color:var(--amber)}.b-error{background:var(--red-d);color:var(--red)}.b-pending{background:var(--bg3);color:var(--t2)}
+.b-active{background:var(--green-d);color:var(--green)}.b-suspended{background:var(--red-d);color:var(--red)}.b-left{background:var(--bg3);color:var(--t2)}.b-inactive{background:var(--bg3);color:var(--t2)}
+.b-mr{background:var(--bg3);color:var(--t1)}.b-asm{background:var(--green-d);color:var(--green)}.b-rsm{background:var(--blue-d);color:var(--blue)}.b-zsm{background:var(--purple-d);color:var(--purple)}.b-nsm{background:var(--teal-d);color:var(--teal)}.b-company_admin{background:var(--amber-d);color:var(--amber)}
+.card{background:var(--bg1);border:0.5px solid var(--border);border-radius:var(--r12);overflow:hidden}
+.ch{padding:12px 16px;border-bottom:0.5px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px}
+.ch h3{font-size:13px;font-weight:500;color:var(--t0)}.ch-r{font-size:10px;color:var(--t2);font-family:var(--mono)}
+.form-g{margin-bottom:12px}
+.form-g label{display:block;font-size:11px;color:var(--t1);font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
+.form-g input,.form-g select,.form-g textarea{width:100%;padding:9px 11px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r8);color:var(--t0);font-size:12px;font-family:inherit;outline:none;transition:border .15s}
+.form-g input:focus,.form-g select:focus{border-color:var(--blue)}.form-g select option{background:var(--bg2)}
+.btn-p{width:100%;padding:10px;background:var(--blue);color:#fff;border:none;border-radius:var(--r8);font-size:13px;font-weight:500;cursor:pointer;font-family:inherit;transition:all .2s}
+.btn-p:hover{background:#0058B0;transform:translateY(-1px)}
+.btn-sm{padding:5px 12px;border-radius:var(--r4);font-size:11px;cursor:pointer;font-family:var(--mono);border:none}
+.btn-blue{background:var(--blue);color:#fff}.btn-blue:hover{background:#0058B0}
+.btn-grn{background:var(--green-d);border:0.5px solid var(--green);color:var(--green)}.btn-grn:hover{background:var(--green);color:#fff}
+.btn-del{background:var(--red-d);border:0.5px solid var(--red);color:var(--red)}
+.btn-act{background:var(--bg3);border:0.5px solid var(--border2);color:var(--t1)}.btn-act:hover{color:var(--t0)}
+.btn-amber{background:var(--amber-d);border:0.5px solid var(--amber);color:var(--amber)}
+.sg{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px}
+.sc{background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r12);padding:14px}
+.sl{font-size:10px;color:var(--t1);font-family:var(--mono);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px;font-weight:600}
+.sv{font-size:23px;font-weight:600;font-family:var(--mono);color:var(--t0);letter-spacing:-.01em}
+.sv.bl{color:var(--blue)}.sv.gr{color:var(--green)}.sv.am{color:var(--amber)}.sv.pu{color:var(--purple)}.sv.tl{color:var(--teal)}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead tr{background:var(--bg2)}
+thead th{padding:8px 12px;text-align:left;font-size:10px;font-weight:500;color:var(--t2);font-family:var(--mono);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}
+thead th.r{text-align:right}
+tbody tr{border-top:0.5px solid var(--border);transition:background .12s}
+tbody tr:hover td{background:rgba(79,158,255,.04)}
+tbody td{padding:8px 12px;color:var(--t1)}
+tbody td.r{text-align:right;font-family:var(--mono)}
+td.b{font-weight:500;color:var(--t0)}
+tfoot tr{border-top:1px solid var(--border2);background:var(--bg2)}
+tfoot td{padding:8px 12px;font-weight:600;font-family:var(--mono);color:var(--t0)}
+tfoot td.r{text-align:right}
+.modal{display:none;position:fixed;inset:0;background:rgba(29,29,31,0.45);backdrop-filter:blur(8px) saturate(140%);-webkit-backdrop-filter:blur(8px) saturate(140%);z-index:999;align-items:stretch;justify-content:center;padding:0}
+.modal-box{background:var(--glass-bg-strong);backdrop-filter:blur(var(--glass-blur)) saturate(180%);-webkit-backdrop-filter:blur(var(--glass-blur)) saturate(180%);border:0;box-shadow:none;border-radius:0;padding:32px 28px;width:100vw;max-width:100vw;height:100vh;max-height:100vh;overflow-y:auto}
+.modal-box>*{max-width:640px;width:100%;margin-left:auto;margin-right:auto}
+.mh{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.mh h2{font-size:15px;font-weight:600;color:var(--t0)}
+.mc{background:none;border:none;color:var(--t2);font-size:20px;cursor:pointer}.mc:hover{color:var(--t0)}
+.flash{padding:9px 13px;border-radius:var(--r8);font-size:12px;margin-bottom:12px}
+.f-ok{background:var(--green-d);border:0.5px solid var(--green);color:var(--green)}
+.f-err{background:var(--red-d);border:0.5px solid var(--red);color:var(--red)}
+.ph{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:8px}
+.ph h1{font-size:22px;font-weight:700;letter-spacing:-.02em;color:var(--t0)}
+.ph p{font-size:11px;color:var(--t2);margin-top:3px;font-family:var(--mono)}
+.ph-r{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.stl{font-size:14px;font-weight:500;margin-bottom:12px;color:var(--t0)}
+.mt8{margin-top:8px}.mt16{margin-top:16px}.mt24{margin-top:24px}
+.muted{color:var(--t2)}.mono{font-family:var(--mono)}
+.spin{width:14px;height:14px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;display:inline-block;vertical-align:middle}
+@keyframes sp{to{transform:rotate(360deg)}}
+@keyframes fu{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}.fu{animation:fu .3s ease both}
+.bb{height:3px;background:var(--bg4);border-radius:2px;overflow:hidden;margin-top:3px}
+.bf{height:100%;background:var(--blue);border-radius:2px}
+.back{display:inline-flex;align-items:center;gap:5px;color:var(--t2);font-size:12px;margin-bottom:16px;transition:color .15s}
+.back:hover{color:var(--t0);text-decoration:none}
+.tab-b{padding:5px 12px;border-radius:var(--r8);font-size:11px;font-family:var(--mono);cursor:pointer;transition:all .15s;border:0.5px solid var(--border);background:var(--bg3);color:var(--t1)}
+.tab-b.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+.r2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.r3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.p-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:0.5px solid var(--border)}.p-row:last-child{border:none}
+.pb-blk{background:var(--bg1);border:0.5px solid var(--border);border-radius:var(--r12);margin-bottom:8px;overflow:hidden}
+.p-hd{display:flex;align-items:center;gap:10px;padding:11px 16px;cursor:pointer;background:var(--bg1);transition:background .15s}
+.p-hd:hover{background:var(--bg2)}
+.p-av{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;font-family:var(--mono);flex-shrink:0}
+.p-bd{border-top:0.5px solid var(--border)}
+.dh{background:var(--bg1);border:0.5px solid var(--border);border-radius:var(--r12);padding:16px 20px;margin-bottom:14px}
+.dh h2{font-size:19px;font-weight:700;color:var(--t0)}
+.dm{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px}
+.dmi{font-size:11px;font-family:var(--mono);color:var(--t2)}
+.dmi span{color:var(--t0);font-weight:500}
+/* Team hierarchy */
+.team-group{margin-bottom:10px;border:0.5px solid var(--border);border-radius:var(--r12);overflow:hidden}
+.team-grp-hd{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:var(--bg2);cursor:pointer;user-select:none;transition:background .15s}
+.team-grp-hd:hover{background:var(--bg3)}
+.team-grp-arrow{font-size:11px;color:var(--t2);transition:transform .2s;display:inline-block}
+.team-grp-arrow.collapsed{transform:rotate(-90deg)}
+.team-grp-body{background:var(--bg1)}
+.tm-card{border-top:0.5px solid var(--border);padding:10px 16px;transition:background .12s}
+.tm-card:hover{background:var(--bg2)}
+.tm-main{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.tm-extra{display:none;padding:8px 0 2px;border-top:0.5px dashed var(--border);margin-top:8px}
+.tm-extra.open{display:block}
+.tm-expand{background:none;border:none;cursor:pointer;color:var(--t2);font-size:10px;font-family:var(--mono);padding:2px 6px;border-radius:var(--r4);transition:color .15s}
+.tm-expand:hover{color:var(--blue)}
+.uz{border:1.5px dashed var(--border2);border-radius:var(--r12);padding:24px 18px;text-align:center;cursor:pointer;background:var(--bg2);transition:all .2s;margin-bottom:10px}
+.uz:hover,.uz.drag{border-color:var(--blue);background:var(--blue-g)}
+.prog-wrap{background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r8);padding:11px 13px;margin-bottom:6px}
+.prog-bar{height:7px;background:var(--bg3);border-radius:4px;overflow:hidden;margin-top:6px}
+.prog-fill{height:100%;background:linear-gradient(90deg,var(--blue),var(--teal));border-radius:4px;transition:width .4s ease}
+.qbtn{padding:5px 11px;border-radius:var(--r4);font-size:10px;cursor:pointer;font-family:var(--mono);border:0.5px solid var(--border2);background:var(--bg3);color:var(--t1);transition:all .15s}
+.qbtn:hover{border-color:var(--blue);color:var(--blue)}
+.qbtn.on{background:var(--blue-d);border-color:var(--blue);color:var(--blue)}
+.warn-card{border-radius:var(--r8);padding:11px 13px;margin-top:7px;font-size:12px}
+.warn-dup{background:var(--red-d);border:0.5px solid var(--red);color:var(--red)}
+.warn-info{background:var(--green-d);border:0.5px solid var(--green);color:var(--green)}
+.warn-stale{background:var(--amber-d);border:0.5px solid var(--amber);color:var(--amber)}
+/* Handover */
+.ho-box{background:var(--bg2);border:0.5px solid var(--amber);border-radius:var(--r12);padding:16px 18px;margin-top:16px}
+.ho-box h3{font-size:13px;font-weight:600;color:var(--amber);margin-bottom:6px}
+/* Login */
+.lw{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.lc{background:var(--bg1);border:0.5px solid var(--border);border-radius:var(--r16);padding:36px 32px;width:100%;max-width:440px}
+.cr{display:flex;justify-content:space-between;font-size:11px;color:var(--t1);font-family:var(--mono);padding:2px 0;border-bottom:0.5px solid var(--border)}
+.cr:last-child{border:none}.cr span:first-child{color:var(--blue)}
+
+/* ═══ Mobile navigation (hamburger + off-canvas sidebar) ═══ */
+.mobile-menu-btn{display:none;position:fixed;top:12px;left:12px;z-index:210;width:38px;height:38px;background:var(--blue);color:#fff;border:none;border-radius:var(--r8);font-size:17px;cursor:pointer;align-items:center;justify-content:center;box-shadow:0 3px 10px rgba(0,113,227,0.3)}
+.sticky-glass-head{background:var(--glass-bg-strong)!important;backdrop-filter:blur(var(--glass-blur)) saturate(180%);-webkit-backdrop-filter:blur(var(--glass-blur)) saturate(180%)}
+.sb-overlay{display:none;position:fixed;inset:0;background:rgba(29,29,31,0.4);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:149}
+.sb-overlay.show{display:block}
+
+/* ═══ Responsive breakpoints ═══ */
+@media(max-width:900px){
+  .mobile-menu-btn{display:flex}
+  .sb-toggle{display:none}
+  .sb{transform:translateX(-100%);transition:transform .25s ease;z-index:150;width:250px}
+  .sb.mobile-open{transform:translateX(0)}
+  .sb.collapsed{width:250px}
+  .sb.collapsed .sb-logo h2,.sb.collapsed .sb-logo p,.sb.collapsed .ni-label,.sb.collapsed .sb-foot-inner,.sb.collapsed .ni .badge,.sb.collapsed .sb-sect{display:block}
+  .sb.collapsed .ni{padding:7px 10px;justify-content:flex-start;gap:8px}
+  .main,.main.sb-collapsed{margin-left:0!important;padding:64px 16px 24px;max-width:100%}
+  .sg{grid-template-columns:repeat(2,1fr)}
+  .g2,.r2,.r3{grid-template-columns:1fr}
+  .ph{flex-direction:column;align-items:flex-start}
+  .modal-box{width:94vw;padding:20px 18px}
+  .dh{padding:14px 16px}
+  .dm{gap:10px}
+}
+@media(max-width:520px){
+  .sg{grid-template-columns:repeat(2,1fr);gap:8px}
+  .sc{padding:10px}
+  .sv{font-size:16px}
+  table{font-size:11px}
+  thead th,tbody td{padding:6px 8px}
+  .lc{padding:26px 18px}
+  .modal-box{padding:16px 14px}
+  .ph h1{font-size:16px}
+  .tm-main{flex-direction:column;align-items:flex-start;gap:6px}
+}
+</style>
+</head>
+<body{% if page in ('dashboard','documents','detail') %} data-auto-refresh-page="45"{% endif %}>
+
+{% macro sidebar(user) %}
+<button class="mobile-menu-btn" id="mobile-menu-btn" onclick="toggleMobileSidebar()" aria-label="Menu">☰</button>
+<div class="sb-overlay" id="sb-overlay" onclick="toggleMobileSidebar()"></div>
+<div class="sb" id="main-sidebar">
+  <div class="sb-logo">
+    <button class="sb-toggle" id="sb-toggle-btn" onclick="toggleSidebar()" title="Toggle sidebar">‹</button>
+    <div class="sb-mark"><svg width="14" height="14" fill="none" viewBox="0 0 14 14"><rect x="1.5" y="8" width="2.6" height="4.5" rx="1" fill="white"/><rect x="5.7" y="5" width="2.6" height="7.5" rx="1" fill="white" fill-opacity="0.85"/><rect x="9.9" y="1.5" width="2.6" height="11" rx="1" fill="white" fill-opacity="0.7"/></svg></div>
+    <h2>Data Extraction</h2>
+    {% if user.company_name %}<span class="co-tag">{{ user.company_name[:16] }}</span>{% endif %}
+  </div>
+  <div class="sb-user">
+    <div class="s-av">{{ user.full_name[:2].upper() }}</div>
+    <div class="s-name">{{ user.full_name.split('(')[0].strip() }}</div>
+    <div class="s-role">{{ ROLE_LABELS.get(user.role, user.role) }}</div>
+    <div class="s-area">{{ user.area or '' }}</div>
+  </div>
+  <div class="sb-nav">
+    <div class="sb-sec sb-sect">Sales</div>
+    <a href="/dashboard" style="text-decoration:none"><div class="ni {{ 'on' if active_page=='dashboard' else '' }}">
+      <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><rect x="1" y="1" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="7" y="1" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="7" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="7" y="7" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/></svg>
+      <span class="ni-label">Dashboard</span>
+    </div></a>
+    <a href="/analytics" style="text-decoration:none"><div class="ni {{ 'on' if active_page=='analytics' else '' }}">
+      <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><path d="M1 10L4 6.5L7 8L10 3.5L12 5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="ni-label">Analytics</span>
+    </div></a>
+    <a href="/documents" style="text-decoration:none"><div class="ni {{ 'on' if active_page=='documents' else '' }}">
+      <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><path d="M2 11V3a1 1 0 011-1h5l3 3v6a1 1 0 01-1 1H3a1 1 0 01-1-1z" stroke="currentColor" stroke-width="1.2"/><path d="M7 2v3h3" stroke="currentColor" stroke-width="1.2"/><path d="M4 7h5M4 9h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      <span class="ni-label">Documents</span>
+    </div></a>
+    {% if user.role in ('company_admin','nsm','zsm','rsm','asm') %}
+    <div class="sb-sec sb-sect">Team</div>
+    <a href="/team" style="text-decoration:none"><div class="ni {{ 'on' if active_page=='team' else '' }}">
+      <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><circle cx="4.5" cy="3.5" r="2" stroke="currentColor" stroke-width="1.2"/><circle cx="9" cy="3.5" r="2" stroke="currentColor" stroke-width="1.2"/><path d="M1 11c0-2 1.5-3 3.5-3s3.5 1 3.5 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M9 8c1.5 0 3 .8 3 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      <span class="ni-label">Team &amp; Handover</span>
+    </div></a>
+    {% if user.role in ('company_admin','nsm','zsm') %}
+    <a href="/registrations" style="text-decoration:none"><div class="ni {{ 'on' if active_page=='regs' else '' }}">
+      <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><path d="M2 11V3a1 1 0 011-1h5l3 3v6a1 1 0 01-1 1H3a1 1 0 01-1-1z" stroke="currentColor" stroke-width="1.2"/><path d="M7 2v3h3" stroke="currentColor" stroke-width="1.2"/></svg>
+      <span class="ni-label">Registrations {% if pending_count is defined and pending_count %}<span style="background:var(--red);color:#fff;border-radius:10px;padding:0 5px;font-size:9px">{{ pending_count }}</span>{% endif %}</span>
+    </div></a>
+    <a href="/team/password-resets" style="text-decoration:none"><div class="ni {{ 'on' if active_page=='pwreset' else '' }}">
+      <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><rect x="3" y="6" width="7" height="5.5" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4.5 6V4a2 2 0 014 0v2" stroke="currentColor" stroke-width="1.2"/></svg>
+      <span class="ni-label">Password Resets <span id="pwreset-badge" data-live-badge="/team/password-resets/count:pending" style="display:none;background:var(--amber);color:#000;border-radius:10px;padding:0 5px;font-size:9px"></span></span>
+    </div></a>
+    {% endif %}
+    {% if user.role in ('company_admin','nsm') %}
+    <a href="/credits" style="text-decoration:none"><div class="ni {{ 'on' if active_page=='credits' else '' }}">
+      <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><rect x="1" y="3" width="11" height="7" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M1 6h11" stroke="currentColor" stroke-width="1.2"/></svg>
+      <span class="ni-label">Credits {% if creds is defined and creds.remaining is defined and creds.remaining <= 10 %}<span style="background:var(--red);color:#fff;border-radius:10px;padding:0 4px;font-size:9px">Low</span>{% endif %}</span>
+    </div></a>
+    {% endif %}
+    {% endif %}
+    <div class="sb-sec sb-sect">Account</div>
+    <a href="/profile" style="text-decoration:none"><div class="ni {{ 'on' if active_page=='profile' else '' }}">
+      <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><circle cx="6.5" cy="4" r="2.5" stroke="currentColor" stroke-width="1.2"/><path d="M1 12c0-2.5 2.5-4 5.5-4s5.5 1.5 5.5 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      <span class="ni-label">Profile</span>
+    </div></a>
+  </div>
+  <div class="sb-foot">
+    <div class="sb-foot-inner">
+      <span class="badge b-{{ user.role }}">{{ user.role.replace('_',' ').upper() }}</span>
+      <div style="margin-top:6px;display:flex;align-items:center;justify-content:space-between">
+        <a href="/logout">Sign out &rarr;</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endmacro %}
+
+{% macro flashes() %}
+{% for m in get_flashed_messages() %}
+<div class="flash {{ 'f-ok' if m and (m.startswith('✓') or 'created' in m or 'updated' in m or 'approved' in m or 'changed' in m or 'complete' in m or 'Added' in m or 'deleted' in m or 'Approved' in m or 'transferred' in m or 'submitted' in m) else 'f-err' }}">{{ m }}</div>
+{% endfor %}
+{% endmacro %}
+
+{# ═══ LOGIN ═══ #}
+{% if page == "login" %}
+<div class="lw">
+  <div class="lc fu">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:24px">
+      <div class="sb-mark" style="width:34px;height:34px"><svg width="17" height="17" fill="none" viewBox="0 0 14 14"><rect x="1.5" y="8" width="2.6" height="4.5" rx="1" fill="white"/><rect x="5.7" y="5" width="2.6" height="7.5" rx="1" fill="white" fill-opacity="0.85"/><rect x="9.9" y="1.5" width="2.6" height="11" rx="1" fill="white" fill-opacity="0.7"/></svg></div>
+      <div><h1 style="font-size:20px;font-weight:600;color:var(--t0)">Data Extraction</h1><p style="font-size:12px;color:var(--t2)">Enterprise Sales Intelligence</p></div>
+    </div>
+    {{ flashes() }}
+    <form method="POST" action="/login">
+      <div class="form-g">
+        <label>Company Code</label>
+        <input type="text" name="company_code" required autofocus
+          placeholder="e.g. BHARAT or CMP001"
+          style="text-transform:uppercase;letter-spacing:.08em;font-family:var(--mono);font-size:14px;font-weight:600"
+          value="{{ request.form.get('company_code','') }}">
+        <div style="font-size:10px;color:var(--t2);margin-top:4px">Enter the unique code given to your organisation</div>
+      </div>
+      <div class="form-g"><label>Username / Mobile / Employee ID</label>
+        <input type="text" name="username" required placeholder="Any of the above"
+          value="{{ request.form.get('username','') }}"></div>
+      <div class="form-g"><label>Password</label>
+        <input type="password" name="password" required></div>
+      <button type="submit" class="btn-p">Sign In</button>
+    </form>
+    <div style="text-align:center;margin-top:14px;font-size:12px;color:var(--t2)">
+      New employee? <a href="/register">Request Access</a>
+      &nbsp;·&nbsp; <a href="/forgot-password">Forgot Password?</a>
+    </div>
+
+  </div>
+</div>
+
+{# ═══ FORGOT PASSWORD ═══ #}
+{% elif page == "forgot_password" %}
+<div class="lw">
+  <div class="lc fu">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:24px">
+      <div class="sb-mark" style="width:34px;height:34px"><svg width="17" height="17" fill="none" viewBox="0 0 14 14"><rect x="1.5" y="8" width="2.6" height="4.5" rx="1" fill="white"/><rect x="5.7" y="5" width="2.6" height="7.5" rx="1" fill="white" fill-opacity="0.85"/><rect x="9.9" y="1.5" width="2.6" height="11" rx="1" fill="white" fill-opacity="0.7"/></svg></div>
+      <div><h1 style="font-size:20px;font-weight:600;color:var(--t0)">Reset Password</h1><p style="font-size:12px;color:var(--t2)">Verify via Company Code + Mobile</p></div>
+    </div>
+    {{ flashes() }}
+    <form method="POST" action="/forgot-password">
+      <div class="form-g">
+        <label>Company Code</label>
+        <input type="text" name="company_code" required autofocus placeholder="e.g. CMP001"
+          style="text-transform:uppercase;letter-spacing:.08em;font-family:var(--mono);font-size:14px;font-weight:600"
+          value="{{ request.form.get('company_code','') }}">
+      </div>
+      <div class="form-g">
+        <label>Registered Mobile Number</label>
+        <input type="text" name="mobile" required placeholder="10-digit mobile" maxlength="10"
+          value="{{ request.form.get('mobile','') }}">
+        <div style="font-size:10px;color:var(--t2);margin-top:4px">This is your identity verification — must match your registered mobile</div>
+      </div>
+      <div class="form-g"><label>New Password</label><input type="password" name="new_password" required minlength="6"></div>
+      <div class="form-g"><label>Confirm Password</label><input type="password" name="confirm_password" required></div>
+      <button type="submit" class="btn-p">Reset Password</button>
+    </form>
+    <div style="text-align:center;margin-top:14px;font-size:12px;color:var(--t2)">
+      <a href="/login">← Back to Login</a>
+    </div>
+  </div>
+</div>
+
+{# ═══ REGISTER ═══ #}
+{% elif page == "register" %}
+<div class="lw" style="align-items:flex-start;padding-top:32px">
+  <div class="lc" style="max-width:540px">
+    <div style="margin-bottom:20px">
+      <h1 style="font-size:18px;font-weight:600;color:var(--t0)">Request Access</h1>
+      <p style="font-size:12px;color:var(--t2);margin-top:3px">Your company admin will approve within 24 hours</p>
+    </div>
+    {{ flashes() }}
+    <form method="POST" action="/register" id="reg-form">
+      <input type="hidden" id="reg-company-id" value="">
+
+      {# ── Company Code ── #}
+      <div class="form-g">
+        <label>Company Code *</label>
+        <div style="display:flex;gap:7px">
+          <input type="text" name="company_code" id="reg-code" required
+            placeholder="e.g. DEMO09110"
+            style="text-transform:uppercase;letter-spacing:.06em;font-family:var(--mono);font-weight:600;flex:1"
+            oninput="loadRegData(this.value)"
+            value="{{ request.form.get('company_code','') }}">
+          <div id="co-status" style="font-size:11px;color:var(--t2);display:flex;align-items:center;min-width:80px"></div>
+        </div>
+        <div id="co-name" style="font-size:11px;color:var(--green);margin-top:4px;font-family:var(--mono)"></div>
+      </div>
+
+      {# ── Full Name ── #}
+      <div class="form-g"><label>Full Name *</label>
+        <input type="text" name="full_name" required value="{{ request.form.get('full_name','') }}"></div>
+
+      {# ── Mobile + Employee ID ── #}
+      <div class="r2">
+        <div class="form-g">
+          <label>Mobile * <span style="font-size:9px;color:var(--t2)">(used for login if no Employee ID)</span></label>
+          <input type="tel" name="mobile" id="reg-mobile" maxlength="10" required placeholder="10-digit"
+            value="{{ request.form.get('mobile','') }}"></div>
+        <div class="form-g">
+          <label>Employee ID * <span style="font-size:9px;color:var(--amber)">(strict — used as login username)</span></label>
+          <input type="text" name="employee_id" id="reg-empid"
+            placeholder="e.g. MR1004"
+            oninput="checkEmpId(this.value)"
+            value="{{ request.form.get('employee_id','') }}">
+          <div id="empid-status" style="font-size:10px;margin-top:3px;font-family:var(--mono)"></div>
+        </div>
+      </div>
+
+      {# ── Email ── #}
+      <div class="form-g"><label>Email</label>
+        <input type="email" name="email" placeholder="your@email.com"
+          value="{{ request.form.get('email','') }}"></div>
+
+      {# ── Role + Division ── #}
+      <div class="r2">
+        <div class="form-g"><label>Role</label>
+          <select name="role" id="reg-role" onchange="loadManagers()">
+            <option value="mr">MR — Medical Representative</option>
+            <option value="asm">ASM — Area Sales Manager</option>
+            <option value="rsm">RSM — Regional Sales Manager</option>
+            <option value="zsm">ZSM — Zonal Sales Manager</option>
+          </select></div>
+        <div class="form-g"><label>Division</label>
+          <select name="division_id" id="reg-div">
+            <option value="">— Enter company code first —</option>
+          </select></div>
+      </div>
+
+      {# ── Region / Area / Territory smart dropdowns + custom fallback ── #}
+      <div class="r3">
+        <div class="form-g">
+          <label>Region</label>
+          <select id="reg-region-sel" onchange="geoSelChange('region',this.value)"
+            style="width:100%;padding:7px 9px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r4);color:var(--t0);font-size:12px;outline:none">
+            <option value="">— select or type below —</option>
+          </select>
+          <input type="text" name="region" id="reg-region" placeholder="or type region"
+            style="margin-top:4px;font-size:11px" value="{{ request.form.get('region','') }}">
+        </div>
+        <div class="form-g">
+          <label>Area</label>
+          <select id="reg-area-sel" onchange="geoSelChange('area',this.value)"
+            style="width:100%;padding:7px 9px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r4);color:var(--t0);font-size:12px;outline:none">
+            <option value="">— select or type below —</option>
+          </select>
+          <input type="text" name="area" id="reg-area" placeholder="or type area"
+            style="margin-top:4px;font-size:11px" value="{{ request.form.get('area','') }}">
+        </div>
+        <div class="form-g">
+          <label>Territory</label>
+          <select id="reg-territory-sel" onchange="geoSelChange('territory',this.value)"
+            style="width:100%;padding:7px 9px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r4);color:var(--t0);font-size:12px;outline:none">
+            <option value="">— select or type below —</option>
+          </select>
+          <input type="text" name="territory" id="reg-territory" placeholder="or type territory"
+            style="margin-top:4px;font-size:11px" value="{{ request.form.get('territory','') }}">
+        </div>
+      </div>
+
+      {# ── Reporting Manager (dropdown by Employee ID after company code entered) ── #}
+      <div class="form-g">
+        <label>Reporting Manager Employee ID
+          <span style="font-size:9px;color:var(--t2)">— loaded after company code is entered</span>
+        </label>
+        <select name="manager_emp_id" id="reg-manager"
+          style="width:100%;padding:7px 9px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r4);color:var(--t0);font-size:12px;outline:none">
+          <option value="">— Enter company code first —</option>
+        </select>
+        <div id="mgr-info" style="font-size:10px;color:var(--t2);margin-top:3px;font-family:var(--mono)"></div>
+      </div>
+
+      {# ── Password ── #}
+      <div class="r2">
+        <div class="form-g"><label>Password *</label>
+          <input type="password" name="password" required placeholder="Min 6 characters"></div>
+        <div class="form-g"><label>Confirm Password *</label>
+          <input type="password" name="confirm_password" required></div>
+      </div>
+
+      <button type="submit" class="btn-p" id="reg-submit">Submit Registration Request</button>
+    </form>
+    <div style="text-align:center;margin-top:12px;font-size:12px;color:var(--t2)">
+      Already registered? <a href="/login">Login here</a>
+    </div>
+  </div>
+</div>
+
+{% elif page == "reg_success" %}
+<div class="lw">
+  <div class="lc" style="text-align:center">
+    <div style="width:52px;height:52px;background:var(--green-d);border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 16px"><svg width="22" height="22" fill="none" viewBox="0 0 22 22"><path d="M4 12l4 4L18 6" stroke="var(--green)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <h2 style="font-size:18px;font-weight:600;color:var(--t0);margin-bottom:10px">Request Submitted!</h2>
+    <p style="font-size:13px;color:var(--t1);line-height:1.6;margin-bottom:20px">Your company admin will review and approve your request. You'll be able to login with your <strong>mobile number</strong> once approved.</p>
+    <a href="/login" class="btn-p" style="display:block;text-align:center;text-decoration:none">Go to Login</a>
+  </div>
+</div>
+
+{# ═══ COMPANY SELF-REGISTRATION ═══ #}
+{% elif page == "company_register" %}
+<div class="lw" style="align-items:flex-start;padding:32px 20px;min-height:100vh">
+  <div class="lc" style="max-width:560px;margin:0 auto">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <div class="sb-mark" style="width:34px;height:34px"><svg width="17" height="17" fill="none" viewBox="0 0 14 14"><rect x="1.5" y="8" width="2.6" height="4.5" rx="1" fill="white"/><rect x="5.7" y="5" width="2.6" height="7.5" rx="1" fill="white" fill-opacity="0.85"/><rect x="9.9" y="1.5" width="2.6" height="11" rx="1" fill="white" fill-opacity="0.7"/></svg></div>
+      <h1 style="font-size:18px;font-weight:600;color:var(--t0)">Register Your Company</h1>
+    </div>
+    <p style="font-size:12px;color:var(--t2);margin-bottom:24px;font-family:var(--mono)">Secure onboarding link · 100 starter credits included</p>
+    {{ flashes() }}
+    <form method="POST" action="/company/register/{{ token }}">
+      <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r8);padding:12px 14px;margin-bottom:16px">
+        <div style="font-size:10px;font-family:var(--mono);color:var(--amber);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Company Code Format</div>
+        <div style="font-size:13px;color:var(--t0)">Your code = <strong style="color:var(--blue);font-family:var(--mono)">XXXX</strong><strong style="color:var(--green);font-family:var(--mono)">1234</strong></div>
+        <div style="font-size:11px;color:var(--t2);margin-top:4px">First 4 chars from your short name + 4 system-generated digits. This is your permanent login key.</div>
+      </div>
+      <div class="r2">
+        <div class="form-g"><label>Company Full Name *</label><input type="text" name="company_name" required placeholder="Bharat Pharma Pvt Ltd" value="{{ form.get('company_name','') }}"></div>
+        <div class="form-g">
+          <label>Company Short Name * <span style="font-size:9px;color:var(--t2)">(2–4 letters, becomes code prefix)</span></label>
+          <input type="text" name="short_name" required maxlength="4" placeholder="BHAR"
+            style="text-transform:uppercase;font-family:var(--mono);font-weight:700;letter-spacing:.1em;font-size:16px"
+            value="{{ form.get('short_name','') }}" oninput="this.value=this.value.toUpperCase()">
+        </div>
+      </div>
+      <div class="r2">
+        <div class="form-g"><label>City</label><input type="text" name="city" placeholder="Mumbai" value="{{ form.get('city','') }}"></div>
+        <div class="form-g"><label>State</label><input type="text" name="state" placeholder="Maharashtra" value="{{ form.get('state','') }}"></div>
+      </div>
+      <div style="background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r8);padding:12px 14px;margin-bottom:14px">
+        <div style="font-size:11px;font-family:var(--mono);color:var(--blue);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Company Administrator Account</div>
+        <div class="form-g"><label>Admin Full Name *</label><input type="text" name="admin_name" required value="{{ form.get('admin_name','') }}"></div>
+        <div class="r2">
+          <div class="form-g"><label>Admin Mobile * (login ID)</label><input type="tel" name="admin_mobile" required maxlength="10" placeholder="10-digit" value="{{ form.get('admin_mobile','') }}"></div>
+          <div class="form-g"><label>Admin Email</label><input type="email" name="admin_email" placeholder="admin@company.com" value="{{ form.get('admin_email','') }}"></div>
+        </div>
+        <div class="r2">
+          <div class="form-g"><label>Password *</label><input type="password" name="password" required placeholder="Min 6 characters"></div>
+          <div class="form-g"><label>Confirm Password *</label><input type="password" name="confirm_password" required></div>
+        </div>
+      </div>
+      <button type="submit" class="btn-p">Register Company &amp; Get Started</button>
+    </form>
+  </div>
+</div>
+
+{# ═══ COMPANY REG SUCCESS ═══ #}
+{% elif page == "company_reg_success" %}
+<div class="lw">
+  <div class="lc fu" style="max-width:500px;text-align:center">
+    <div style="width:60px;height:60px;background:var(--green-d);border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 20px">
+      <svg width="26" height="26" fill="none" viewBox="0 0 26 26"><path d="M5 14l5 5L21 7" stroke="var(--green)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <h2 style="font-size:20px;font-weight:600;color:var(--t0);margin-bottom:6px">🎉 Company Registered!</h2>
+    <p style="font-size:13px;color:var(--t1);margin-bottom:20px">{{ company_name }} is ready. Your company code is your permanent login key.</p>
+    <div style="background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r12);padding:18px;margin-bottom:20px;text-align:left">
+      <div style="margin-bottom:12px">
+        <div style="font-size:10px;color:var(--t2);font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em">Company Code (Login Key)</div>
+        <div style="font-size:28px;font-weight:700;font-family:var(--mono);color:var(--blue);letter-spacing:.1em;margin-top:4px">{{ code }}</div>
+        <div style="font-size:11px;color:var(--t2);margin-top:3px">Share this code with all your employees for login</div>
+      </div>
+      <div style="border-top:0.5px solid var(--border);padding-top:12px">
+        <div style="font-size:11px;color:var(--t2);font-family:var(--mono)">Admin username: <strong style="color:var(--t0)">{{ admin_username }}</strong></div>
+        <div style="font-size:11px;color:var(--t2);font-family:var(--mono);margin-top:4px">Password: <strong style="color:var(--t0)">{{ admin_password }}</strong></div>
+        <div style="font-size:10px;color:var(--amber);margin-top:6px">⚠ Change password after first login</div>
+      </div>
+    </div>
+    <div style="background:var(--green-d);border:0.5px solid var(--green);border-radius:var(--r8);padding:10px 14px;margin-bottom:18px;font-size:12px;color:var(--green)">
+      ✓ 100 starter credits activated · 3 default divisions created · Company admin account ready
+    </div>
+    <div style="display:flex;gap:8px;flex-direction:column">
+      <a href="/login" class="btn-p" style="display:block;text-align:center;text-decoration:none">Login to Your Dashboard →</a>
+      <button onclick="shareWhatsApp('{{ code }}','{{ company_name }}','{{ admin_username }}')" style="padding:10px;background:var(--green-d);border:0.5px solid var(--green);border-radius:var(--r8);color:var(--green);cursor:pointer;font-family:inherit;font-size:13px">📲 Share via WhatsApp</button>
+    </div>
+  </div>
+</div>
+
+{# ═══ INVALID REG LINK ═══ #}
+{% elif page == "reg_link_invalid" %}
+<div class="lw">
+  <div class="lc" style="text-align:center">
+    <div style="width:52px;height:52px;background:var(--red-d);border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+      <svg width="22" height="22" fill="none" viewBox="0 0 22 22"><path d="M6 6l10 10M16 6l-10 10" stroke="var(--red)" stroke-width="2.5" stroke-linecap="round"/></svg>
+    </div>
+    <h2 style="font-size:18px;font-weight:600;color:var(--t0);margin-bottom:10px">
+      {% if expired is defined and expired %}Link Expired{% else %}Invalid Link{% endif %}
+    </h2>
+    <p style="font-size:13px;color:var(--t1);line-height:1.6;margin-bottom:20px">
+      {% if expired is defined and expired %}This registration link has expired. Please contact your system administrator for a new link.
+      {% else %}This registration link is invalid or has already been used.{% endif %}
+    </p>
+    <a href="/login" style="font-size:12px;color:var(--blue)">← Go to Login</a>
+  </div>
+</div>
+
+{# ═══ CREDITS ═══ #}
+{% elif page == "credits" %}
+{% set active_page = "credits" %}
+<div class="shell">{{ sidebar(user) }}
+<div class="main">
+  <div class="ph">
+    <div><h1>Credit Management</h1><p>{{ user.company_name }} [{{ user.company_code }}] · Usage tracking &amp; analytics</p></div>
+    <button class="btn-sm btn-blue" onclick="document.getElementById('req-modal').style.display='flex'">Request Credits</button>
+  </div>
+  {{ flashes() }}
+
+  {# Credit balance cards #}
+  <div class="sg" style="grid-template-columns:repeat(4,1fr)">
+    <div class="sc fu" style="border-color:{% if creds.remaining <= 10 %}var(--red){% elif creds.remaining <= 30 %}var(--amber){% else %}var(--green){% endif %}">
+      <div class="sl">Available Credits</div>
+      <div class="sv {% if creds.remaining <= 10 %}re{% elif creds.remaining <= 30 %}am{% else %}gr{% endif %}" style="font-size:28px">{{ creds.remaining }}</div>
+      <div style="font-size:10px;color:var(--t2);margin-top:4px;font-family:var(--mono)">{{ creds.plan|upper }} plan</div>
+    </div>
+    <div class="sc fu" style="animation-delay:.05s">
+      <div class="sl">Total Allocated</div>
+      <div class="sv bl">{{ creds.total_credits }}</div>
+    </div>
+    <div class="sc fu" style="animation-delay:.1s">
+      <div class="sl">Used to Date</div>
+      <div class="sv am">{{ creds.used_credits }}</div>
+    </div>
+    <div class="sc fu" style="animation-delay:.15s">
+      <div class="sl">Usage %</div>
+      <div class="sv pu">{% if creds.total_credits %}{{ ((creds.used_credits / creds.total_credits)*100)|round(1) }}{% else %}0{% endif %}%</div>
+    </div>
+  </div>
+
+  {# Credit bar #}
+  <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r12);padding:14px 18px;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--t2);margin-bottom:6px;font-family:var(--mono)">
+      <span>Credit Usage</span><span>{{ creds.used_credits }} / {{ creds.total_credits }}</span>
+    </div>
+    <div style="height:10px;background:var(--bg3);border-radius:5px;overflow:hidden">
+      {% set pct = ((creds.used_credits / creds.total_credits)*100)|round(1) if creds.total_credits else 0 %}
+      <div style="height:100%;width:{{ [pct,100]|min }}%;background:{% if pct>=90 %}var(--red){% elif pct>=70 %}var(--amber){% else %}var(--blue){% endif %};border-radius:5px;transition:width .4s"></div>
+    </div>
+    {% if creds.remaining <= 20 %}
+    <div style="margin-top:8px;padding:7px 10px;background:var(--amber-d);border:0.5px solid var(--amber);border-radius:var(--r4);font-size:11px;color:var(--amber)">
+      ⚠ Low credits — {{ creds.remaining }} remaining. <a href="#" onclick="document.getElementById('req-modal').style.display='flex'" style="color:var(--amber);font-weight:600">Request more →</a>
+    </div>{% endif %}
+  </div>
+
+  <div class="g2">
+    {# Division breakdown #}
+    <div class="card fu">
+      <div class="ch"><h3>Division-wise Usage</h3><span class="ch-r">{{ div_usage|length }} divisions</span></div>
+      <div style="padding:12px 16px">
+        {% if div_usage %}
+          {% set max_used = div_usage[0]['credits_used'] or 1 %}
+          {% for d in div_usage %}
+          <div style="margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
+              <span style="color:var(--t0);font-weight:500">{{ d['division_name'] }}</span>
+              <span class="mono muted" style="font-size:10px">{{ d['credits_used'] }} credits · {{ d['operations'] }} ops</span>
+            </div>
+            <div style="height:5px;background:var(--bg3);border-radius:3px;overflow:hidden">
+              <div style="height:100%;width:{{ [(d['credits_used'] / max_used * 100)|round(0)|int, 100]|min }}%;background:var(--blue);border-radius:3px"></div>
+            </div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div style="text-align:center;padding:20px;color:var(--t2);font-size:12px">No usage data yet</div>
+        {% endif %}
+      </div>
+    </div>
+
+    {# Daily trend chart #}
+    <div class="card fu" style="animation-delay:.05s">
+      <div class="ch"><h3>Daily Usage (14 days)</h3></div>
+      <div style="padding:14px 16px">
+        {% if daily %}
+          {% set max_day = daily|max(attribute='used') %}
+          {% for d in daily %}
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+            <span style="font-size:10px;color:var(--t2);font-family:var(--mono);min-width:76px">{{ d['day'] }}</span>
+            <div style="flex:1;height:8px;background:var(--bg3);border-radius:4px;overflow:hidden">
+              <div style="height:100%;width:{{ [(d['used'] / (max_day['used'] or 1) * 100)|round(0)|int,100]|min }}%;background:var(--purple);border-radius:4px"></div>
+            </div>
+            <span style="font-size:10px;color:var(--t2);font-family:var(--mono);min-width:20px;text-align:right">{{ d['used'] }}</span>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div style="text-align:center;padding:20px;color:var(--t2);font-size:12px">No usage in last 14 days</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# Recent transactions #}
+  <div class="card fu mt16">
+    <div class="ch"><h3>Recent Transactions</h3><span class="ch-r">last 20</span></div>
+    <div style="overflow-y:auto;max-height:320px">
+    <div class="tw"><table>
+      <thead class="sticky-glass-head" style="position:sticky;top:0;z-index:2">
+        <tr><th>Operation</th><th>User</th><th>Division</th><th class="r">Credits</th><th>Balance After</th><th>Time</th></tr>
+      </thead>
+      <tbody>
+        {% for tx in recent_tx %}<tr>
+          <td class="b" style="font-size:12px">{{ tx['operation_type'] }}</td>
+          <td class="muted" style="font-size:11px">{{ tx['user_name'] or '—' }}</td>
+          <td class="muted" style="font-size:11px">{{ tx['division_name'] or '—' }}</td>
+          <td class="r mono" style="color:var(--red)">-{{ tx['credits_used'] }}</td>
+          <td class="mono" style="font-size:11px">{{ tx['balance_after'] }}</td>
+          <td class="mono muted" style="font-size:10px">{{ tx['created_at'][:16] }}</td>
+        </tr>{% else %}
+        <tr><td colspan="6" style="text-align:center;padding:20px;color:var(--t2);font-size:12px">No transactions yet</td></tr>
+        {% endfor %}
+      </tbody>
+    </table></div>
+    </div>
+  </div>
+
+  {# Credit requests #}
+  {% if my_requests %}
+  <div class="card fu mt16">
+    <div class="ch"><h3>My Credit Requests</h3></div>
+    <div class="tw"><table>
+      <thead><tr><th>Requested</th><th class="r">Credits</th><th>Message</th><th>Status</th><th>Date</th></tr></thead>
+      <tbody>{% for rq in my_requests %}<tr>
+        <td class="muted" style="font-size:11px">{{ rq['credits_requested'] }}</td>
+        <td class="r mono">{{ rq['credits_requested'] }}</td>
+        <td class="muted" style="font-size:11px">{{ rq['message'] or '—' }}</td>
+        <td><span class="badge {% if rq['status']=='approved' %}b-done{% elif rq['status']=='rejected' %}b-error{% else %}b-processing{% endif %}">{{ rq['status'] }}</span></td>
+        <td class="mono muted" style="font-size:10px">{{ rq['created_at'][:10] }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+  </div>{% endif %}
+</div></div>
+
+<div id="req-modal" class="modal">
+  <div class="modal-box"><div class="mh"><h2>Request Additional Credits</h2><button class="mc" onclick="this.closest('.modal').style.display='none'">&times;</button></div>
+    <form method="POST" action="/credits/request">
+      <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r8);padding:12px;margin-bottom:14px;font-size:12px;color:var(--t1)">
+        Current balance: <strong style="color:var(--blue)">{{ creds.remaining }}</strong> credits remaining
+      </div>
+      <div class="form-g"><label>Credits Requested *</label>
+        <input type="number" name="amount" required min="100" step="100" placeholder="e.g. 500" style="font-family:var(--mono);font-size:16px;font-weight:600"></div>
+      <div class="form-g"><label>Message (optional)</label>
+        <textarea name="message" rows="3" style="width:100%;padding:9px 11px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r8);color:var(--t0);font-size:12px;font-family:inherit;outline:none;resize:vertical" placeholder="Reason for credit request..."></textarea></div>
+      <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r8);padding:10px 12px;margin-bottom:12px;font-size:11px;color:var(--t2)">
+        📧 Request will be sent to the system admin (admin@pharmaanalyzer.com)
+      </div>
+      <div style="display:flex;gap:8px">
+        <button type="submit" class="btn-p" style="flex:1">Submit Request</button>
+        <button type="button" onclick="this.closest('.modal').style.display='none'" style="flex:1;padding:10px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r8);color:var(--t1);cursor:pointer;font-family:inherit">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% elif page == "dashboard" %}
+{% set active_page = "dashboard" %}
+<div class="shell">{{ sidebar(user) }}
+<div class="main">
+  <div class="ph">
+    <div><h1>Dashboard</h1><p>{{ user.company_name }} &middot; {{ ROLE_LABELS.get(user.role,user.role) }} &middot; {{ user.area or 'All Areas' }}</p></div>
+    <div class="ph-r">
+      {% if user.role in ('mr', 'asm') %}
+      <button onclick="document.getElementById('up-panel').scrollIntoView({behavior:'smooth'})" class="btn-sm btn-blue">+ Upload Bill</button>
+      {% else %}
+      <button onclick="toggleUploadPanel();document.getElementById('up-panel')?.scrollIntoView({behavior:'smooth'})" class="btn-sm" style="background:var(--bg2);border:0.5px solid var(--border2);color:var(--t1)">⬆ Upload Document</button>
+      {% endif %}
+    </div>
+  </div>
+  {{ flashes() }}
+
+  {# MR Gap Alerts #}
+  {% if upload_gaps is defined and upload_gaps %}
+  <div style="background:var(--amber-d);border:0.5px solid var(--amber);border-radius:var(--r12);padding:11px 14px;margin-bottom:12px">
+    <div style="font-size:12px;font-weight:600;color:var(--amber);margin-bottom:7px">⚠ {{ upload_gaps|length }} MR(s) have NOT uploaded for {{ q_info.label }}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:5px">
+      {% for mr in upload_gaps %}
+      <span style="background:var(--bg1);border:0.5px solid var(--amber);border-radius:var(--r4);padding:3px 8px;font-size:11px;color:var(--t0);font-family:var(--mono)">{{ mr.full_name }} · {{ mr.area }}{% if mr.mobile %} · {{ mr.mobile }}{% endif %}</span>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# Credits widget — only for admins, show warning when low #}
+  {% if creds is defined and user.role in ('company_admin','nsm') %}
+  <div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg2);border:0.5px solid {% if creds.remaining<=10 %}var(--red){% elif creds.remaining<=30 %}var(--amber){% else %}var(--border){% endif %};border-radius:var(--r8);padding:8px 14px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div>
+        <div style="font-size:10px;color:var(--t2);font-family:var(--mono);text-transform:uppercase;letter-spacing:.05em">Credits</div>
+        <div style="font-size:16px;font-weight:700;font-family:var(--mono);color:{% if creds.remaining<=10 %}var(--red){% elif creds.remaining<=30 %}var(--amber){% else %}var(--green){% endif %}">{{ creds.remaining }}</div>
+      </div>
+      <div style="font-size:11px;color:var(--t2)">
+        of {{ creds.total_credits }} total · {{ creds.used_credits }} used
+        <span style="background:var(--bg3);border-radius:3px;padding:1px 5px;font-family:var(--mono);font-size:9px;margin-left:4px">{{ creds.plan|upper }}</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:5px;align-items:center">
+      {% if creds.remaining <= 20 %}
+      <span style="font-size:11px;color:{% if creds.remaining<=10 %}var(--red){% else %}var(--amber){% endif %}">{% if creds.remaining<=10 %}⛔ Credits exhausted!{% else %}⚠ Low credits{% endif %}</span>
+      {% endif %}
+      <a href="/credits" style="padding:4px 9px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r4);font-size:10px;color:var(--t1);font-family:var(--mono);text-decoration:none">View →</a>
+    </div>
+  </div>
+  {% endif %}
+
+  {# Pipeline status bar #}
+  <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r8);padding:10px 16px;margin-bottom:12px;display:flex;align-items:center;gap:0;flex-wrap:wrap">
+    <div style="padding:6px 14px;text-align:center;min-width:100px">
+      <div style="font-size:11px;color:var(--t2);font-family:var(--mono);margin-bottom:2px">◎ Extraction Done</div>
+      <div style="font-size:18px;font-weight:700;color:var(--blue)">{{ stats.get('ocr_done',0) or 0 }}</div>
+    </div>
+    <div style="color:var(--border2);font-size:18px;padding:0 4px">→</div>
+    <div style="padding:6px 14px;text-align:center;min-width:120px">
+      <div style="font-size:11px;color:var(--t2);font-family:var(--mono);margin-bottom:2px">⏳ Pending Verif</div>
+      <div style="font-size:18px;font-weight:700;color:var(--amber)">{{ stats.get('pending_verif',0) or 0 }}</div>
+    </div>
+    <div style="color:var(--border2);font-size:18px;padding:0 4px">→</div>
+    <div style="padding:6px 14px;text-align:center;min-width:110px;background:var(--green-d);border-radius:var(--r8)">
+      <div style="font-size:11px;color:var(--green);font-family:var(--mono);margin-bottom:2px">✓ Verified</div>
+      <div style="font-size:18px;font-weight:700;color:var(--green)">{{ stats.get('verified_count',0) or 0 }}</div>
+    </div>
+    <div style="flex:1"></div>
+    <div style="padding:6px 14px;border-left:0.5px solid var(--border);display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+      <div style="text-align:center;border-left:0.5px solid var(--border);padding-left:12px">
+        <div style="font-size:9px;color:var(--green);font-family:var(--mono)">✓ Verified Value</div>
+        <div style="font-size:16px;font-weight:700;color:var(--green)">&#8377;{{ "{:,.0f}".format(stats.get('verified_revenue',0) or 0) }}</div>
+      </div>
+    </div>
+  </div>
+  {# Upload Panel — MR & ASM see it always; RSM+ get a collapsible toggle #}
+  {% if user.role in ('mr', 'asm') %}
+  <div id="up-panel" class="mt24">
+  {% else %}
+  <div style="margin-top:16px">
+    <button onclick="toggleUploadPanel()" id="upload-toggle-btn"
+      style="display:flex;align-items:center;gap:8px;padding:7px 16px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r8);font-size:12px;color:var(--t1);cursor:pointer;font-family:inherit;width:100%;text-align:left">
+      <svg width="14" height="14" fill="none" viewBox="0 0 14 14"><path d="M7 10V3M7 3L4 6M7 3L10 6" stroke="var(--blue)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M1 11v1.5h12V11" stroke="var(--t2)" stroke-width="1.2" stroke-linecap="round"/></svg>
+      <span style="font-weight:500">Upload Sales Document</span>
+      <span style="font-size:10px;color:var(--t2);margin-left:4px">(click to expand)</span>
+      <span id="upload-toggle-arrow" style="margin-left:auto;color:var(--t2);font-size:12px">▼</span>
+    </button>
+  </div>
+  <div id="up-panel" class="mt24" style="display:none">
+  {% endif %}
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+      <div class="stl" style="margin:0">Upload Sales Document</div>
+      <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:10px;color:var(--t2);font-family:var(--mono)">Period:</span>
+        <button class="qbtn" onclick="setQPeriod(1,this)">Q1 Apr–Jun</button>
+        <button class="qbtn" onclick="setQPeriod(2,this)">Q2 Jul–Sep</button>
+        <button class="qbtn" onclick="setQPeriod(3,this)">Q3 Oct–Dec</button>
+        <button class="qbtn" onclick="setQPeriod(4,this)">Q4 Jan–Mar</button>
+        <button class="qbtn" onclick="setQPeriod(0,this)">Monthly</button>
+      </div>
+    </div>
+    <div id="period-hint" style="display:none;background:var(--blue-d);border:0.5px solid var(--blue);border-radius:var(--r8);padding:7px 12px;margin-bottom:8px;font-size:11px;color:var(--blue);font-family:var(--mono)"></div>
+    {# Manual date override #}
+    <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r8);padding:10px 14px;margin-bottom:10px">
+      <div style="font-size:10px;color:var(--t2);font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px">Statement Date Range (optional — auto-detected from document)</div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--t2);font-family:var(--mono)">From</span>
+        <input type="date" id="man-from" style="padding:5px 8px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r4);color:var(--t0);font-size:11px;font-family:var(--mono);outline:none">
+        <span style="font-size:11px;color:var(--t2);font-family:var(--mono)">To</span>
+        <input type="date" id="man-to" style="padding:5px 8px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r4);color:var(--t0);font-size:11px;font-family:var(--mono);outline:none">
+        <button onclick="clearManualDates()" style="padding:4px 9px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r4);font-size:10px;color:var(--t2);cursor:pointer;font-family:var(--mono)">Clear</button>
+        <span style="font-size:10px;color:var(--t2)">Leave blank to auto-detect from document</span>
+      </div>
+    </div>
+    <div class="uz" id="dropzone" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="handleDrop(event)" onclick="document.getElementById('fi').click()">
+      <div style="width:40px;height:40px;background:var(--bg3);border-radius:var(--r8);margin:0 auto 10px;display:flex;align-items:center;justify-content:center">
+        <svg width="18" height="18" fill="none" viewBox="0 0 18 18"><path d="M9 13V4M9 4L5.5 7.5M9 4L12.5 7.5" stroke="var(--blue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 14v2h14v-2" stroke="var(--t2)" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </div>
+      <h4 style="font-size:13px;font-weight:500;color:var(--t0);margin-bottom:3px">Drop files or click to browse</h4>
+      <p style="font-size:11px;color:var(--t2);font-family:var(--mono)">PDF &middot; JPEG &middot; PNG &middot; XLSX &middot; CSV &middot; Any rotation / orientation</p>
+      <input type="file" id="fi" multiple accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.csv" style="display:none" onchange="queueFiles(this.files)">
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin:12px 0">
+      <div style="flex:1;height:1px;background:var(--border2)"></div>
+      <span style="font-size:10px;color:var(--t2);font-family:var(--mono)">OR IMPORT FROM A LINK</span>
+      <div style="flex:1;height:1px;background:var(--border2)"></div>
+    </div>
+    <div style="display:flex;gap:8px" onclick="event.stopPropagation()">
+      <input type="url" id="url-input" placeholder="Paste an S3/EC2, Google Drive, or direct web link to a PDF/JPG/PNG…"
+        style="flex:1;padding:9px 12px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r8);color:var(--t0);font-size:12px;font-family:var(--mono);outline:none"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();importFromUrl();}">
+      <button onclick="importFromUrl()" style="padding:9px 16px;background:var(--blue-d);border:0.5px solid var(--blue);border-radius:var(--r8);color:var(--blue);font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap">↓ Import</button>
+    </div>
+    <p style="font-size:10px;color:var(--t2);font-family:var(--mono);margin-top:5px">
+      Only public http(s) links are supported — internal/private network addresses are blocked for security.
+    </p>
+    <div id="uq"></div>
+    <div id="warn-area"></div>
+  </div>
+
+  <div style="margin-top:14px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r8);padding:10px 14px;font-size:12px;color:var(--t1)">
+    📄 View uploaded documents in the <a href="/documents" style="color:var(--blue)">Documents tab →</a>
+  </div>
+</div></div>
+
+{# ═══ DOCUMENTS ═══ #}
+{% elif page == "documents" %}
+{% set active_page = "documents" %}
+<div class="shell">{{ sidebar(user) }}
+<div class="main">
+  <div class="ph">
+    <div><h1>Documents</h1><p>{{ user.company_name }} · All uploaded sales documents</p></div>
+    <div class="ph-r">
+      <a href="/export/excel?scope=team&date_from={{ date_from }}&date_to={{ date_to }}&verified_only=1" style="padding:5px 12px;background:var(--green-d);border:0.5px solid var(--green);border-radius:var(--r4);font-size:11px;color:var(--green);font-family:var(--mono);text-decoration:none">⬇ Excel Report</a>
+      <button onclick="shareWA('{{ date_from }}','{{ date_to }}')" class="btn-sm" style="background:var(--green-d);border:0.5px solid var(--green);color:var(--green)">📲 WhatsApp</button>
+      <a href="/dashboard" style="padding:5px 12px;background:var(--blue);color:#fff;border-radius:var(--r4);font-size:11px;font-family:var(--mono);text-decoration:none">+ Upload Bill</a>
+    </div>
+  </div>
+  {{ flashes() }}
+
+  <div class="card fu">
+    <div class="ch" style="flex-wrap:wrap;gap:8px;padding-bottom:10px;border-bottom:0.5px solid var(--border)">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <h3>All Documents</h3>
+          <span class="ch-r">{{ uploads|length }} records</span>
+        </div>
+        {# Inline search #}
+        <div style="display:flex;align-items:center;gap:6px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r4);padding:4px 10px;min-width:220px">
+          <svg width="11" height="11" fill="none" viewBox="0 0 12 12"><circle cx="5" cy="5" r="3.5" stroke="var(--t2)" stroke-width="1.2"/><path d="M8.5 8.5L11 11" stroke="var(--t2)" stroke-width="1.2" stroke-linecap="round"/></svg>
+          <input type="text" id="doc-search" placeholder="Search document, agency, uploader..." oninput="filterDocTable(this.value)" style="background:none;border:none;outline:none;font-size:11px;color:var(--t0);font-family:inherit;width:100%">
+          <button onclick="document.getElementById('doc-search').value='';filterDocTable('')" style="background:none;border:none;color:var(--t2);cursor:pointer;font-size:13px;padding:0;line-height:1">&times;</button>
+        </div>
+      </div>
+        {# Status filter badges #}
+        {% set sf = status_filter or 'all' %}
+        {% set sc = status_counts or {} %}
+        <div style="display:flex;gap:4px;flex-wrap:wrap">
+          {% for lbl,val,col in [('All','all','var(--blue)'),('◎ Extraction Done','done','var(--blue)'),('✓ Verified','verified_stage','var(--green)'),('⏳ Pending','pending_verif','var(--amber)'),('Rejected','rejected','var(--red)'),('Error','error','var(--amber)')] %}
+          <a href="/documents?date_from={{ date_from }}&date_to={{ date_to }}&status_filter={{ val }}"
+            style="padding:2px 8px;border-radius:10px;font-size:10px;font-family:var(--mono);text-decoration:none;
+            {% if sf==val %}background:var(--blue);color:#fff;font-weight:700{% else %}background:var(--bg3);color:var(--t2);border:0.5px solid var(--border2){% endif %}">
+            {{ lbl }}{% if val!='all' and sc.get(val) %} ({{ sc[val] }}){% elif val=='all' %} ({{ sc.values()|sum }}){% endif %}
+          </a>{% endfor %}
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+        <form method="GET" action="/documents" style="display:flex;align-items:center;gap:4px">
+          <input type="hidden" name="status_filter" value="{{ status_filter or 'all' }}">
+          <span style="font-size:10px;color:var(--t2);font-family:var(--mono)">FROM</span>
+          <input type="date" name="date_from" value="{{ date_from }}" style="padding:4px 7px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r4);color:var(--t0);font-size:10px;font-family:var(--mono);outline:none">
+          <span style="font-size:10px;color:var(--t2);font-family:var(--mono)">TO</span>
+          <input type="date" name="date_to" value="{{ date_to }}" style="padding:4px 7px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r4);color:var(--t0);font-size:10px;font-family:var(--mono);outline:none">
+          <button type="submit" style="padding:4px 9px;background:var(--blue);color:#fff;border:none;border-radius:var(--r4);font-size:10px;cursor:pointer;font-family:var(--mono)">Filter</button>
+          {% if date_from or date_to or (status_filter and status_filter!='all') %}<a href="/documents" style="font-size:10px;color:var(--t2)">Clear</a>{% endif %}
+        </form>
+      </div>
+    </div>
+    {# Scrollable container #}
+    <div style="overflow-y:auto;max-height:620px;scroll-behavior:smooth;-webkit-overflow-scrolling:touch" id="docs-scroll">
+    <div class="tw"><table>
+      <thead class="sticky-glass-head" style="position:sticky;top:0;z-index:2">
+        <tr>
+          <th>Document Name</th><th>Agency Name</th><th>DocType</th><th>Period</th>
+          <th class="r">Net ₹</th><th>Verified On</th><th>Status</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="docs-tbody">
+        {% for up in uploads %}
+        <tr style="{% if up['status']=='rejected' %}opacity:0.7;background:rgba(255,60,60,0.04){% endif %}">
+          <td>
+            <div class="b" style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+              title="{{ up['original_filename'] or 'Untitled' }}">
+              {{ up['original_filename'] or 'Untitled' }}
+            </div>
+            <div class="muted mono" style="font-size:9px;margin-top:1px">
+              {{ up['uploader_name'] }} ·
+              <span class="badge b-{{ up['uploader_role'] }}" style="font-size:9px;padding:0 4px">{{ up['uploader_role'].upper() }}</span>
+              {% if up.get('doc_type') and up['doc_type'] != 'STATEMENT' %}
+              <span style="font-size:9px;color:var(--amber);font-family:var(--mono);margin-left:3px">{{ up['doc_type'] }}</span>
+              {% endif %}
+            </div>
+            <div class="muted mono" style="font-size:9px">{{ up['upload_date'][:16].replace('T',' ') }}</div>
+            {% if up['status']=='rejected' and up.get('rejection_reason') %}
+            <div style="margin-top:3px;padding:3px 6px;background:rgba(255,60,60,0.12);border-left:2px solid var(--red);border-radius:2px;font-size:9px;color:var(--red)">
+              ✗ Rejected{% if up.get('rejected_by_name') %} by {{ up['rejected_by_name'] }}{% endif %}{% if up.get('rejected_at') %} on {{ up['rejected_at'][:10] }}{% endif %}:
+              {{ up['rejection_reason'] }}
+            </div>
+            {% endif %}
+          </td>
+          <td style="font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+              title="{{ up.get('stockist_name','') }}">
+            {{ up.get('stockist_name') or '—' }}
+          </td>
+          <td><span class="badge b-pending" style="font-size:9px">{{ up.get('doc_type','STATEMENT') }}</span></td>
+          <td style="font-size:10px;font-family:var(--mono);white-space:nowrap">
+            {% if up['statement_from_date'] or up['statement_to_date'] %}
+            <span style="color:var(--blue)">{{ up['statement_from_date'] or '?' }}</span>
+            <span style="color:var(--t2)"> → </span>
+            <span style="color:var(--blue)">{{ up['statement_to_date'] or '?' }}</span>
+            {% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td class="r mono b" style="color:var(--green)">{% if up['invoice_net'] %}₹{{ "{:,.0f}".format(up['invoice_net']) }}{% else %}—{% endif %}</td>
+          <td class="mono muted" style="font-size:10px">
+            {% if up['verification_status'] == 'verified' and up['verified_at'] %}
+            <span style="color:var(--teal)">✓</span> {{ up['verified_at'][:10] }}
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            <span class="badge {% if up['status']=='done' %}b-done{% elif up['status']=='processing' %}b-processing{% elif up['status']=='error' %}b-error{% elif up['status']=='rejected' %}b-error{% else %}b-pending{% endif %}">
+              {{ up['status'] or 'pending' }}
+            </span>
+          </td>
+          <td style="white-space:nowrap;min-width:120px">
+            {% if up['status']=='done' %}
+              <a href="/extraction/{{ up['id'] }}" style="font-size:11px">View →</a>
+              <a href="/uploads/{{ up['stored_filename'] }}" target="_blank"
+                style="margin-left:6px;font-size:10px;color:var(--t2);text-decoration:none" title="Open original document">📄</a>
+            {% elif up['status']=='rejected' %}
+              <a href="/extraction/{{ up['id'] }}" style="font-size:11px;color:var(--t2)">View data</a>
+              {% if user['role'] in ('company_admin','nsm') %}
+              <button onclick="restoreUpload({{ up['id'] }})"
+                style="margin-left:6px;font-size:10px;color:var(--green);background:none;border:none;cursor:pointer;padding:0" title="Restore this upload">↩ Restore</button>
+              {% endif %}
+            {% elif up['status']=='error' %}
+              <span style="font-size:10px;color:var(--red)" title="{{ up.get('error_msg','') }}">✗ Failed</span>
+            {% endif %}
+          </td>
+        </tr>{% else %}
+        <tr><td colspan="8" style="text-align:center;padding:28px;color:var(--t2);font-size:12px">
+          {% if status_filter and status_filter!='all' %}No {{ status_filter }} documents found. <a href="/documents">Clear filter</a>{% else %}No documents yet. <a href="/dashboard">Upload a bill →</a>{% endif %}
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table></div>
+    </div>
+    {% if uploads|length >= 50 %}
+    <div style="padding:8px 16px;border-top:0.5px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+      <span style="font-size:11px;color:var(--t2)">Showing top {{ uploads|length }} records</span>
+      <span style="font-size:11px;color:var(--t2)">Use date filter to narrow results ↑</span>
+    </div>
+    {% endif %}
+  </div>
+</div></div>
+
+{# ═══ DETAIL ═══ #}
+{% elif page == "detail" %}
+{% set active_page = "dashboard" %}
+<div class="shell">{{ sidebar(user) }}
+<div class="main">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">
+    <a href="/dashboard" class="back"><svg width="12" height="12" fill="none" viewBox="0 0 12 12"><path d="M8 2L3 6L8 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Back to Dashboard</a>
+    {% if extraction and upload and upload['status']=='done' %}
+    <div style="display:flex;gap:8px;align-items:center">
+      {# Verification status badge #}
+      {% set vs = upload.get('verification_status','ocr_done') %}
+      <span style="font-size:11px;padding:3px 10px;border-radius:10px;font-family:var(--mono);
+        {% if vs=='verified' %}background:var(--green-d);color:var(--green);border:0.5px solid var(--green)
+        {% elif vs=='pending_verification' %}background:var(--amber-d);color:var(--amber);border:0.5px solid var(--amber)
+        {% else %}background:var(--bg3);color:var(--t2);border:0.5px solid var(--border2){% endif %}">
+        {% if vs=='verified' %}✓ Manually Verified{% elif vs=='pending_verification' %}⏳ Verification Pending{% else %}◎ Extraction Done{% endif %}
+      </span>
+    </div>
+    {% endif %}
+  </div>
+  {% if extraction %}
+  <div class="dh fu">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px">
+      <div style="font-size:12px;color:var(--t2)">Uploaded by <strong style="color:var(--t0)">{{ upload['uploader_name'] }}</strong> &middot; {{ upload['upload_date'][:10] }}</div>
+    </div>
+    {% if extraction['bill_number'] or extraction['bill_date'] or extraction['discount_percent'] or extraction['sgst'] or extraction['cgst'] %}
+    <div class="dm">
+      {% if extraction['bill_number'] %}<div class="dmi">Bill: <span>{{ extraction['bill_number'] }}</span></div>{% endif %}
+      {% if extraction['bill_date'] %}<div class="dmi">Date: <span>{{ extraction['bill_date'] }}</span></div>{% endif %}
+      {% if extraction['discount_percent'] %}<div class="dmi">Disc {{ extraction['discount_percent'] }}%: <span style="color:var(--amber)">-₹{{ "{:,.2f}".format(extraction['discount_amount'] or 0) }}</span></div>{% endif %}
+      {% if extraction['sgst'] %}<div class="dmi">SGST: <span>₹{{ "{:,.2f}".format(extraction['sgst']) }}</span></div>{% endif %}
+      {% if extraction['cgst'] %}<div class="dmi">CGST: <span>₹{{ "{:,.2f}".format(extraction['cgst']) }}</span></div>{% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  {# ── Extraction Debug Panel ── #}
+  {% set dbg = debug_info or {} %}
+  {# ── Stockist / Agency summary card -- single source of truth for name/GST/address/period/total, not repeated above ── #}
+  <div style="background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r8);padding:14px 18px;margin-bottom:14px">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px">
+      <div>
+        <div style="font-size:11px;color:var(--t2);font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Stockist (Agency)</div>
+        <div style="font-size:18px;font-weight:700;color:var(--t0)">{{ extraction['stockist_name'] or 'Unknown' }}</div>
+        {% if extraction['stockist_gst'] %}
+        <div style="font-size:10px;font-family:var(--mono);color:var(--t2);margin-top:2px">GST: {{ extraction['stockist_gst'] }}</div>{% endif %}
+        {% if extraction['stockist_address'] %}
+        <div style="font-size:11px;color:var(--t2);margin-top:3px;max-width:400px">{{ extraction['stockist_address'][:120] }}</div>{% endif %}
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+        <div style="font-size:11px;color:var(--t2);font-family:var(--mono)">Statement Period</div>
+        <div style="font-size:13px;font-weight:600;color:var(--blue);font-family:var(--mono)">
+          {{ extraction['statement_from_date'] or '?' }} → {{ extraction['statement_to_date'] or '?' }}
+        </div>
+        {% if extraction['invoice_net'] %}
+        <div style="font-size:20px;font-weight:700;color:var(--green)">₹{{ "{:,.2f}".format(extraction['invoice_net']) }}</div>
+        <div style="font-size:10px;color:var(--t2)">Total Net Sale</div>{% endif %}
+      </div>
+    </div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:0.5px solid var(--border)">
+      {% set total_items = namespace(n=0) %}
+      {% for pg in parties %}{% set total_items.n = total_items.n + pg['items']|length %}{% endfor %}
+      <span style="font-size:11px;font-family:var(--mono)">🏪 <strong style="color:var(--t0)">{{ parties|length }}</strong> <span style="color:var(--t2)">parties</span></span>
+      <span style="font-size:11px;font-family:var(--mono)">💊 <strong style="color:var(--t0)">{{ total_items.n }}</strong> <span style="color:var(--t2)">brand items</span></span>
+      {% if dbg.get('source_file') %}<span style="font-size:10px;font-family:var(--mono);color:var(--t2)">📄 {{ dbg['source_file'] }}</span>{% endif %}
+      {% if dbg.get('mode') %}<span style="font-size:10px;font-family:var(--mono);color:var(--teal)">✦ {{ dbg['mode'] }}</span>{% endif %}
+    </div>
+    {% if dbg.get('errors') %}
+    <div style="margin-top:8px;font-size:11px;color:var(--amber)">
+      ⚠ {{ dbg['errors']|length }} extraction error(s): {{ dbg['errors']|join(' | ') }}
+    </div>{% endif %}
+  </div>
+  <div id="detail-grid" style="display:grid;grid-template-columns:1fr 1.7fr;gap:14px;align-items:start">
+    <div class="card" style="position:sticky;top:20px">
+      {% set fn = upload['stored_filename'] or '' %}
+      {% set fe = fn.split('.')[-1].lower() if fn else '' %}
+      <div class="ch">
+        <h3>Original Document</h3>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button onclick="rotateDoc(-90)" title="Rotate left"
+            style="font-size:12px;padding:1px 8px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r4);color:var(--t2);cursor:pointer">⟲</button>
+          <button onclick="rotateDoc(90)" title="Rotate right"
+            style="font-size:12px;padding:1px 8px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r4);color:var(--t2);cursor:pointer">⟳</button>
+          <span style="font-size:10px;font-family:var(--mono);color:var(--t2)">{{ upload['original_filename'] or fn }}</span>
+          <a href="/uploads/{{ fn }}" target="_blank"
+            style="font-size:10px;font-family:var(--mono);padding:2px 8px;background:var(--blue-d);border:0.5px solid var(--blue);border-radius:var(--r4);color:var(--blue);text-decoration:none">
+            Open ↗
+          </a>
+          <button onclick="toggleDocViewer()" id="doc-toggle-btn"
+            style="font-size:10px;font-family:var(--mono);padding:2px 8px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r4);color:var(--t2);cursor:pointer">
+            ▼ Minimize
+          </button>
+        </div>
+      </div>
+      <div id="doc-viewer-body" style="padding:10px">
+        {% if not fn %}
+          <div style="background:var(--bg2);border-radius:var(--r8);padding:24px;text-align:center;color:var(--t2);font-size:12px">
+            No file attached to this record.
+          </div>
+        {% elif fe in ['jpg','jpeg','png'] %}
+          <div id="doc-img-wrap" style="overflow:hidden;width:100%">
+          <img id="doc-img" src="/uploads/{{ fn }}" style="width:100%;border-radius:var(--r8);display:block;transition:transform .2s ease"
+            onerror="this.parentElement.innerHTML='<div style=\'background:var(--bg2);border-radius:var(--r8);padding:24px;text-align:center\'><div style=\'font-size:32px;margin-bottom:10px\'>🖼️</div><div style=\'font-size:12px;color:var(--t2);margin-bottom:10px\'>Image not found on server</div><a href=\'/uploads/{{ fn }}\' target=\'_blank\' style=\'font-size:11px;color:var(--blue)\'>Try direct link ↗</a></div>'">
+          </div>
+        {% elif fe == 'pdf' %}
+          <iframe src="/uploads/{{ fn }}" style="width:100%;height:520px;border:none;border-radius:var(--r8)"
+            onerror="this.style.display='none'"></iframe>
+          <div style="margin-top:6px;text-align:center">
+            <a href="/uploads/{{ fn }}" target="_blank" style="font-size:11px;color:var(--t2)">
+              If PDF doesn't load, click to open directly ↗
+            </a>
+          </div>
+        {% else %}
+          <div style="background:var(--bg2);border-radius:var(--r8);padding:20px;text-align:center">
+            <div style="font-size:32px;margin-bottom:8px">📊</div>
+            <div style="font-size:12px;color:var(--t2);margin-bottom:12px">{{ fe.upper() }} file — {{ upload['original_filename'] or fn }}</div>
+            <a href="/uploads/{{ fn }}" target="_blank"
+              style="padding:7px 14px;background:var(--blue);color:#fff;border-radius:var(--r8);font-size:12px;text-decoration:none">
+              ⬇ Download File
+            </a>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+    <div>
+      <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r8);padding:8px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div style="display:flex;align-items:center;gap:8px;flex:1">
+          <svg width="12" height="12" fill="none" viewBox="0 0 12 12" style="flex-shrink:0"><circle cx="5" cy="5" r="3.5" stroke="var(--t2)" stroke-width="1.2"/><path d="M8.5 8.5L11 11" stroke="var(--t2)" stroke-width="1.2" stroke-linecap="round"/></svg>
+          <input type="text" id="brandSearch" placeholder="Search brand / product..." oninput="searchBrand(this.value)" style="flex:1;background:none;border:none;outline:none;color:var(--t0);font-size:12px;font-family:inherit">
+          <span id="searchCount" style="font-size:10px;color:var(--t2);font-family:var(--mono)"></span>
+          <button onclick="clearSearch()" style="background:none;border:none;color:var(--t2);cursor:pointer;font-size:14px;padding:0">&times;</button>
+        </div>
+        <div style="display:flex;gap:4px;flex-shrink:0">
+          <button onclick="expandAllParties()" style="font-size:10px;font-family:var(--mono);padding:3px 9px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r4);color:var(--t1);cursor:pointer">▾ Expand All</button>
+          <button onclick="collapseAllParties()" style="font-size:10px;font-family:var(--mono);padding:3px 9px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r4);color:var(--t1);cursor:pointer">▸ Collapse All</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:5px;margin-bottom:12px;flex-wrap:wrap">
+        <button class="tab-b on" onclick="flt('all',this)">ALL ({{ parties|length }})</button>
+        {% set types_found = parties|map(attribute='party')|map(attribute='type')|list %}
+        {% for pt in ['distributor','chemist','retailer','shop'] %}
+          {% set cnt = types_found|select('equalto',pt)|list|length %}
+          {% if cnt %}<button class="tab-b" onclick="flt('{{ pt }}',this)">{{ pt.upper() }} ({{ cnt }})</button>{% endif %}
+        {% endfor %}
+      </div>
+      <div id="pc">
+      {% for pg in parties %}{% set p=pg['party'] %}{% set items=pg['items'] %}{% set pt=p['type'] or 'chemist' %}{% set ini=(p['name'] or 'UN')[:2].upper() %}
+      <div class="pb-blk fu" data-type="{{ pt }}" style="animation-delay:{{ loop.index0 * 0.04 }}s">
+        <div class="p-hd" onclick="tog(this)">
+          <div class="p-av" style="background:{% if pt=='distributor' %}var(--blue-d){% elif pt=='chemist' %}var(--green-d){% elif pt=='retailer' %}var(--amber-d){% else %}var(--bg3){% endif %};color:{% if pt=='distributor' %}var(--blue){% elif pt=='chemist' %}var(--green){% elif pt=='retailer' %}var(--amber){% else %}var(--t1){% endif %}">{{ ini }}</div>
+          <div style="flex:1;min-width:0">
+            {# Store Name (Party Name) — primary label #}
+            <div style="font-weight:600;font-size:13px;color:var(--t0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+              {{ p['name'] or 'Unknown Store' }}
+            </div>
+            {# Store Location + meta #}
+            <div style="font-size:11px;color:var(--t2);margin-top:2px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-family:var(--mono)">
+              {% if p['area'] %}<span style="color:var(--blue);font-weight:500">📍 {{ p['area'] }}</span>{% endif %}
+              {% if p['dl_number'] %}<span>DL: {{ p['dl_number'] }}</span>{% endif %}
+              {% if p['gst_number'] %}<span>GST: {{ p['gst_number'] }}</span>{% endif %}
+              <span>{{ items|length }} brands</span>
+              <span style="color:var(--t0);font-weight:600">₹{{ "{:,.2f}".format(p['total_amount'] or 0) }}</span>
+              
+            </div>
+          </div>
+          <div class="ti muted" style="font-size:10px;font-family:var(--mono)">▲</div>
+        </div>
+        <div class="p-bd"><div class="tw"><table>
+          <thead><tr>
+            <th>Brand / Product</th><th>Dosage</th><th class="r">Amount ₹</th>
+          </tr></thead>
+          <tbody>
+            {% for item in items %}<tr class="item-row">
+              <td>
+                <div class="b" style="font-size:12px;color:var(--t0)">{{ item['brand'] or '—' }}</div>
+                {% if item['batch_no'] or item['expiry'] %}
+                <div style="font-size:9px;color:var(--t2);font-family:var(--mono)">
+                  {% if item['batch_no'] %}Batch: {{ item['batch_no'] }}{% endif %}
+                  {% if item['expiry'] %} · Exp: {{ item['expiry'] }}{% endif %}
+                </div>{% endif %}
+              </td>
+              <td class="mono muted" style="font-size:11px">{{ item['pack'] or '—' }}</td>
+              <td class="r mono b" style="color:{% if (item['final_amount'] or 0)<0 %}var(--red){% elif (item['final_amount'] or 0)==0 %}var(--t2){% else %}var(--t0){% endif %}">
+                ₹{{ "{:,.2f}".format(item['final_amount'] or 0) }}
+              </td>
+            </tr>{% endfor %}
+          </tbody>
+          <tfoot>
+            <tr style="border-top:1px solid var(--border2)">
+              <td colspan="2" style="font-weight:600;color:var(--t0)">Subtotal — {{ p['name'] }}</td>
+              <td class="r mono b" style="color:var(--blue);font-size:13px">₹{{ "{:,.2f}".format(p['total_amount'] or 0) }}</td>
+            </tr>
+          </tfoot>
+        </table></div></div>
+      </div>{% else %}<div style="text-align:center;padding:32px;color:var(--t2)">No party data extracted from this document.</div>{% endfor %}
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div style="background:var(--blue-g);border:0.5px solid var(--blue-d);border-radius:var(--r8);padding:12px 16px;color:var(--blue);font-size:12px">Document is still being processed or encountered an error.</div>
+  {% endif %}
+</div></div>
+
+{# ═══ TEAM ═══ #}
+{% elif page == "team" %}
+{% set active_page = "team" %}
+<div class="shell">{{ sidebar(user) }}
+<div class="main">
+  <div class="ph">
+    <div><h1>Team Management</h1><p>{{ user.company_name }} &middot; MR → ASM → RSM → ZSM → NSM → Admin</p></div>
+    <button class="btn-sm btn-blue" onclick="document.getElementById('add-user-modal').style.display='flex'">+ Add User</button>
+  </div>
+  {{ flashes() }}
+  <div class="sg">
+    {# Show only roles that are relevant to this manager's level #}
+    {% if user.role in ('company_admin') %}
+      {% set visible_roles = [('company_admin','am'),('nsm','tl'),('zsm','pu'),('rsm','bl'),('asm','gr'),('mr','tl')] %}
+    {% elif user.role == 'nsm' %}
+      {% set visible_roles = [('zsm','pu'),('rsm','bl'),('asm','gr'),('mr','tl')] %}
+    {% elif user.role == 'zsm' %}
+      {% set visible_roles = [('rsm','bl'),('asm','gr'),('mr','tl')] %}
+    {% elif user.role == 'rsm' %}
+      {% set visible_roles = [('asm','gr'),('mr','tl')] %}
+    {% else %}
+      {% set visible_roles = [('mr','tl')] %}
+    {% endif %}
+    {% for r,cls in visible_roles %}
+    {% set cnt=users|selectattr('role','equalto',r)|list|length %}
+    <div class="sc"><div class="sl">{{ ROLE_LABELS.get(r,r).split(' —')[0] }}</div><div class="sv {{ cls }}">{{ cnt }}</div></div>
+    {% endfor %}
+  </div>
+  <div class="card">
+    <div class="ch"><div style="display:flex;align-items:center;justify-content:space-between;width:100%;gap:10px;flex-wrap:wrap">
+      <h3>Team Members ({{ users|length }})</h3>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:6px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r4);padding:4px 10px;min-width:210px">
+          <svg width="11" height="11" fill="none" viewBox="0 0 12 12"><circle cx="5" cy="5" r="3.5" stroke="var(--t2)" stroke-width="1.2"/><path d="M8.5 8.5L11 11" stroke="var(--t2)" stroke-width="1.2" stroke-linecap="round"/></svg>
+          <input type="text" id="team-search" placeholder="Search name, ID, area..." oninput="filterTeam(this.value)" style="background:none;border:none;outline:none;font-size:11px;color:var(--t0);font-family:inherit;width:100%">
+          <button onclick="document.getElementById('team-search').value='';filterTeam('')" style="background:none;border:none;color:var(--t2);cursor:pointer;font-size:13px;padding:0;line-height:1">&times;</button>
+        </div>
+        <button onclick="toggleAllGroups()" id="expand-all-btn" style="font-size:10px;color:var(--blue);background:none;border:none;cursor:pointer;font-family:var(--mono)">Collapse All</button>
+      </div>
+    </div></div>
+    {% set role_order = ['company_admin','nsm','zsm','rsm','asm','mr'] %}
+    {% for role_key in role_order %}
+      {% set ru = users|selectattr('role','equalto',role_key)|list %}
+      {% if ru %}
+      <div class="team-group" id="grp-{{ role_key }}" style="margin:0;border:none;border-radius:0;border-top:0.5px solid var(--border)">
+        <div class="team-grp-hd" onclick="toggleGroup('{{ role_key }}')">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="badge b-{{ role_key }}">{{ role_key.upper() }}</span>
+            <span style="font-size:12px;font-weight:500;color:var(--t0)">{{ ROLE_LABELS.get(role_key,role_key).split(' —')[0] }}</span>
+            <span style="font-size:11px;color:var(--t2);font-family:var(--mono)">{{ ru|length }} member{{ 's' if ru|length>1 else '' }}</span>
+          </div>
+          <span class="team-grp-arrow" id="grp-arrow-{{ role_key }}">▾</span>
+        </div>
+        <div class="team-grp-body" id="grp-body-{{ role_key }}">
+          {% for u in ru %}
+          <div class="tm-card">
+            <div class="tm-main">
+              {# Avatar + Name block #}
+              <div style="display:flex;align-items:center;gap:10px;min-width:0;flex:1">
+                <div style="width:34px;height:34px;border-radius:50%;background:var(--blue-d);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--blue);font-family:var(--mono);flex-shrink:0">{{ u['full_name'][:2].upper() }}</div>
+                <div style="min-width:0">
+                  <div style="font-size:13px;font-weight:600;color:var(--t0);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ u['full_name'] }}</div>
+                  <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:2px">
+                    {% if u['employee_id'] %}<span style="font-size:10px;font-family:var(--mono);color:var(--blue)">{{ u['employee_id'] }}</span>{% endif %}
+                    {% if u['mobile'] %}<span style="font-size:10px;font-family:var(--mono);color:var(--t2)">📱{{ u['mobile'] }}</span>{% endif %}
+                    <span style="font-size:10px;color:var(--t2)">{{ u['area'] or '' }}{% if u['territory'] and u['territory']!=u['area'] %}/{{ u['territory'] }}{% endif %}</span>
+                  </div>
+                </div>
+              </div>
+              {# Reporting manager tag #}
+              <div style="flex-shrink:0;text-align:center;min-width:140px">
+                {% if u.get('parent_name') %}
+                <div style="font-size:9px;color:var(--t2);font-family:var(--mono);text-transform:uppercase;letter-spacing:.05em">Reports To</div>
+                <div style="font-size:11px;font-weight:500;color:var(--t0);margin-top:1px">{{ u['parent_name'] }}</div>
+                {% if u.get('parent_emp_id') %}<div style="font-size:9px;font-family:var(--mono);color:var(--blue)">[{{ u['parent_emp_id'] }}]</div>{% endif %}
+                {% else %}
+                <span style="font-size:10px;color:var(--t2)">— No Manager —</span>
+                {% endif %}
+              </div>
+              {# Stats + Status + Actions #}
+              <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+                <div style="text-align:center">
+                  <div style="font-size:9px;color:var(--t2);font-family:var(--mono)">UPLOADS</div>
+                  <div style="font-size:14px;font-weight:700;font-family:var(--mono);color:var(--t0)">{{ u['upload_count'] or 0 }}</div>
+                </div>
+                <span class="badge b-{{ u['status'] or 'active' }}">{{ u['status'] or 'active' }}</span>
+                <button class="tm-expand" onclick="toggleExtra({{ u['id'] }})">Details ▾</button>
+                <div style="display:flex;gap:4px">
+                  <button class="btn-sm btn-act" onclick="openEditUser({{ u['id'] }},{{ u|tojson|safe }})">Edit</button>
+                  {% if u['id']!=user.id and user.role in ('company_admin','nsm') %}
+                    {% if (u['status'] or 'active') == 'inactive' %}
+                      <form method="POST" action="/team/delete/{{ u['id'] }}" style="display:inline" onsubmit="return confirm('Reactivate {{ u['full_name'] }}? They will be able to log in again.')">
+                        <button type="submit" class="btn-sm btn-act">Activate</button>
+                      </form>
+                    {% else %}
+                      <form method="POST" action="/team/delete/{{ u['id'] }}" style="display:inline" onsubmit="return confirm('Deactivate {{ u['full_name'] }}? They will no longer be able to log in, but all their upload/verification history is kept.')">
+                        <button type="submit" class="btn-sm btn-del">Deactivate</button>
+                      </form>
+                    {% endif %}
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+            {# Collapsible extra details #}
+            <div class="tm-extra" id="extra-{{ u['id'] }}">
+              <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:11px;color:var(--t1)">
+                <div><span style="color:var(--t2);font-family:var(--mono);font-size:10px">DIVISION</span><br>{{ u['div_name'] or '—' }}</div>
+                <div><span style="color:var(--t2);font-family:var(--mono);font-size:10px">EMAIL</span><br>{{ u.get('email') or '—' }}</div>
+                <div><span style="color:var(--t2);font-family:var(--mono);font-size:10px">REGION</span><br>{{ u.get('region') or '—' }}</div>
+                <div><span style="color:var(--t2);font-family:var(--mono);font-size:10px">TERRITORY</span><br>{{ u.get('territory') or '—' }}</div>
+                <div><span style="color:var(--t2);font-family:var(--mono);font-size:10px">JOINED</span><br>{{ u.get('joined_date') or '—' }}</div>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+
+  {% if user.role in ('company_admin','nsm','zsm','rsm','asm') %}
+  <div class="ho-box">
+    {# Mode tabs #}
+    <div style="display:flex;gap:0;margin-bottom:16px;border:1px solid var(--border);border-radius:var(--r8);overflow:hidden;width:fit-content">
+      <button id="tab-full" onclick="setHandoverMode('full')"
+        style="padding:7px 18px;font-size:11px;font-family:var(--mono);border:none;cursor:pointer;background:var(--blue);color:#fff;font-weight:600">
+        ↩ Full Exit Handover
+      </button>
+      <button id="tab-remap" onclick="setHandoverMode('remap')"
+        style="padding:7px 18px;font-size:11px;font-family:var(--mono);border:none;cursor:pointer;background:var(--bg2);color:var(--t2)">
+        🔀 Change Reporting Manager
+      </button>
+    </div>
+
+    {# Full Exit Handover #}
+    <div id="panel-full">
+      <h3>↩ Full Exit Handover — Employee Leaving Organisation</h3>
+      <p style="font-size:11px;color:var(--t1);margin:6px 0 14px">Transfers <strong>all uploaded documents</strong> and <strong>all direct reports</strong> from the leaving employee to the replacement. Leaving employee is automatically marked as <em>Left</em>.</p>
+      <form method="POST" action="/team/handover">
+        <input type="hidden" name="mode" value="full">
+        <div class="r3">
+          <div class="form-g"><label>Leaving Employee *</label>
+            <select name="from_user_id" required><option value="">— Select —</option>
+              {% for u in all_active %}<option value="{{ u['id'] }}">{{ u['full_name'] }} [{{ u['role'].upper() }}{% if u['employee_id'] %} · {{ u['employee_id'] }}{% endif %}]</option>{% endfor %}
+            </select></div>
+          <div class="form-g"><label>Replacement Employee *</label>
+            <select name="to_user_id" required><option value="">— Select —</option>
+              {% for u in all_active %}<option value="{{ u['id'] }}">{{ u['full_name'] }} [{{ u['role'].upper() }}{% if u['employee_id'] %} · {{ u['employee_id'] }}{% endif %}]</option>{% endfor %}
+            </select></div>
+          <div class="form-g"><label>Notes</label><input type="text" name="notes" placeholder="e.g. Resignation effective 01/05/2026"></div>
+        </div>
+        <div style="background:var(--amber-d);border:0.5px solid var(--amber);border-radius:var(--r4);padding:8px 12px;margin-bottom:12px;font-size:11px;color:var(--amber)">
+          ⚠ This action: (1) transfers all uploads, (2) reassigns all subordinates, (3) marks employee as Left. <strong>Cannot be undone.</strong>
+        </div>
+        <button type="submit" class="btn-sm btn-blue" style="padding:8px 20px;font-size:12px;background:var(--red);border-color:var(--red)"
+          onclick="return confirm('FULL EXIT HANDOVER\n\nThis will:\n• Transfer ALL uploaded documents\n• Reassign ALL direct reports\n• Mark employee as Left\n\nThis cannot be undone. Proceed?')">
+          ✓ Execute Full Handover
+        </button>
+      </form>
+    </div>
+
+    {# Change Reporting Manager only #}
+    <div id="panel-remap" style="display:none">
+      <h3>🔀 Change Reporting Manager — No Exit</h3>
+      <p style="font-size:11px;color:var(--t1);margin:6px 0 14px">Reassigns all <strong>direct reports</strong> of one manager to another. Employee stays active — use this when restructuring teams or transferring territory, not when someone leaves.</p>
+      <form method="POST" action="/team/handover">
+        <input type="hidden" name="mode" value="remap">
+        <div class="r3">
+          <div class="form-g"><label>Current Manager (reports move away from) *</label>
+            <select name="from_user_id" required><option value="">— Select —</option>
+              {% for u in all_active %}<option value="{{ u['id'] }}">{{ u['full_name'] }} [{{ u['role'].upper() }}{% if u['employee_id'] %} · {{ u['employee_id'] }}{% endif %}]</option>{% endfor %}
+            </select></div>
+          <div class="form-g"><label>New Manager (reports move to) *</label>
+            <select name="to_user_id" required><option value="">— Select —</option>
+              {% for u in all_active %}<option value="{{ u['id'] }}">{{ u['full_name'] }} [{{ u['role'].upper() }}{% if u['employee_id'] %} · {{ u['employee_id'] }}{% endif %}]</option>{% endfor %}
+            </select></div>
+          <div class="form-g"><label>Reason / Notes</label><input type="text" name="notes" placeholder="e.g. Territory restructure, maternity cover"></div>
+        </div>
+        <button type="submit" class="btn-sm btn-blue" style="padding:8px 20px;font-size:12px"
+          onclick="return confirm('Reassign all direct reports?\n\nEmployees will now report to the new manager. No uploads are moved. Both employees remain active.')">
+          🔀 Reassign Team
+        </button>
+      </form>
+    </div>
+  </div>
+
+  {% if handovers %}
+  <div class="card mt16"><div class="ch"><h3>Handover &amp; Remap Log</h3></div>
+    <div class="tw"><table>
+      <thead><tr><th>From</th><th>To</th><th>Type</th><th class="r">Count</th><th>Notes</th><th>Date</th></tr></thead>
+      <tbody>{% for h in handovers %}<tr>
+        <td class="b" style="font-size:12px">{{ h['from_name'] }}</td>
+        <td class="b" style="font-size:12px">{{ h['to_name'] }}</td>
+        <td><span class="badge {% if '[REMAP]' in (h['notes'] or '') %}b-pending{% else %}b-error{% endif %}" style="font-size:9px">
+          {{ 'REMAP' if '[REMAP]' in (h['notes'] or '') else 'EXIT' }}
+        </span></td>
+        <td class="r mono">{{ h['transfers'] }}</td>
+        <td class="muted" style="font-size:11px">{{ (h['notes'] or '—')|replace('[REMAP] ','') }}</td>
+        <td class="mono muted" style="font-size:10px">{{ h['done_at'][:10] }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+  </div>{% endif %}
+  {% endif %}
+</div></div>
+
+<div id="add-user-modal" class="modal">
+  <div class="modal-box"><div class="mh"><h2>Add New User</h2><button class="mc" onclick="this.closest('.modal').style.display='none'">&times;</button></div>
+    <form method="POST" action="/team/add">
+      <div class="r2"><div class="form-g"><label>Full Name *</label><input type="text" name="full_name" required></div><div class="form-g"><label>Username *</label><input type="text" name="username" required></div></div>
+      <div class="r2"><div class="form-g"><label>Mobile (10-digit)</label><input type="tel" name="mobile" placeholder="10-digit mobile"></div><div class="form-g"><label>Employee ID</label><input type="text" name="employee_id"></div></div>
+      <div class="r2"><div class="form-g"><label>Password *</label><input type="password" name="password" required placeholder="Min 6 chars"></div><div class="form-g"><label>Email</label><input type="email" name="email"></div></div>
+      <div class="r2">
+        <div class="form-g"><label>Role *</label>
+          <select name="role" id="ar-role" onchange="toggleParent('ar-role','ar-pr')">
+            {% for r in ROLES %}<option value="{{ r }}">{{ ROLE_LABELS.get(r,r) }}</option>{% endfor %}
+          </select></div>
+        <div class="form-g" id="ar-pr"><label>Reports To</label>
+          <select name="parent_id"><option value="">— None —</option>
+            {% for m in managers %}<option value="{{ m['id'] }}">[{{ m['role'].upper() }}] {{ m['full_name'] }}{% if m['employee_id'] %} ({{ m['employee_id'] }}){% endif %}</option>{% endfor %}
+          </select></div>
+      </div>
+      <div class="r3">
+        <div class="form-g"><label>Division</label><select name="division_id"><option value="">— None —</option>{% for d in divisions %}<option value="{{ d['id'] }}">{{ d['name'] }}</option>{% endfor %}</select></div>
+        <div class="form-g"><label>Region</label><input type="text" name="region" placeholder="North/South"></div>
+        <div class="form-g"><label>Area</label><input type="text" name="area" placeholder="Delhi"></div>
+      </div>
+      <div class="form-g"><label>Territory</label><input type="text" name="territory" placeholder="Delhi-East, Delhi-West"></div>
+      <div style="display:flex;gap:8px"><button type="submit" class="btn-p" style="flex:1">Create User</button><button type="button" onclick="this.closest('.modal').style.display='none'" style="flex:1;padding:10px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r8);color:var(--t1);cursor:pointer;font-family:inherit">Cancel</button></div>
+    </form>
+  </div>
+</div>
+<div id="edit-user-modal" class="modal">
+  <div class="modal-box"><div class="mh"><h2>Edit User</h2><button class="mc" onclick="this.closest('.modal').style.display='none'">&times;</button></div>
+    <form id="edit-user-form" method="POST" action="">
+      <div class="r2"><div class="form-g"><label>Full Name *</label><input type="text" name="full_name" id="eu-name" required></div><div class="form-g"><label>Mobile</label><input type="tel" name="mobile" id="eu-mobile"></div></div>
+      <div class="r2"><div class="form-g"><label>Employee ID</label><input type="text" name="employee_id" id="eu-empid"></div><div class="form-g"><label>Email</label><input type="email" name="email" id="eu-email"></div></div>
+      <div class="r2">
+        <div class="form-g"><label>Role *</label><select name="role" id="eu-role" onchange="toggleParent('eu-role','eu-pr')">{% for r in ROLES %}<option value="{{ r }}">{{ ROLE_LABELS.get(r,r) }}</option>{% endfor %}</select></div>
+        <div class="form-g" id="eu-pr"><label>Reports To</label><select name="parent_id" id="eu-parent"><option value="">— None —</option>{% for m in managers %}<option value="{{ m['id'] }}">[{{ m['role'].upper() }}] {{ m['full_name'] }}</option>{% endfor %}</select></div>
+      </div>
+      <div class="r3">
+        <div class="form-g"><label>Division</label><select name="division_id" id="eu-div"><option value="">— None —</option>{% for d in divisions %}<option value="{{ d['id'] }}">{{ d['name'] }}</option>{% endfor %}</select></div>
+        <div class="form-g"><label>Region</label><input type="text" name="region" id="eu-region"></div>
+        <div class="form-g"><label>Area</label><input type="text" name="area" id="eu-area"></div>
+      </div>
+      <div class="r2">
+        <div class="form-g"><label>Territory</label><input type="text" name="territory" id="eu-territory"></div>
+        <div class="form-g"><label>Status</label><select name="status" id="eu-status"><option value="active">Active</option><option value="inactive">Inactive</option><option value="suspended">Suspended</option><option value="left">Left Organisation</option></select></div>
+      </div>
+      <div class="form-g"><label>New Password (blank = keep current)</label><input type="password" name="new_password"></div>
+      <div style="display:flex;gap:8px"><button type="submit" class="btn-p" style="flex:1">Save Changes</button><button type="button" onclick="this.closest('.modal').style.display='none'" style="flex:1;padding:10px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r8);color:var(--t1);cursor:pointer;font-family:inherit">Cancel</button></div>
+    </form>
+  </div>
+</div>
+
+{# ═══ REGISTRATIONS ═══ #}
+{% elif page == "registrations" %}
+{% set active_page = "regs" %}
+<div class="shell">{{ sidebar(user) }}
+<div class="main">
+  <div class="ph"><div><h1>Registrations</h1><p>Pending access requests</p></div></div>
+  {{ flashes() }}
+  {% if pending %}
+  <div class="stl" style="color:var(--amber)">● Pending Approval ({{ pending|length }})</div>
+  {% for reg in pending %}
+  <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r12);padding:14px 16px;margin-bottom:8px" class="fu">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div>
+        <div style="font-size:14px;font-weight:600;color:var(--t0);margin-bottom:4px">{{ reg['full_name'] }}</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--t2);font-family:var(--mono)">
+          <span>📱 {{ reg['mobile'] }}</span>
+          {% if reg['employee_id'] %}<span>ID: {{ reg['employee_id'] }}</span>{% endif %}
+          <span class="badge b-{{ reg['role'] }}">{{ ROLE_LABELS.get(reg['role'],reg['role']).split(' —')[0] }}</span>
+          {% if reg['region'] %}<span>{{ reg['region'] }}</span>{% endif %}
+          {% if reg['area'] %}<span>{{ reg['area'] }}</span>{% endif %}
+          {% if reg['manager_name'] %}<span style="color:var(--blue)">Mgr EmpID: <strong>{{ reg['manager_name'] }}</strong></span>{% endif %}
+          {% if reg.get('email') %}<span>✉ {{ reg['email'] }}</span>{% endif %}
+          <span>Applied: {{ reg['applied_at'][:10] }}</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+        <form method="POST" action="/registrations/approve/{{ reg['id'] }}" style="display:flex;gap:5px;align-items:center">
+          <select name="parent_id" style="padding:5px 7px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r4);color:var(--t0);font-size:10px;font-family:var(--mono);outline:none">
+            <option value="">— Assign Manager —</option>
+            {% for m in all_users %}<option value="{{ m['id'] }}">[{{ m['role'].upper() }}] {{ m['full_name'] }}{% if m.get('employee_id') %} ({{ m['employee_id'] }}){% endif %}</option>{% endfor %}
+          </select>
+          <button type="submit" class="btn-sm btn-grn">✓ Approve</button>
+        </form>
+        <form method="POST" action="/registrations/reject/{{ reg['id'] }}" onsubmit="return confirm('Reject this request?')"><button type="submit" class="btn-sm btn-del">✗ Reject</button></form>
+      </div>
+    </div>
+  </div>{% endfor %}
+  {% else %}<div class="card"><div style="text-align:center;padding:32px;color:var(--t2);font-size:12px">No pending registrations</div></div>{% endif %}
+  {% if reviewed %}
+  <div class="stl mt24">Recent Decisions</div>
+  <div class="card"><div class="tw"><table>
+    <thead><tr><th>Name</th><th>Mobile</th><th>Role</th><th>Applied</th><th>Status</th></tr></thead>
+    <tbody>{% for r in reviewed %}<tr>
+      <td class="b" style="font-size:12px">{{ r['full_name'] }}</td><td class="mono muted" style="font-size:11px">{{ r['mobile'] }}</td>
+      <td><span class="badge b-{{ r['role'] }}">{{ r['role'].upper() }}</span></td>
+      <td class="muted mono" style="font-size:10px">{{ r['applied_at'][:10] }}</td>
+      <td><span class="badge {{ 'b-done' if r['status']=='approved' else 'b-error' }}">{{ r['status'] }}</span></td>
+    </tr>{% endfor %}</tbody>
+  </table></div></div>{% endif %}
+</div></div>
+
+{# ═══ PASSWORD RESETS (admin approval) ═══ #}
+{% elif page == "password_resets" %}
+{% set active_page = "pwreset" %}
+<div class="shell">{{ sidebar(user) }}
+<div class="main">
+  <div class="ph"><div><h1>Password Resets</h1><p>Approve or reject self-service reset requests before they take effect</p></div></div>
+  {{ flashes() }}
+  {% if pending %}
+  <div class="stl" style="color:var(--amber)">● Pending Approval ({{ pending|length }})</div>
+  {% for r in pending %}
+  <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r12);padding:14px 16px;margin-bottom:8px" class="fu">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div>
+        <div style="font-size:14px;font-weight:600;color:var(--t0);margin-bottom:4px">{{ r['full_name'] }}</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--t2);font-family:var(--mono)">
+          <span>📱 {{ r['mobile'] }}</span>
+          <span class="badge b-{{ r['role'] }}">{{ ROLE_LABELS.get(r['role'],r['role']).split(' —')[0] }}</span>
+          <span>Username: {{ r['username'] }}</span>
+          <span>Requested: {{ r['created_at']|string|truncate(19,true,'') }}</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+        <form method="POST" action="/team/password-resets/{{ r['id'] }}/approve" onsubmit="return confirm('Approve this password reset for '+{{ r['full_name']|tojson }}+'? Their password will change immediately.')">
+          <button type="submit" class="btn-sm btn-grn">✓ Approve</button>
+        </form>
+        <form method="POST" action="/team/password-resets/{{ r['id'] }}/reject" onsubmit="return confirm('Reject this reset request?')">
+          <button type="submit" class="btn-sm btn-del">✗ Reject</button>
+        </form>
+      </div>
+    </div>
+  </div>{% endfor %}
+  {% else %}<div class="card"><div style="text-align:center;padding:32px;color:var(--t2);font-size:12px">No pending password reset requests</div></div>{% endif %}
+  <div style="margin-top:16px;font-size:11px;color:var(--t2);background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r8);padding:10px 14px">
+    ℹ️ When someone uses "Forgot password" on the login page, nothing changes until you approve it here -- this prevents anyone who merely knows a company code and a mobile number from taking over an account.
+  </div>
+</div></div>
+
+{# ═══ ANALYTICS ═══ #}
+{% elif page == "analytics" %}
+{% set active_page = "analytics" %}
+<div class="shell">{{ sidebar(user) }}
+<div class="main">
+
+  {# ── Page Header ── #}
+  <div class="ph" style="margin-bottom:10px">
+    <div>
+      <h1 style="font-size:20px;letter-spacing:-.3px">Analytics</h1>
+      <p style="color:var(--t2);font-size:11px;font-family:var(--mono)">{{ user.company_name }} · {{ user.division_name or 'All Divisions' }}</p>
+    </div>
+    <div class="ph-r" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button onclick="toggleDownloadPanel()" style="padding:6px 14px;background:var(--teal-d);border:0.5px solid var(--teal);border-radius:var(--r4);font-size:11px;color:var(--teal);cursor:pointer;font-family:var(--mono)">⬇ Export</button>
+      <button onclick="shareWA('','')" style="padding:6px 14px;background:var(--green-d);border:0.5px solid var(--green);border-radius:var(--r4);font-size:11px;color:var(--green);cursor:pointer;font-family:var(--mono)">📲 Share</button>
+    </div>
+  </div>
+
+  {# ── Export Panel ── #}
+  <div id="download-panel" style="display:none;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r8);padding:14px 18px;margin-bottom:14px">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end">
+      <div><label style="font-size:10px;color:var(--t2);font-family:var(--mono);display:block;margin-bottom:4px">FROM</label><input type="date" id="dl-from" style="width:100%;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r4);padding:5px 8px;color:var(--t0);font-size:11px;outline:none"></div>
+      <div><label style="font-size:10px;color:var(--t2);font-family:var(--mono);display:block;margin-bottom:4px">TO</label><input type="date" id="dl-to" style="width:100%;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r4);padding:5px 8px;color:var(--t0);font-size:11px;outline:none"></div>
+      <div><label style="font-size:10px;color:var(--t2);font-family:var(--mono);display:block;margin-bottom:4px">SCOPE</label>
+        <select id="dl-scope" style="width:100%;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r4);padding:5px 8px;color:var(--t0);font-size:11px;outline:none">
+          <option value="mine">My uploads</option><option value="team" selected>My team</option>
+          <option value="verified">Verified only</option><option value="all">All accessible</option>
+        </select></div>
+      <a id="dl-link" href="#" onclick="buildDownloadLink(event)" style="padding:7px 16px;background:var(--teal);border:none;border-radius:var(--r4);color:#fff;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap">⬇ Excel</a>
+    </div>
+  </div>
+
+  {# ══════════════════════════════════════════════════════
+     ROW 1 — KPI Scorecards
+  ══════════════════════════════════════════════════════ #}
+  {% set kpi = kpi or {} %}
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+    {# Total Revenue #}
+    <div style="background:var(--bg1);border:0.5px solid var(--border);border-radius:var(--r12);padding:16px 18px;border-top:3px solid var(--blue);position:relative;overflow:hidden">
+      <div style="font-size:9px;font-family:var(--mono);color:var(--t2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Total Revenue</div>
+      <div style="font-size:22px;font-weight:700;color:var(--blue);font-family:var(--mono);line-height:1">₹{{ "{:,.0f}".format(kpi.get('total_revenue',0) or 0) }}</div>
+      <div style="font-size:10px;color:var(--t2);margin-top:5px">{{ kpi.get('done_bills',0) or 0 }} extraction done bills</div>
+      <div style="position:absolute;right:14px;top:14px;font-size:22px;opacity:.08">💰</div>
+    </div>
+    {# Total Bills #}
+    <div style="background:var(--bg1);border:0.5px solid var(--border);border-radius:var(--r12);padding:16px 18px;border-top:3px solid var(--amber);position:relative;overflow:hidden">
+      <div style="font-size:9px;font-family:var(--mono);color:var(--t2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Total Bills</div>
+      <div style="font-size:22px;font-weight:700;color:var(--amber);font-family:var(--mono);line-height:1">{{ kpi.get('total_bills',0) or 0 }}</div>
+      <div style="font-size:10px;color:var(--t2);margin-top:5px"><span style="color:var(--red)">{{ kpi.get('rejected_bills',0) or 0 }} rejected</span></div>
+      <div style="position:absolute;right:14px;top:14px;font-size:22px;opacity:.08">📄</div>
+    </div>
+    {# Unique Parties #}
+    <div style="background:var(--bg1);border:0.5px solid var(--border);border-radius:var(--r12);padding:16px 18px;border-top:3px solid var(--teal);position:relative;overflow:hidden">
+      <div style="font-size:9px;font-family:var(--mono);color:var(--t2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Unique Parties</div>
+      <div style="font-size:22px;font-weight:700;color:var(--teal);font-family:var(--mono);line-height:1">{{ kpi.get('total_parties',0) or 0 }}</div>
+      <div style="font-size:10px;color:var(--t2);margin-top:5px">chemists &amp; stockists</div>
+      <div style="position:absolute;right:14px;top:14px;font-size:22px;opacity:.08">🏪</div>
+    </div>
+    {# Avg Per Bill #}
+    {% set avg = ((kpi.get('total_revenue',0) or 0) / (kpi.get('done_bills',1) or 1))|int %}
+    <div style="background:var(--bg1);border:0.5px solid var(--border);border-radius:var(--r12);padding:16px 18px;border-top:3px solid var(--green);position:relative;overflow:hidden">
+      <div style="font-size:9px;font-family:var(--mono);color:var(--t2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Avg / Bill</div>
+      <div style="font-size:22px;font-weight:700;color:var(--green);font-family:var(--mono);line-height:1">₹{{ "{:,.0f}".format(avg) }}</div>
+      <div style="font-size:10px;color:var(--t2);margin-top:5px">revenue per document</div>
+      <div style="position:absolute;right:14px;top:14px;font-size:22px;opacity:.08">📊</div>
+    </div>
+  </div>
+
+  {# ══════════════════════════════════════════════════════
+     ROW 2 — Top 10 Brands | Top 10 Agencies
+  ══════════════════════════════════════════════════════ #}
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+    <div class="chart-card">
+      <div style="font-size:13px;font-weight:600;color:var(--t0);margin-bottom:4px">Top 10 Brands</div>
+      <div style="font-size:10px;color:var(--t2);font-family:var(--mono);margin-bottom:12px">By net sales value</div>
+      <canvas id="brandChart" height="220"></canvas>
+    </div>
+    <div class="chart-card">
+      <div style="font-size:13px;font-weight:600;color:var(--t0);margin-bottom:4px">Top 10 Agencies</div>
+      <div style="font-size:10px;color:var(--t2);font-family:var(--mono);margin-bottom:12px">By invoice net value</div>
+      <canvas id="agencyChart" height="220"></canvas>
+    </div>
+  </div>
+
+  {# ══════════════════════════════════════════════════════
+     ROW 3 — Top 10 Party Names (wide) + Party Type Mix
+  ══════════════════════════════════════════════════════ #}
+  <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:12px">
+    <div class="chart-card">
+      <div style="font-size:13px;font-weight:600;color:var(--t0);margin-bottom:4px">Top 10 Party Names</div>
+      <div style="font-size:10px;color:var(--t2);font-family:var(--mono);margin-bottom:12px">Highest revenue store-level parties</div>
+      <canvas id="partyNamesChart" height="200"></canvas>
+    </div>
+    <div class="chart-card">
+      <div style="font-size:13px;font-weight:600;color:var(--t0);margin-bottom:4px">Party Type Mix</div>
+      <div style="font-size:10px;color:var(--t2);font-family:var(--mono);margin-bottom:14px">Chemist vs Stockist distribution</div>
+      <canvas id="partyDonut" height="160"></canvas>
+      <div id="donut-legend" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;justify-content:center"></div>
+    </div>
+  </div>
+
+  {# ══════════════════════════════════════════════════════
+     ROW 4 — Weekly Trend + Monthly Summary Table
+  ══════════════════════════════════════════════════════ #}
+  <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:12px;margin-bottom:12px">
+    <div class="chart-card">
+      <div style="font-size:13px;font-weight:600;color:var(--t0);margin-bottom:4px">Weekly Upload Trend</div>
+      <div style="font-size:10px;color:var(--t2);font-family:var(--mono);margin-bottom:12px">Last 12 weeks</div>
+      <canvas id="weeklyChart" height="160"></canvas>
+    </div>
+    <div class="chart-card">
+      <div style="font-size:13px;font-weight:600;color:var(--t0);margin-bottom:12px">Monthly Summary</div>
+      <div style="overflow-y:auto;max-height:220px">
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead>
+            <tr class="sticky-glass-head" style="position:sticky;top:0">
+              <th style="padding:6px 10px;text-align:left;font-size:10px;font-family:var(--mono);color:var(--t2);font-weight:600;border-bottom:0.5px solid var(--border)">MONTH</th>
+              <th style="padding:6px 10px;text-align:right;font-size:10px;font-family:var(--mono);color:var(--t2);font-weight:600;border-bottom:0.5px solid var(--border)">BILLS</th>
+              <th style="padding:6px 10px;text-align:right;font-size:10px;font-family:var(--mono);color:var(--green);font-weight:600;border-bottom:0.5px solid var(--border)">DONE</th>
+              <th style="padding:6px 10px;text-align:right;font-size:10px;font-family:var(--mono);color:var(--red);font-weight:600;border-bottom:0.5px solid var(--border)">REJ</th>
+              <th style="padding:6px 10px;text-align:right;font-size:10px;font-family:var(--mono);color:var(--blue);font-weight:600;border-bottom:0.5px solid var(--border)">REVENUE</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in monthly|reverse %}
+            <tr style="border-bottom:0.5px solid var(--border)">
+              <td style="padding:6px 10px;font-family:var(--mono);font-weight:600;color:var(--t0)">{{ m['month'] }}</td>
+              <td style="padding:6px 10px;text-align:right;font-family:var(--mono);color:var(--t1)">{{ m['uploads'] }}</td>
+              <td style="padding:6px 10px;text-align:right;font-family:var(--mono);color:var(--green)">{{ m['done_count'] or 0 }}</td>
+              <td style="padding:6px 10px;text-align:right;font-family:var(--mono);color:{% if (m['rejected_count'] or 0)>0 %}var(--red){% else %}var(--t2){% endif %}">{{ m['rejected_count'] or 0 }}</td>
+              <td style="padding:6px 10px;text-align:right;font-family:var(--mono);font-weight:600;color:var(--blue)">₹{{ "{:,.0f}".format(m['revenue'] or 0) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" style="text-align:center;padding:28px;color:var(--t2)">No data yet</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {# ══════════════════════════════════════════════════════
+     ROW 6 — MR Performance Leaderboard
+  ══════════════════════════════════════════════════════ #}
+  {% if mr_perf %}
+  <div style="background:var(--bg1);border:0.5px solid var(--border);border-radius:var(--r12);padding:16px 20px;margin-bottom:12px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+      <div>
+        <div style="font-size:13px;font-weight:600;color:var(--navy)">
+          {% if user.role in ('company_admin') %}NSM
+          {% elif user.role == 'nsm' %}ZSM
+          {% elif user.role == 'zsm' %}RSM
+          {% elif user.role == 'rsm' %}ASM
+          {% else %}MR
+          {% endif %} Performance Leaderboard
+        </div>
+        <div style="font-size:10px;color:var(--t2);font-family:var(--mono)">{{ mr_perf|length }} reps · ranked by verified revenue</div>
+      </div>
+      {% if perf_members %}
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:11px;color:var(--t2)">Drill down:</span>
+        <select onchange="location='/analytics?perf_uid='+this.value" style="padding:5px 10px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r4);color:var(--t0);font-size:11px;outline:none;cursor:pointer">
+          <option value="">— Select team member —</option>
+          {% for m in perf_members %}
+          <option value="{{ m.id }}" {% if request.args.get('perf_uid')==m.id|string %}selected{% endif %}>{{ m.full_name }} ({{ m.role.upper() }})</option>
+          {% endfor %}
+        </select>
+        {% if request.args.get('perf_uid') %}<a href="/analytics" style="font-size:10px;color:var(--t2)">✕ Clear</a>{% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% set mx = mr_perf[0].get('verified_revenue') or mr_perf[0].get('revenue') or 1 %}
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead>
+          <tr>
+            <th style="padding:8px 12px;text-align:left;background:var(--bg2);color:var(--t2);font-size:10px;font-family:var(--mono)">#</th>
+            <th style="padding:8px 12px;text-align:left;background:var(--bg2);color:var(--t2);font-size:10px;font-family:var(--mono)">NAME</th>
+            <th style="padding:8px 12px;text-align:left;background:var(--bg2);color:var(--t2);font-size:10px;font-family:var(--mono)">AREA</th>
+            <th style="padding:8px 12px;text-align:right;background:var(--bg2);color:var(--t2);font-size:10px;font-family:var(--mono)">BILLS</th>
+            <th style="padding:8px 12px;text-align:right;background:var(--bg2);color:var(--red);font-size:10px;font-family:var(--mono)">REJ</th>
+            <th style="padding:8px 12px;text-align:right;background:var(--bg2);color:var(--green);font-size:10px;font-family:var(--mono)">VERIFIED ₹</th>
+            <th style="padding:8px 12px;background:var(--bg2);color:var(--t2);font-size:10px;font-family:var(--mono)">SHARE</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in mr_perf %}
+          {% set rev = m.get('verified_revenue') or m.get('revenue') or 0 %}
+          {% set pct = [rev/mx*100, 100]|min|int %}
+          <tr style="border-bottom:0.5px solid var(--border);transition:background .12s" onmouseover="this.style.background='var(--bg2)'" onmouseout="this.style.background=''">
+            <td style="padding:8px 12px;font-family:var(--mono);color:var(--t2);font-size:11px">
+              {% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}{{ loop.index }}{% endif %}
+            </td>
+            <td style="padding:8px 12px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="width:28px;height:28px;border-radius:50%;background:var(--blue-d);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--blue);font-family:var(--mono);flex-shrink:0">{{ m['full_name'][:2].upper() }}</div>
+                <span style="font-weight:600;color:var(--t0)">{{ m['full_name'] }}</span>
+              </div>
+            </td>
+            <td style="padding:8px 12px;color:var(--t2);font-size:11px">{{ m['area'] or '—' }}</td>
+            <td style="padding:8px 12px;text-align:right;font-family:var(--mono);color:var(--t1)">{{ m['bills'] or 0 }}</td>
+            <td style="padding:8px 12px;text-align:right;font-family:var(--mono);color:{% if (m['rejected_bills'] or 0)>0 %}var(--red){% else %}var(--t2){% endif %}">{{ m['rejected_bills'] or 0 }}</td>
+            <td style="padding:8px 12px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--green)">₹{{ "{:,.0f}".format(rev) }}</td>
+            <td style="padding:8px 12px;min-width:120px">
+              <div style="display:flex;align-items:center;gap:6px">
+                <div style="flex:1;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden">
+                  <div style="width:{{ pct }}%;height:100%;background:{% if loop.index==1 %}var(--green){% elif loop.index==2 %}var(--teal){% else %}var(--blue){% endif %};border-radius:3px"></div>
+                </div>
+                <span style="font-size:10px;color:var(--t2);font-family:var(--mono);width:30px;text-align:right">{{ pct }}%</span>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ══════════════════════════════════════════════════════
+     ROW 7 — Rejection Log
+  ══════════════════════════════════════════════════════ #}
+  {% if rejection_summary %}
+  <div style="background:var(--bg1);border:0.5px solid var(--border);border-radius:var(--r12);padding:16px 20px;margin-bottom:12px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div>
+        <div style="font-size:13px;font-weight:600;color:var(--t0)">Rejection Analysis</div>
+        <div style="font-size:10px;color:var(--t2);font-family:var(--mono)">{{ rejection_summary|length }} rejection reason(s)</div>
+      </div>
+      <span style="font-size:11px;padding:3px 10px;background:var(--red-d);border:0.5px solid var(--red);border-radius:10px;color:var(--red);font-family:var(--mono)">
+        ✗ {{ rejection_summary|sum(attribute='cnt') }} total rejections
+      </span>
+    </div>
+    <div class="tw">
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="background:var(--bg2)">
+          <th style="padding:7px 12px;text-align:left;font-size:10px;font-family:var(--mono);color:var(--t2);border-bottom:0.5px solid var(--border)">REASON</th>
+          <th style="padding:7px 12px;text-align:left;font-size:10px;font-family:var(--mono);color:var(--t2);border-bottom:0.5px solid var(--border)">TYPE</th>
+          <th style="padding:7px 12px;text-align:left;font-size:10px;font-family:var(--mono);color:var(--t2);border-bottom:0.5px solid var(--border)">REJECTED BY</th>
+          <th style="padding:7px 12px;text-align:right;font-size:10px;font-family:var(--mono);color:var(--red);border-bottom:0.5px solid var(--border)">COUNT</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rejection_summary %}
+        <tr style="border-bottom:0.5px solid var(--border)">
+          <td style="padding:7px 12px;color:var(--t0);max-width:320px">{{ r['rejection_reason'] or '—' }}</td>
+          <td style="padding:7px 12px"><span style="font-size:10px;padding:2px 7px;background:var(--red-d);color:var(--red);border-radius:4px;font-family:var(--mono)">{{ (r['rejection_type'] or 'manual').replace('_',' ') }}</span></td>
+          <td style="padding:7px 12px;color:var(--t2);font-size:11px">{{ r['rejected_by_name'] or 'System' }}</td>
+          <td style="padding:7px 12px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--red)">{{ r['cnt'] }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+  {% endif %}
+
+</div></div>
+
+<script>
+const monthlyData={{ monthly|tojson|safe }};
+const weeklyData={{ weekly|tojson|safe }};
+const partyData={{ party_dist|tojson|safe }};
+const brandData={{ brands|tojson|safe }};
+const top_parties_data={{ (top_parties or [])|tojson|safe }};
+const top_agencies_data={{ (top_agencies or [])|tojson|safe }};
+</script>
+
+{# ═══ PROFILE ═══ #}
+{% elif page == "profile" %}
+{% set active_page = "profile" %}
+<div class="shell">{{ sidebar(user) }}
+<div class="main">
+  <div class="ph"><div><h1>My Profile</h1></div></div>
+  {{ flashes() }}
+  <div class="g2">
+    <div class="card"><div class="ch"><h3>Account Details</h3></div>
+      <div style="padding:18px 20px">
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;padding-bottom:14px;border-bottom:0.5px solid var(--border)">
+          <div style="width:48px;height:48px;border-radius:50%;background:var(--blue-d);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:600;color:var(--blue);font-family:var(--mono)">{{ user.full_name[:2].upper() }}</div>
+          <div>
+            <div style="font-size:15px;font-weight:600;color:var(--t0)">{{ user.full_name }}</div>
+            <div style="font-size:11px;color:var(--t2);font-family:var(--mono);margin-top:2px">@{{ user.username }}</div>
+            <div style="margin-top:5px"><span class="badge b-{{ user.role }}">{{ user.role.replace('_',' ').upper() }}</span></div>
+          </div>
+        </div>
+        {% if user.company_name %}<div class="p-row"><span style="color:var(--t2);font-size:12px">Company</span><span style="color:var(--t0);font-size:12px;font-weight:500">{{ user.company_name }} <span style="font-family:var(--mono);font-size:10px;color:var(--blue)">[{{ user.company_code }}]</span></span></div>{% endif %}
+        {% for lbl,val in [('Mobile',user.mobile or '—'),('Employee ID',user.employee_id or '—'),('Email',user.email or '—'),('Division',user.division_name or '—'),('Region',user.region or '—'),('Area',user.area or '—'),('Territory',user.territory or '—'),('Joined',user.joined_date or '—')] %}
+        <div class="p-row"><span style="color:var(--t2);font-size:12px">{{ lbl }}</span><span style="color:var(--t0);font-size:12px;font-weight:500">{{ val }}</span></div>{% endfor %}
+        {# Reporting Manager — shown for MR and all hierarchy roles #}
+        {% if user.parent_name %}
+        <div class="p-row" style="border-top:0.5px solid var(--border);margin-top:8px;padding-top:8px">
+          <span style="color:var(--t2);font-size:12px">Reporting Manager</span>
+          <span style="color:var(--t0);font-size:12px;font-weight:500">
+            {{ user.parent_name }}
+            {% if user.parent_emp_id %}
+              <span style="font-family:var(--mono);font-size:10px;color:var(--blue);margin-left:5px">[{{ user.parent_emp_id }}]</span>
+            {% endif %}
+            {% if user.parent_mobile %}
+              <span style="font-family:var(--mono);font-size:10px;color:var(--t2);margin-left:5px">📱{{ user.parent_mobile }}</span>
+            {% endif %}
+          </span>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="card"><div class="ch"><h3>Change Password</h3></div>
+      <div style="padding:18px 20px">
+        <form method="POST" action="/profile">
+          <div class="form-g"><label>Current Password</label><input type="password" name="old_password" required></div>
+          <div class="form-g"><label>New Password</label><input type="password" name="new_password" required placeholder="Min 6 characters"></div>
+          <div class="form-g"><label>Confirm New Password</label><input type="password" name="confirm_password" required></div>
+          <button type="submit" class="btn-p">Update Password</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+{# ═══ DIVISIONS ═══ #}
+{% elif page == "divisions" %}
+{% set active_page = "divisions" %}
+<div class="shell">{{ sidebar(user) }}
+<div class="main">
+  <div class="ph">
+    <div><h1>Divisions</h1><p>{{ user.company_name }} · Manage product/sales divisions</p></div>
+    <button class="btn-sm btn-blue" onclick="document.getElementById('add-div-modal').style.display='flex'">+ Add Division</button>
+  </div>
+  {{ flashes() }}
+  <div class="card">
+    <div class="ch"><h3>All Divisions ({{ divisions|length }})</h3><span class="ch-r">Company → Division → Employees</span></div>
+    <div class="tw"><table>
+      <thead><tr><th>Division Name</th><th>Code</th><th>Description</th><th class="r">Active Members</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody>{% for d in divisions %}<tr>
+        <td class="b">{{ d['name'] }}</td>
+        <td class="mono muted" style="font-size:11px">{{ d['code'] or '—' }}</td>
+        <td class="muted" style="font-size:11px">{{ d['description'] or '—' }}</td>
+        <td class="r mono">{{ d['member_count'] }}</td>
+        <td><span class="badge b-{{ d['status'] or 'active' }}">{{ d['status'] or 'active' }}</span></td>
+        <td>
+          <div style="display:flex;gap:4px">
+            <button class="btn-sm btn-act" onclick="openEditDiv({{ d['id'] }},'{{ d['name']|replace("'","\\'") }}','{{ d['code'] or '' }}','{{ d['description'] or '' }}','{{ d['status'] or 'active' }}')">Edit</button>
+            {% if d['member_count'] == 0 %}
+            <form method="POST" action="/divisions/delete/{{ d['id'] }}" style="display:inline"
+              onsubmit="return confirm('Delete division {{ d['name'] }}?')">
+              <button type="submit" class="btn-sm btn-del">Delete</button>
+            </form>{% endif %}
+          </div>
+        </td>
+      </tr>{% else %}
+      <tr><td colspan="6" style="text-align:center;padding:28px;color:var(--t2);font-size:12px">No divisions yet. Add the first one.</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+  </div>
+</div></div>
+
+<div id="add-div-modal" class="modal">
+  <div class="modal-box"><div class="mh"><h2>Add Division</h2><button class="mc" onclick="this.closest('.modal').style.display='none'">&times;</button></div>
+    <form method="POST" action="/divisions/add">
+      <div class="r2">
+        <div class="form-g"><label>Division Name *</label><input type="text" name="name" required placeholder="e.g. Cardiac Division"></div>
+        <div class="form-g"><label>Code</label><input type="text" name="code" placeholder="CARD" style="text-transform:uppercase"></div>
+      </div>
+      <div class="form-g"><label>Description</label><input type="text" name="description" placeholder="Optional description"></div>
+      <div style="display:flex;gap:8px">
+        <button type="submit" class="btn-p" style="flex:1">Add Division</button>
+        <button type="button" onclick="this.closest('.modal').style.display='none'" style="flex:1;padding:10px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r8);color:var(--t1);cursor:pointer;font-family:inherit">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="edit-div-modal" class="modal">
+  <div class="modal-box"><div class="mh"><h2>Edit Division</h2><button class="mc" onclick="this.closest('.modal').style.display='none'">&times;</button></div>
+    <form id="edit-div-form" method="POST" action="">
+      <div class="r2">
+        <div class="form-g"><label>Division Name *</label><input type="text" name="name" id="ed-name" required></div>
+        <div class="form-g"><label>Code</label><input type="text" name="code" id="ed-code" style="text-transform:uppercase"></div>
+      </div>
+      <div class="form-g"><label>Description</label><input type="text" name="description" id="ed-desc"></div>
+      <div class="form-g"><label>Status</label>
+        <select name="status" id="ed-status">
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select></div>
+      <div style="display:flex;gap:8px">
+        <button type="submit" class="btn-p" style="flex:1">Save Changes</button>
+        <button type="button" onclick="this.closest('.modal').style.display='none'" style="flex:1;padding:10px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r8);color:var(--t1);cursor:pointer;font-family:inherit">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<script>
+// ── Register: AJAX load divisions by company code ────────────────────────────
+let _codeTimer = null;
+function loadDivisions(code){ loadRegData(code); } // kept for backward compat
+function loadRegData(code){
+  clearTimeout(_codeTimer);
+  code = code.trim().toUpperCase();
+  const st = document.getElementById('co-status');
+  const cn = document.getElementById('co-name');
+  const divSel = document.getElementById('reg-div');
+  if(!st) return;
+  if(code.length < 4){
+    if(st) st.textContent=''; if(cn) cn.textContent='';
+    document.getElementById('reg-company-id').value='';
+    resetRegDropdowns(); return;
+  }
+  _codeTimer = setTimeout(async ()=>{
+    st.innerHTML='<span style="color:var(--t2)">⏳ looking up…</span>';
+    try{
+      const r = await fetch('/api/company-by-code?code='+encodeURIComponent(code));
+      const d = await r.json();
+      if(!r.ok || d.error){
+        st.innerHTML='<span style="color:var(--red)">✗ Not found</span>';
+        if(cn) cn.textContent='';
+        document.getElementById('reg-company-id').value='';
+        resetRegDropdowns(); return;
+      }
+      st.innerHTML='<span style="color:var(--green)">✓ Found</span>';
+      if(cn) cn.innerHTML=`<strong>${d.name}</strong> <span style="font-family:var(--mono);color:var(--blue)">[${d.code}]</span>`;
+      document.getElementById('reg-company-id').value = d.id;
+      // Divisions
+      if(divSel){
+        divSel.innerHTML='<option value="">— Select Division —</option>';
+        (d.divisions||[]).forEach(div=>{
+          const o=document.createElement('option'); o.value=div.id; o.textContent=div.name; divSel.appendChild(o);
+        });
+      }
+      // Geo dropdowns
+      fillGeoDrop('region',    d.regions    || []);
+      fillGeoDrop('area',      d.areas      || []);
+      fillGeoDrop('territory', d.territories|| []);
+      // Managers
+      loadManagers();
+    }catch(e){ st.innerHTML='<span style="color:var(--red)">✗ Error</span>'; }
+  }, 600);
+}
+function resetRegDropdowns(){
+  ['reg-div','reg-manager'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) el.innerHTML='<option value="">— Enter company code first —</option>';
+  });
+  ['region','area','territory'].forEach(f=>fillGeoDrop(f,[]));
+}
+function fillGeoDrop(field, vals){
+  const sel=document.getElementById('reg-'+field+'-sel');
+  if(!sel) return;
+  sel.innerHTML='<option value="">— select or type below —</option>';
+  vals.forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; sel.appendChild(o); });
+}
+function geoSelChange(field, val){
+  const inp=document.getElementById('reg-'+field);
+  if(inp && val){ inp.value=val; }
+}
+async function loadManagers(){
+  const cid=document.getElementById('reg-company-id').value;
+  const role=document.getElementById('reg-role') ? document.getElementById('reg-role').value : 'mr';
+  const sel=document.getElementById('reg-manager');
+  const info=document.getElementById('mgr-info');
+  if(!cid||!sel) return;
+  try{
+    const r=await fetch('/api/reg-managers?company_id='+cid+'&role='+role);
+    const d=await r.json();
+    sel.innerHTML='<option value="">— None / Not known —</option>';
+    (d.managers||[]).forEach(m=>{
+      const o=document.createElement('option');
+      o.value = m.employee_id || String(m.id);
+      o.textContent=`[${m.role.toUpperCase()}] ${m.full_name}${m.employee_id?' ('+m.employee_id+')':''}${m.area?' · '+m.area:''}`;
+      sel.appendChild(o);
+    });
+    if(info) info.textContent=(d.managers||[]).length+' managers available for '+role.toUpperCase();
+  }catch(e){ if(info) info.textContent='Could not load managers'; }
+}
+let _empTimer=null;
+function checkEmpId(val){
+  const cid=document.getElementById('reg-company-id').value;
+  const st=document.getElementById('empid-status');
+  const btn=document.getElementById('reg-submit');
+  if(!val||!cid){ if(st)st.textContent=''; return; }
+  clearTimeout(_empTimer);
+  _empTimer=setTimeout(async()=>{
+    if(st) st.innerHTML='<span style="color:var(--t2)">checking…</span>';
+    try{
+      const r=await fetch('/api/check-emp-id?company_id='+cid+'&emp_id='+encodeURIComponent(val));
+      const d=await r.json();
+      if(d.exists){
+        if(st) st.innerHTML='<span style="color:var(--red)">✗ Already registered — choose a different Employee ID</span>';
+        if(btn) btn.disabled=true;
+      } else {
+        if(st) st.innerHTML='<span style="color:var(--green)">✓ Available</span>';
+        if(btn) btn.disabled=false;
+      }
+    }catch(e){ if(st) st.textContent=''; }
+  }, 500);
+}
+
+// Divisions page: edit modal
+function openEditDiv(id,name,code,desc,status){
+  const f = document.getElementById('edit-div-form');
+  if(!f) return;
+  f.action = '/divisions/edit/' + id;
+  const s = (eid,v) => { const el=document.getElementById(eid); if(el) el.value=v||''; };
+  s('ed-name',name); s('ed-code',code); s('ed-desc',desc);
+  const st = document.getElementById('ed-status'); if(st) st.value = status||'active';
+  document.getElementById('edit-div-modal').style.display = 'flex';
+}
+
+// ── Quarter period buttons ────────────────────────────────────────────────────
+const Q_RANGES = {
+  1:{label:'Q1 (Apr–Jun)',from:'01',fm:'04',to:'30',tm:'06'},
+  2:{label:'Q2 (Jul–Sep)',from:'01',fm:'07',to:'30',tm:'09'},
+  3:{label:'Q3 (Oct–Dec)',from:'01',fm:'10',to:'31',tm:'12'},
+  4:{label:'Q4 (Jan–Mar)',from:'01',fm:'01',to:'31',tm:'03'},
+};
+let _manualFrom = null, _manualTo = null;
+
+function setQPeriod(q, btn){
+  document.querySelectorAll('.qbtn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  const yr = new Date().getFullYear();
+  const hint = document.getElementById('period-hint');
+  const mf = document.getElementById('man-from');
+  const mt = document.getElementById('man-to');
+  if(q===0){
+    if(hint){hint.style.display='block';hint.textContent='ℹ Monthly statement selected — upload any single-month statement';}
+  } else {
+    const p = Q_RANGES[q];
+    const fd = `${yr}-${p.fm}-${p.from}`;
+    const td = `${yr}-${p.tm}-${p.to}`;
+    if(mf) mf.value = fd;
+    if(mt) mt.value = td;
+    _manualFrom = fd; _manualTo = td;
+    if(hint){hint.style.display='block';hint.textContent=`ℹ ${p.label} ${yr}: ${p.from}/${p.fm}/${yr} → ${p.to}/${p.tm}/${yr} — dates set automatically`;}
+  }
+}
+function clearManualDates(){
+  const mf=document.getElementById('man-from');const mt=document.getElementById('man-to');
+  if(mf)mf.value='';if(mt)mt.value='';
+  _manualFrom=null;_manualTo=null;
+  document.querySelectorAll('.qbtn').forEach(b=>b.classList.remove('on'));
+  const h=document.getElementById('period-hint');if(h)h.style.display='none';
+}
+
+// ── File upload with real progress tracking ────────────────────────────────
+function queueFiles(f){Array.from(f).forEach(x=>{const id='f'+Date.now()+Math.random().toString(36).slice(2);buildCard(id,x);doUpload(id,x,false);})}
+function handleDrop(e){e.preventDefault();document.getElementById('dropzone').classList.remove('drag');queueFiles(e.dataTransfer.files)}
+function ftBadge(n){const e=n.split('.').pop().toLowerCase();if(['jpg','jpeg','png'].includes(e))return{l:'IMG',bg:'var(--blue-d)',c:'var(--blue)'};if(e==='pdf')return{l:'PDF',bg:'var(--red-d)',c:'var(--red)'};return{l:'XLS',bg:'var(--green-d)',c:'var(--green)'};}
+
+function buildCard(id,file){
+  const b=ftBadge(file.name);
+  const q=document.getElementById('uq');if(!q)return;
+  q.insertAdjacentHTML('beforeend',`
+    <div class="prog-wrap" id="pc${id}">
+      <div style="display:flex;align-items:center;gap:9px">
+        <div style="width:28px;height:28px;border-radius:var(--r4);background:${b.bg};color:${b.c};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;font-family:var(--mono);flex-shrink:0">${b.l}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:500;color:var(--t0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${file.name}</div>
+          <div id="ps${id}" style="font-size:10px;color:var(--t2);font-family:var(--mono)">Preparing...</div>
+        </div>
+        <div id="pp${id}" style="font-size:11px;font-family:var(--mono);color:var(--blue);min-width:32px;text-align:right">0%</div>
+      </div>
+      <div class="prog-bar"><div class="prog-fill" id="pf${id}" style="width:0%"></div></div>
+    </div>`);
+}
+
+function setProgress(id,pct,stage,isErr){
+  const pf=document.getElementById('pf'+id);const ps=document.getElementById('ps'+id);const pp=document.getElementById('pp'+id);
+  if(pf){pf.style.width=pct+'%';pf.style.background=isErr?'var(--red)':pct>=100?'var(--green)':'linear-gradient(90deg,var(--blue),var(--teal))';}
+  if(ps)ps.textContent=stage;
+  if(pp){pp.textContent=pct+'%';pp.style.color=isErr?'var(--red)':pct>=100?'var(--green)':'var(--blue)';}
+}
+
+async function pollUntilDone(id, uploadId){
+  window._activeUploads = (window._activeUploads||0)+1;
+  try{
+  // /upload and /upload-from-url now return almost immediately (the actual
+  // Gemini extraction runs on a background worker pool) -- poll for the
+  // real result instead of expecting it in the initial response.
+  const maxWaitMs = 5*60*1000; // 5 min safety cap
+  const startedAt = Date.now();
+  while(true){
+    if(Date.now()-startedAt > maxWaitMs){
+      setProgress(id,100,'Timed out waiting for extraction — check My Documents shortly',true);
+      return;
+    }
+    let prog;
+    try{
+      const r = await fetch('/api/upload-progress/'+uploadId);
+      prog = await r.json();
+    }catch(e){
+      await new Promise(res=>setTimeout(res,2000));
+      continue;
+    }
+    if(prog.stage) setProgress(id, prog.pct||50, prog.stage, !!prog.error);
+    if(prog.done){
+      handleUploadResult(id, prog);
+      return;
+    }
+    await new Promise(res=>setTimeout(res,1200));
+  }
+  } finally {
+    window._activeUploads = Math.max(0, (window._activeUploads||1)-1);
+  }
+}
+
+async function doUpload(id,file,forceProceed){
+  setProgress(id,5,'Uploading...',false);
+  const fd=new FormData();
+  fd.append('file',file);
+  if(forceProceed) fd.append('force_proceed','1');
+  const mf=document.getElementById('man-from');const mt=document.getElementById('man-to');
+  if(mf&&mf.value) fd.append('manual_from',mf.value);
+  if(mt&&mt.value) fd.append('manual_to',mt.value);
+  window['_file_'+id]=file;
+  try{
+    const resp=await fetch('/upload',{method:'POST',body:fd});
+    const d=await resp.json();
+    if(d.error){ handleUploadResult(id,d); return; }
+    setProgress(id,10,'Queued for extraction...',false);
+    await pollUntilDone(id, d.upload_id);
+  }catch(e){
+    setProgress(id,100,'Upload failed — network error',true);
+  }
+}
+
+async function doUploadFromUrl(id,url,forceProceed){
+  setProgress(id,5,'Fetching document from link...',false);
+  const fd=new FormData();
+  fd.append('source_url',url);
+  if(forceProceed) fd.append('force_proceed','1');
+  const mf=document.getElementById('man-from');const mt=document.getElementById('man-to');
+  if(mf&&mf.value) fd.append('manual_from',mf.value);
+  if(mt&&mt.value) fd.append('manual_to',mt.value);
+  window['_url_'+id]=url;
+  try{
+    const resp=await fetch('/upload-from-url',{method:'POST',body:fd});
+    const d=await resp.json();
+    if(d.error){ handleUploadResult(id,d); return; }
+    setProgress(id,10,'Queued for extraction...',false);
+    await pollUntilDone(id, d.upload_id);
+  }catch(e){
+    setProgress(id,100,'Import failed — network error',true);
+  }
+}
+
+function importFromUrl(){
+  const inp=document.getElementById('url-input');
+  const url=(inp.value||'').trim();
+  if(!url) return;
+  if(!/^https?:\/\//i.test(url)){
+    showWarn(`<div class="warn-card warn-dup">❌ Only http:// and https:// links are supported.</div>`);
+    return;
+  }
+  const id='u'+Date.now()+Math.random().toString(36).slice(2);
+  let displayName=url;
+  try{ displayName = decodeURIComponent(url.split('/').pop().split('?')[0]) || url; }catch(e){}
+  buildCard(id,{name:displayName});
+  doUploadFromUrl(id,url,false);
+  inp.value='';
+}
+
+function handleUploadResult(id,d){
+  if(d.error){
+      // Level-1 or Level-2 duplicate rejection
+      if(d.duplicate_level===1){
+        setProgress(id,100,'❌ Exact duplicate file rejected',true);
+        showWarn(`<div class="warn-card warn-dup">
+          <strong>🚫 Level-1 Duplicate: Exact File Match</strong><br>
+          <small>${d.error}</small>
+          ${d.existing_upload_id?`<br><a href="/extraction/${d.existing_upload_id}" style="font-size:11px;color:var(--blue)">View existing upload →</a>`:''}
+        </div>`);
+      } else if(d.duplicate_level===2){
+        setProgress(id,100,'❌ Smart duplicate rejected',true);
+        showWarn(`<div class="warn-card warn-dup">
+          <strong>🔍 Level-2 Duplicate: Same Content Detected</strong><br>
+          <small>${d.error}</small>
+          ${d.existing_upload_id?`<br><a href="/extraction/${d.existing_upload_id}" style="font-size:11px;color:var(--blue)">View existing →</a>`:''}
+        </div>`);
+      } else if(d.credits_exhausted){
+        setProgress(id,100,'⛔ No credits',true);
+        showWarn(`<div class="warn-card warn-dup">⛔ <strong>No credits remaining!</strong><br>
+          <small><a href="/credits" style="color:var(--red)">Request more credits →</a></small></div>`);
+      } else {
+        setProgress(id,100,'Failed: '+d.error.slice(0,60),true);
+        showWarn(`<div class="warn-card warn-dup">❌ ${d.error}<br><small>Check the file and retry.</small></div>`);
+      }
+      return;
+    }
+    // ── Match % badge ──────────────────────────────────────────────────────
+    const mp=d.match_pct;
+    const et=d.extracted_total||0;
+    const gt=d.doc_grand_total||0;
+    let matchHtml='';
+    if(gt>0){
+      const col=mp>=99?'var(--green)':mp>=90?'var(--amber)':'var(--red)';
+      const icon=mp>=99?'✅':mp>=90?'⚠️':'❌';
+      matchHtml=`<div class="warn-card" style="border-color:${col};background:${col}18">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span style="font-size:22px;font-weight:700;color:${col}">${mp}%</span>
+          <div>
+            <div style="font-size:12px;font-weight:600;color:var(--t0)">${icon} Extraction Match</div>
+            <div style="font-size:11px;color:var(--t2);font-family:var(--mono)">
+              Extracted: ₹${et.toLocaleString('en-IN',{maximumFractionDigits:2})} &nbsp;|&nbsp;
+              Doc Total: ₹${gt.toLocaleString('en-IN',{maximumFractionDigits:2})}
+              ${mp<99?` &nbsp;|&nbsp; Gap: ₹${d.match_diff.toLocaleString('en-IN',{maximumFractionDigits:2})}`:''}
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }
+    setProgress(id,100,'✓ Complete — '+n_parties_label(d)+(gt>0?' · '+mp+'% match':''),false);
+    if(matchHtml) showWarn(matchHtml);
+    if(d.credits_remaining!==undefined&&d.credits_remaining<=20){
+      showWarn(`<div class="warn-card warn-stale">⚠ Credit balance low: ${d.credits_remaining} remaining. <a href="/credits">Request more →</a></div>`);
+    }
+    const wa=document.getElementById('warn-area');
+    if(wa&&d.warnings&&d.warnings.length){
+      d.warnings.forEach(w=>{
+        const isDup=w.type==='duplicate_period';
+        const isInfo=w.level==='info';
+        const cls=isDup?'warn-dup':isInfo?'warn-info':'warn-stale';
+        let extra='';
+        if(isDup){
+          extra=`<div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+            <button onclick="forceUpload('${id}',this)" class="btn-sm btn-amber">⚠ Proceed Anyway</button>
+            <a href="/extraction/${w.upload_id}" style="font-size:11px">View existing →</a>
+          </div>`;
+          window['_file_'+id]=file;
+        }
+        wa.insertAdjacentHTML('beforeend',`<div class="warn-card ${cls}" id="wc${id}">
+          <div>${w.message}</div>${extra}
+        </div>`);
+      });
+    }
+    const hasCritical=d.warnings&&d.warnings.some(w=>w.level==='warning'&&w.type==='duplicate_period');
+    if(!hasCritical){
+      setTimeout(()=>{
+        location.reload();
+      }, 2200);
+      // Scroll to docs list immediately
+      const dl = document.getElementById('docs-scroll');
+      if(dl) dl.scrollIntoView({behavior:'smooth', block:'start'});
+    }
+}
+
+function n_parties_label(d){
+  try{return (d.data.parties||[]).length+' parties';}catch(e){return '';}
+}
+function forceUpload(id,btn){
+  const file=window['_file_'+id];
+  const url=window['_url_'+id];
+  const wc=document.getElementById('wc'+id);if(wc)wc.remove();
+  const pf=document.getElementById('pf'+id);if(pf)pf.style.width='0%';
+  if(file) doUpload(id,file,true);
+  else if(url) doUploadFromUrl(id,url,true);
+}
+function showWarn(html){const wa=document.getElementById('warn-area');if(wa)wa.insertAdjacentHTML('beforeend',html);}
+
+// ── Restore rejected upload ───────────────────────────────────────────────────
+function restoreUpload(upId){
+  if(!confirm('Restore this upload back to Done status?')) return;
+  fetch(`/api/admin/upload/${upId}/restore`,{method:'POST',headers:{'Content-Type':'application/json'}})
+    .then(r=>r.json()).then(d=>{
+      if(d.success){location.reload();}
+      else{alert('Restore failed: '+(d.error||'unknown'));}
+    }).catch(()=>alert('Network error'));
+}
+
+// ── Detail page ───────────────────────────────────────────────────────────────
+function tog(h){const b=h.nextElementSibling;const i=h.querySelector('.ti');if(!b)return;const o=b.style.display!=='none'&&b.style.display!=='';b.style.display=o?'none':'';if(i)i.innerHTML=o?'▼':'▲';}
+function expandAllParties(){document.querySelectorAll('.pb-blk').forEach(blk=>{const hd=blk.querySelector('.p-hd');const bd=blk.querySelector('.p-bd');const ti=hd?.querySelector('.ti');if(bd)bd.style.display='';if(ti)ti.innerHTML='▲';});}
+function collapseAllParties(){document.querySelectorAll('.pb-blk').forEach(blk=>{const hd=blk.querySelector('.p-hd');const bd=blk.querySelector('.p-bd');const ti=hd?.querySelector('.ti');if(bd)bd.style.display='none';if(ti)ti.innerHTML='▼';});}
+let _docRotation = 0;
+function rotateDoc(deg){
+  const img = document.getElementById('doc-img');
+  const wrap = document.getElementById('doc-img-wrap');
+  if(!img || !wrap) return;
+  _docRotation = (_docRotation + deg + 360) % 360;
+  if(_docRotation === 90 || _docRotation === 270){
+    const w = wrap.clientWidth;
+    img.style.width = 'auto';
+    img.style.height = w + 'px';
+    img.style.maxWidth = 'none';
+    img.style.position = 'relative';
+    img.style.left = '50%';
+    img.style.top = '50%';
+    img.style.transform = `translate(-50%,-50%) rotate(${_docRotation}deg)`;
+    wrap.style.height = w + 'px';
+  } else {
+    img.style.width = '100%';
+    img.style.height = 'auto';
+    img.style.maxWidth = '';
+    img.style.position = 'static';
+    img.style.left = '';
+    img.style.top = '';
+    img.style.transform = `rotate(${_docRotation}deg)`;
+    wrap.style.height = 'auto';
+  }
+}
+function toggleDocViewer(){
+  const body=document.getElementById('doc-viewer-body');
+  const btn=document.getElementById('doc-toggle-btn');
+  const grid=document.getElementById('detail-grid');
+  const docCard=body?.closest('.card');
+  if(!body)return;
+  const hidden=body.style.display==='none'||body.style.display==='';
+  body.style.display=hidden?'block':'none';
+  if(btn)btn.textContent=hidden?'▼ Minimize':'▶ Expand';
+  // Full-width parties when PDF minimized
+  if(grid){
+    grid.style.gridTemplateColumns=hidden?'1fr 1.7fr':'1fr';
+    if(docCard)docCard.style.display=hidden?'':'none';
+  }
+}
+// Sidebar collapse/expand
+function toggleSidebar(){
+  const sb=document.querySelector('.sb');
+  const main=document.querySelector('.main');
+  const btn=document.getElementById('sb-toggle-btn');
+  if(!sb)return;
+  const collapsed=sb.classList.toggle('collapsed');
+  if(main)main.classList.toggle('sb-collapsed',collapsed);
+  if(btn){btn.textContent=collapsed?'›':'‹';btn.style.left=collapsed?'36px':'218px';}
+  localStorage.setItem('sb-state',collapsed?'1':'0');
+}
+// Mobile off-canvas sidebar toggle
+function toggleMobileSidebar(){
+  const sb=document.getElementById('main-sidebar');
+  const ov=document.getElementById('sb-overlay');
+  if(!sb)return;
+  sb.classList.toggle('mobile-open');
+  if(ov)ov.classList.toggle('show');
+}
+// Default: party cards EXPANDED, restore sidebar state
+document.addEventListener('DOMContentLoaded',function(){
+  // Restore sidebar
+  if(localStorage.getItem('sb-state')==='1'){toggleSidebar();}
+  // Close mobile drawer when a nav link is tapped
+  document.querySelectorAll('.sb-nav a,.ni').forEach(function(el){
+    el.addEventListener('click',function(){
+      if(window.innerWidth<=900)toggleMobileSidebar();
+    });
+  });
+});
+function flt(t,btn){document.querySelectorAll('.tab-b').forEach(b=>b.classList.remove('on'));btn.classList.add('on');window._tf=t;applyF();}
+function searchBrand(q){window._bq=(q||'').toLowerCase().trim();applyF();const cnt=document.querySelectorAll('.item-row:not([style*="none"])').length;const el=document.getElementById('searchCount');if(el)el.textContent=q?cnt+' match'+(cnt===1?'':'es'):'';}
+function clearSearch(){const i=document.getElementById('brandSearch');if(i)i.value='';window._bq='';applyF();const el=document.getElementById('searchCount');if(el)el.textContent='';}
+function applyF(){const t=window._tf||'all';const q=window._bq||'';document.querySelectorAll('.pb-blk').forEach(block=>{if(t!=='all'&&block.dataset.type!==t){block.style.display='none';return;}if(!q){block.style.display='';block.querySelectorAll('.item-row').forEach(r=>r.style.display='');block.querySelectorAll('tfoot tr').forEach(r=>r.style.display='');return;}let any=false;block.querySelectorAll('.item-row').forEach(row=>{const brand=(row.querySelector('td')?.textContent||'').toLowerCase();const show=brand.includes(q);row.style.display=show?'':'none';if(show)any=true;});block.querySelectorAll('tfoot tr').forEach(r=>r.style.display=any?'':'none');block.style.display=any?'':'none';});}
+
+// ── WhatsApp ──────────────────────────────────────────────────────────────────
+function toggleDownloadPanel(){
+  const p = document.getElementById('download-panel');
+  if(p) p.style.display = p.style.display==='none' ? '' : 'none';
+}
+function buildDownloadLink(e){
+  e.preventDefault();
+  const from = document.getElementById('dl-from')?.value || '';
+  const to   = document.getElementById('dl-to')?.value || '';
+  const scope= document.getElementById('dl-scope')?.value || 'team';
+  let url = '/export/excel?scope='+scope;
+  if(from) url += '&date_from='+from;
+  if(to)   url += '&date_to='+to;
+  // verified_only based on scope
+  if(scope==='verified') url += '&verified_only=1';
+  window.location.href = url;
+}
+async function shareWA(df,dt){try{const url='/api/whatsapp-report'+(df||dt?'?date_from='+df+'&date_to='+dt:'');const r=await fetch(url);const d=await r.json();window.open('https://wa.me/?text='+encodeURIComponent(d.message.replace(/\\n/g,'\n')),'_blank');}catch(e){alert('Could not generate report.');}}
+
+// WhatsApp share for company registration success
+function shareWhatsApp(code, companyName, adminUser) {
+  const msg = `🏢 *${companyName} — Data Extraction*\n\n` +
+    `✅ Your company account is ready!\n\n` +
+    `*Company Code (Login Key):* \`${code}\`\n` +
+    `*Admin Username:* ${adminUser}\n\n` +
+    `📲 Login at: ${window.location.origin}/login\n` +
+    `Enter company code: *${code}*\n\n` +
+    `_Powered by Data Extraction_`;
+  window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+}
+
+// ── Team hierarchy collapse/expand ─────────────────────────────────────────
+function filterTeam(q){
+  q=(q||'').toLowerCase().trim();
+  document.querySelectorAll('.tm-card').forEach(card=>{
+    const text=card.textContent.toLowerCase();
+    card.style.display=(!q||text.includes(q))?'':'none';
+  });
+  // Auto-expand groups that have visible members, collapse empty ones
+  document.querySelectorAll('[id^="grp-body-"]').forEach(body=>{
+    const visCount=body.querySelectorAll('.tm-card:not([style*="display: none"]):not([style*="display:none"])').length;
+    const grpId=body.id.replace('grp-body-','');
+    const arrow=document.getElementById('grp-arrow-'+grpId);
+    if(q){
+      body.style.display=visCount>0?'':'none';
+      if(arrow)arrow.textContent=visCount>0?'▾':'▸';
+    } else {
+      // Restore original state
+      body.style.display='';
+      if(arrow)arrow.textContent='▾';
+    }
+  });
+}
+function toggleGroup(roleKey){
+  const body=document.getElementById('grp-body-'+roleKey);
+  const arrow=document.getElementById('grp-arrow-'+roleKey);
+  if(!body)return;
+  const collapsed=body.style.display==='none';
+  body.style.display=collapsed?'':'none';
+  if(arrow){arrow.textContent=collapsed?'▾':'▸';arrow.classList.toggle('collapsed',!collapsed);}
+}
+function toggleExtra(uid){
+  const el=document.getElementById('extra-'+uid);
+  const btn=el?.previousElementSibling?.querySelector('.tm-expand');
+  if(!el)return;
+  el.classList.toggle('open');
+  if(btn)btn.textContent=el.classList.contains('open')?'Details ▴':'Details ▾';
+}
+let _allExpanded=true;
+function toggleAllGroups(){
+  const btn=document.getElementById('expand-all-btn');
+  document.querySelectorAll('[id^="grp-body-"]').forEach(body=>{
+    body.style.display=_allExpanded?'none':'';
+  });
+  document.querySelectorAll('[id^="grp-arrow-"]').forEach(arrow=>{
+    arrow.textContent=_allExpanded?'▸':'▾';
+    arrow.classList.toggle('collapsed',_allExpanded);
+  });
+  _allExpanded=!_allExpanded;
+  if(btn)btn.textContent=_allExpanded?'Collapse All':'Expand All';
+}
+// ── Team edit modal ───────────────────────────────────────────────────────────
+function openEditUser(id,u){
+  document.getElementById('edit-user-form').action='/team/edit/'+id;
+  const s=(eid,v)=>{const el=document.getElementById(eid);if(el)el.value=v==null?'':v;};
+  s('eu-name',u.full_name);s('eu-mobile',u.mobile);s('eu-empid',u.employee_id);
+  s('eu-email',u.email);s('eu-region',u.region);s('eu-area',u.area);s('eu-territory',u.territory);
+  const rs=document.getElementById('eu-role');if(rs){rs.value=u.role||'mr';toggleParent('eu-role','eu-pr');}
+  const ps=document.getElementById('eu-parent');if(ps&&u.parent_id)ps.value=u.parent_id;
+  const ds=document.getElementById('eu-div');if(ds&&u.division_id)ds.value=u.division_id;
+  const ss=document.getElementById('eu-status');if(ss)ss.value=u.status||'active';
+  document.getElementById('edit-user-modal').style.display='flex';
+}
+function toggleParent(rid,rowId){const role=document.getElementById(rid)?.value;const row=document.getElementById(rowId);if(row)row.style.display=(role==='company_admin')?'none':'block';}
+// ── Auto-scroll to flash messages after form submits ────────────────────────
+document.addEventListener('DOMContentLoaded', function(){
+  const flash = document.querySelector('.flash-msg, [class*="f-ok"], [class*="f-err"]');
+  if(flash) flash.scrollIntoView({behavior:'smooth', block:'center'});
+
+  // Add spinner to all regular form submits (not upload form — it has its own handler)
+  document.querySelectorAll('form:not(#upload-form):not([onsubmit])').forEach(function(form){
+    form.addEventListener('submit', function(){
+      const btn = form.querySelector('button[type=submit]');
+      if(btn && !btn.dataset.noSpinner){
+        btn.disabled = true;
+        const orig = btn.textContent;
+        btn.textContent = '⏳ ' + orig.replace(/^[✓⬇⬆+]/,'').trim();
+      }
+    });
+  });
+});
+
+document.addEventListener('click',function(e){document.querySelectorAll('.modal').forEach(m=>{if(e.target===m)m.style.display='none';});});
+
+// ── Upload panel toggle (higher roles) ─────────────────────────────────────
+function toggleUploadPanel(){
+  const panel = document.getElementById('up-panel');
+  const arrow  = document.getElementById('upload-toggle-arrow');
+  const btn    = document.getElementById('upload-toggle-btn');
+  if(!panel) return;
+  const hidden = panel.style.display === 'none' || panel.style.display === '';
+  panel.style.display = hidden ? 'block' : 'none';
+  if(arrow) arrow.textContent = hidden ? '▲' : '▼';
+  if(btn){
+    const hint = btn.querySelector('span:nth-child(3)');
+    if(hint) hint.textContent = hidden ? '(click to collapse)' : '(click to expand)';
+  }
+}
+// ── Handover mode toggle ──────────────────────────────────────────────────────
+function setHandoverMode(mode){
+  const isRemap = mode === 'remap';
+  document.getElementById('panel-full').style.display  = isRemap ? 'none' : '';
+  document.getElementById('panel-remap').style.display = isRemap ? '' : 'none';
+  const btnFull  = document.getElementById('tab-full');
+  const btnRemap = document.getElementById('tab-remap');
+  if(btnFull){
+    btnFull.style.background  = isRemap ? 'var(--bg2)' : 'var(--blue)';
+    btnFull.style.color       = isRemap ? 'var(--t2)'  : '#fff';
+    btnFull.style.fontWeight  = isRemap ? '400' : '600';
+  }
+  if(btnRemap){
+    btnRemap.style.background = isRemap ? 'var(--blue)' : 'var(--bg2)';
+    btnRemap.style.color      = isRemap ? '#fff'         : 'var(--t2)';
+    btnRemap.style.fontWeight = isRemap ? '600' : '400';
+  }
+}
+// ── Documents page inline search ──────────────────────────────────────────────
+function filterDocTable(q){
+  q=(q||'').toLowerCase().trim();
+  const tbody=document.getElementById('docs-tbody');
+  if(!tbody)return;
+  let vis=0;
+  tbody.querySelectorAll('tr').forEach(row=>{
+    const show=!q||row.textContent.toLowerCase().includes(q);
+    row.style.display=show?'':'none';
+    if(show)vis++;
+  });
+  const counter=document.querySelector('#docs-tbody')?.closest('.card')?.querySelector('.ch-r');
+  if(counter)counter.textContent=q?(vis+' matches'):(tbody.querySelectorAll('tr').length+' records');
+}
+if(document.getElementById('brandChart')||document.getElementById('weeklyChart')){
+  const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js';
+  s.onload=function(){
+    const gc='rgba(0,0,0,0.06)';
+    const tc='#68686D';
+    const fmt=v=>'₹'+Math.round(v).toLocaleString('en-IN');
+
+    // Monthly combo — only if canvas present
+    if(document.getElementById('monthlyChart')&&monthlyData.length){
+      new Chart(document.getElementById('monthlyChart'),{
+        data:{labels:monthlyData.map(d=>d.month),datasets:[
+          {type:'bar',label:'Uploads',data:monthlyData.map(d=>d.uploads),backgroundColor:'rgba(176,114,31,0.75)',borderColor:'rgba(176,114,31,1)',borderWidth:1,borderRadius:3,yAxisID:'y1',order:2},
+          {type:'line',label:'Revenue',data:monthlyData.map(d=>Math.round(d.revenue||0)),borderColor:'#0071E3',backgroundColor:'rgba(0,113,227,0.18)',borderWidth:2.5,pointRadius:3,pointBackgroundColor:'#0071E3',fill:true,tension:0.4,yAxisID:'y',order:1}
+        ]},
+        options:{responsive:true,interaction:{mode:'index',intersect:false},plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>ctx.dataset.label+': '+(ctx.datasetIndex===1?fmt(ctx.raw):ctx.raw)}}},
+          scales:{x:{grid:{color:gc},ticks:{color:tc,font:{size:10}}},y:{grid:{color:gc},ticks:{color:tc,callback:fmt,font:{size:10}},position:'left'},y1:{grid:{display:false},ticks:{color:tc,font:{size:10}},position:'right'}}}
+      });
+    }
+
+    // Party type donut
+    if(partyData.length){
+      const colors=['#0071E3','#248A3D','#B4650A','#8944C7','#0C7DA0','#D70015'];
+      new Chart(document.getElementById('partyDonut'),{type:'doughnut',
+        data:{labels:partyData.map(p=>p.type||'unknown'),datasets:[{data:partyData.map(p=>Math.round(p.revenue||0)),backgroundColor:colors,borderColor:'#FFFFFF',borderWidth:2,hoverOffset:4}]},
+        options:{responsive:true,cutout:'65%',plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>ctx.label+': '+fmt(ctx.raw)}}}}
+      });
+      const leg=document.getElementById('donut-legend');
+      if(leg) partyData.forEach((p,i)=>{leg.innerHTML+=`<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:${tc}"><span style="width:8px;height:8px;border-radius:50%;background:${colors[i]};display:inline-block"></span>${p.type||'unknown'} (${p.count||0})</div>`;});
+    }
+
+    // Top 10 Brands
+    if(brandData.length){
+      new Chart(document.getElementById('brandChart'),{type:'bar',
+        data:{labels:brandData.map(b=>(b.brand||'').length>22?(b.brand||'').slice(0,22)+'…':(b.brand||'')),datasets:[{label:'₹',data:brandData.map(b=>Math.round(b.amt||0)),backgroundColor:'rgba(137,68,199,0.85)',borderColor:'#8944C7',borderWidth:1,borderRadius:3}]},
+        options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>fmt(ctx.raw)}}},scales:{x:{grid:{color:gc},ticks:{color:tc,callback:fmt,font:{size:10}}},y:{grid:{display:false},ticks:{color:tc,font:{size:10}}}}}
+      });
+    }
+
+    // Top 10 Agencies
+    if(top_agencies_data&&top_agencies_data.length){
+      new Chart(document.getElementById('agencyChart'),{type:'bar',
+        data:{labels:top_agencies_data.map(a=>(a.name||'').length>22?(a.name||'').slice(0,22)+'…':(a.name||'')),datasets:[{label:'₹',data:top_agencies_data.map(a=>Math.round(a.amt||0)),backgroundColor:'rgba(12,125,160,0.85)',borderColor:'#0C7DA0',borderWidth:1,borderRadius:3}]},
+        options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>fmt(ctx.raw)}}},scales:{x:{grid:{color:gc},ticks:{color:tc,callback:fmt,font:{size:10}}},y:{grid:{display:false},ticks:{color:tc,font:{size:10}}}}}
+      });
+    } else {
+      const el=document.getElementById('agencyChart');
+      if(el)el.closest('div').innerHTML+='<div style="text-align:center;padding:30px;color:var(--t2);font-size:12px">No agency data yet</div>';
+    }
+
+    // Top 10 Parties
+    if(top_parties_data&&top_parties_data.length){
+      new Chart(document.getElementById('partyNamesChart'),{type:'bar',
+        data:{labels:top_parties_data.map(p=>(p.name||'').length>30?(p.name||'').slice(0,30)+'…':(p.name||'')),datasets:[{label:'₹',data:top_parties_data.map(p=>Math.round(p.amt||0)),backgroundColor:'rgba(180,101,10,0.82)',borderColor:'#B4650A',borderWidth:1,borderRadius:3}]},
+        options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>fmt(ctx.raw)}}},scales:{x:{grid:{color:gc},ticks:{color:tc,callback:fmt,font:{size:10}}},y:{grid:{display:false},ticks:{color:tc,font:{size:10}}}}}
+      });
+    }
+
+    // Weekly trend
+    if(weeklyData.length){
+      new Chart(document.getElementById('weeklyChart'),{type:'line',
+        data:{labels:weeklyData.map(w=>w.week.replace(/^\d{4}-/,'')),datasets:[
+          {label:'Uploads',data:weeklyData.map(w=>w.uploads),borderColor:'#0071E3',backgroundColor:'rgba(0,113,227,0.16)',borderWidth:2,pointRadius:3,fill:true,tension:0.4},
+          {label:'Revenue',data:weeklyData.map(w=>Math.round(w.revenue||0)),borderColor:'#248A3D',backgroundColor:'rgba(36,138,61,0.06)',borderWidth:2,pointRadius:3,fill:false,tension:0.4,yAxisID:'y1'}
+        ]},
+        options:{responsive:true,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'top',labels:{color:tc,font:{size:10},boxWidth:12}}},scales:{x:{grid:{color:gc},ticks:{color:tc,font:{size:9}}},y:{grid:{color:gc},ticks:{color:tc,font:{size:10}}},y1:{grid:{display:false},ticks:{color:tc,callback:fmt,font:{size:10}},position:'right'}}}
+      });
+    }
+  };document.head.appendChild(s);
+}
+</script>
+<div id="notif-panel" style="display:none;position:fixed;top:60px;left:220px;width:320px;max-height:400px;overflow-y:auto;background:var(--bg1);border:0.5px solid var(--border2);border-radius:var(--r8);box-shadow:0 8px 32px rgba(0,0,0,.4);z-index:9999">
+  <div style="padding:10px 14px;border-bottom:0.5px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+    <span style="font-size:12px;font-weight:600">Notifications</span>
+    <button onclick="markAllRead()" style="font-size:10px;color:var(--blue);background:none;border:none;cursor:pointer">Mark all read</button>
+  </div>
+  <div id="notif-list" style="padding:6px"></div>
+</div>
+<script>
+let _notifOpen=false;
+async function loadNotifications(){
+  try{
+    const r=await fetch('/api/notifications');
+    const d=await r.json();
+    const cnt=document.getElementById('notif-count');
+    const list=document.getElementById('notif-list');
+    if(!cnt||!list)return;
+    if(d.length>0){cnt.style.display='flex';cnt.textContent=d.length>9?'9+':d.length;}
+    else{cnt.style.display='none';}
+    list.innerHTML=d.length===0?'<div style="padding:16px;text-align:center;font-size:12px;color:var(--t2)">No new notifications</div>':
+      d.map(n=>`<div onclick="readNotif(${n.id},this)" style="padding:8px 12px;border-bottom:0.5px solid var(--border);cursor:pointer;border-left:2px solid var(--blue)">
+        <div style="font-size:11px;font-weight:600;color:var(--t0)">${n.subject||n.event_type}</div>
+        <div style="font-size:10px;color:var(--t2);margin-top:2px">${n.message}</div>
+        <div style="font-size:9px;font-family:var(--mono);color:var(--t2);margin-top:3px">${(n.created_at||'').slice(0,16)}</div>
+      </div>`).join('');
+  }catch(e){}
+}
+function toggleNotif(){_notifOpen=!_notifOpen;document.getElementById('notif-panel').style.display=_notifOpen?'block':'none';if(_notifOpen)loadNotifications();}
+async function readNotif(id,el){await fetch('/api/notifications/read/'+id,{method:'POST'});el.style.opacity='0.5';el.style.borderLeft='2px solid var(--border)';}
+async function markAllRead(){await fetch('/api/notifications/read-all',{method:'POST'});document.getElementById('notif-panel').style.display='none';_notifOpen=false;document.getElementById('notif-count').style.display='none';document.getElementById('notif-list').innerHTML='';}
+// Load count on page load
+document.addEventListener('DOMContentLoaded',()=>{loadNotifications();setInterval(loadNotifications,60000);});
+document.addEventListener('click',(e)=>{if(_notifOpen&&!e.target.closest('#notif-bell')&&!e.target.closest('#notif-panel')){document.getElementById('notif-panel').style.display='none';_notifOpen=false;}});
+</script>
+<script>window.SESSION_LOGIN_URL = '/login';</script>
+<script src="/static/session-timeout.js"></script>
+<script src="/static/live-refresh.js"></script>
+</body>
+</html>

@@ -1,0 +1,1623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Super Admin — Data Extraction</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --navy:#1D1D1F;
+  --bg0:#F5F5F7;--bg1:#FFFFFF;--bg2:#F5F5F7;--bg3:#E8E8ED;--bg4:#D2D2D7;
+  --border:#E5E5EA;--border2:#D2D2D7;
+  --t0:#1D1D1F;--t1:#48484D;--t2:#68686D;
+  --blue:#0071E3;--blue-d:#E8F1FD;--blue-g:rgba(0,113,227,0.08);
+  --green:#248A3D;--green-d:#E3F6E9;
+  --amber:#B4650A;--amber-d:#FDEDD6;
+  --red:#D70015;--red-d:#FDE7E6;
+  --purple:#8944C7;--purple-d:#F2E8FB;
+  --teal:#0C7DA0;--teal-d:#E1F3F8;
+  --mono:'JetBrains Mono',monospace;
+  --disp:'Inter',system-ui,sans-serif;
+  --r4:6px;--r8:10px;--r12:14px;--r16:18px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,0.04),0 2px 10px rgba(0,0,0,0.04);
+  --glass-bg:rgba(255,255,255,0.72);
+  --glass-bg-strong:rgba(255,255,255,0.86);
+  --glass-border:rgba(255,255,255,0.6);
+  --glass-blur:20px;
+  --glass-dark:rgba(29,29,31,0.82);
+}
+
+/* ═══ Visual polish -- colored ambient glow (cards / headings / charts) ═══
+   Flat light-mode UI reads as dull without some tinted depth. This adds a
+   soft colored shadow (not literal neon) so cards/headings/charts feel
+   lifted instead of flat, while keeping the existing light theme. */
+.card,.chart-card{
+  box-shadow:0 1px 2px rgba(0,0,0,0.04),0 4px 20px rgba(0,113,227,0.06);
+  transition:box-shadow .25s ease,transform .2s ease;
+}
+.card:hover,.chart-card:hover{
+  box-shadow:0 2px 4px rgba(0,0,0,0.05),0 10px 32px rgba(0,113,227,0.13);
+  transform:translateY(-1px);
+}
+h1{text-shadow:0 0 32px rgba(0,113,227,0.14)}
+.stat-glow,.kpi-value{text-shadow:0 0 24px rgba(0,113,227,0.18)}
+canvas{filter:drop-shadow(0 2px 10px rgba(0,113,227,0.08))}
+html{background:var(--bg0);color-scheme:light}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg0);color:var(--t0);min-height:100vh;font-size:14px}
+h1,h2,h3{font-family:var(--disp);font-weight:700;letter-spacing:-.02em}
+a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
+.sb{width:250px;background:var(--bg1);border-right:1px solid var(--border);display:flex;flex-direction:column;position:fixed;top:0;left:0;height:100vh;z-index:100;overflow-y:auto}
+.main{margin-left:250px;padding:24px 28px;max-width:1400px}
+.sb-hdr{padding:20px 18px 16px;border-bottom:1px solid var(--border);background:var(--bg1);position:relative}
+.sb-hdr::after{content:'';position:absolute;left:18px;right:18px;bottom:-1px;height:2px;background:linear-gradient(90deg,var(--blue) 0%,rgba(0,113,227,0) 70%)}
+.sb-mark{width:34px;height:34px;background:linear-gradient(150deg,#3395F0 0%,var(--blue) 100%);border-radius:9px;display:flex;align-items:center;justify-content:center;margin-bottom:11px;box-shadow:0 4px 10px rgba(0,113,227,0.28)}
+.sa-badge{background:var(--blue-d);color:var(--blue);border:1px solid var(--border2);border-radius:4px;font-size:10px;font-family:var(--mono);padding:2px 8px;display:inline-block;margin-top:9px;letter-spacing:.04em;font-weight:600}
+.sb-hdr h2{font-size:17px;font-weight:800;color:var(--t0);letter-spacing:-.02em}
+.sb-hdr p{font-size:10px;color:var(--t2);margin-top:7px;font-family:var(--mono)}
+.sb-nav{padding:12px 10px;flex:1}
+.ni{display:flex;align-items:center;gap:7px;padding:7px 10px;border-radius:var(--r8);color:var(--t1);font-size:11.5px;margin-bottom:1px;transition:all .15s;white-space:nowrap;overflow:hidden}
+.ni svg{flex-shrink:0}
+.ni span{flex-shrink:0;margin-left:auto}
+.ni:hover{background:var(--bg3);color:var(--t0)}.ni.on{background:var(--blue-d);color:var(--blue);border-left:3px solid var(--blue);font-weight:600}
+.sb-foot{padding:12px 18px;border-top:1px solid var(--border);background:var(--bg1)}
+.badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:500;font-family:var(--mono);text-transform:uppercase;letter-spacing:.04em}
+.b-active{background:var(--green-d);color:var(--green)}.b-suspended{background:var(--red-d);color:var(--red)}.b-trial{background:var(--amber-d);color:var(--amber)}.b-inactive{background:var(--bg3);color:var(--t2)}
+.b-pro{background:var(--blue-d);color:var(--blue)}.b-basic{background:var(--bg3);color:var(--t1)}.b-enterprise{background:var(--purple-d);color:var(--purple)}
+.b-mr{background:var(--bg3);color:var(--t1)}.b-asm{background:var(--green-d);color:var(--green)}.b-rsm{background:var(--blue-d);color:var(--blue)}.b-zsm{background:var(--purple-d);color:var(--purple)}.b-nsm{background:var(--amber-d);color:var(--amber)}.b-company_admin{background:var(--teal-d);color:var(--teal)}
+.b-done{background:var(--green-d);color:var(--green)}.b-left{background:var(--bg3);color:var(--t2)}
+.card{background:var(--bg1);border:1px solid var(--border);border-radius:var(--r12);overflow:hidden;margin-bottom:16px;box-shadow:var(--shadow-sm)}
+.ch{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;background:var(--bg2)}
+.ch h3{font-size:13px;font-weight:500;color:var(--t0)}.ch-r{font-size:10px;color:var(--t2);font-family:var(--mono)}
+.form-g{margin-bottom:12px}
+.form-g label{display:block;font-size:11px;color:var(--t1);font-family:var(--mono);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
+.form-g input,.form-g select,.form-g textarea{width:100%;padding:8px 10px;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r8);color:var(--t0);font-size:12px;font-family:inherit;outline:none;transition:border .15s}
+.form-g input:focus,.form-g select:focus{border-color:var(--blue)}.form-g select option{background:var(--bg2)}
+.btn-p{width:100%;padding:9px;background:var(--blue);color:#fff;border:none;border-radius:var(--r8);font-size:13px;font-weight:500;cursor:pointer;font-family:inherit;transition:all .2s}
+.btn-p:hover{background:#0058B0}
+.btn-sm{padding:4px 10px;border-radius:var(--r4);font-size:11px;cursor:pointer;font-family:var(--mono);border:none}
+.btn-blue{background:var(--blue);color:#fff}.btn-grn{background:var(--green-d);border:1px solid var(--green);color:var(--green)}
+.btn-del{background:var(--red-d);border:1px solid var(--red);color:var(--red)}.btn-del:hover{background:var(--red);color:#fff}
+.btn-act{background:var(--bg3);border:1px solid var(--border2);color:var(--t1)}.btn-act:hover{color:var(--t0)}
+.sg{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px}
+.sc{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r12);padding:14px;text-align:center}
+.sl{font-size:10px;color:var(--t2);font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
+.sv{font-size:28px;font-weight:700;font-family:var(--mono);color:var(--navy)}
+.sv.bl{color:var(--blue)}.sv.gr{color:var(--green)}.sv.am{color:var(--amber)}.sv.re{color:var(--red)}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.r2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.r3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead tr{background:var(--bg2)}
+thead th{padding:8px 12px;text-align:left;font-size:10px;font-weight:500;color:var(--t2);font-family:var(--mono);text-transform:uppercase;white-space:nowrap;border-bottom:1px solid var(--border)}
+thead th.r{text-align:right}
+tbody tr{border-bottom:1px solid var(--border);transition:background .12s}
+tbody tr:hover td{background:rgba(56,139,253,.04)}
+tbody td{padding:8px 12px;color:var(--t1)}
+tbody td.r{text-align:right;font-family:var(--mono)}.td-b{font-weight:500;color:var(--t0)}
+.modal{display:none;position:fixed;inset:0;background:rgba(29,29,31,0.5);backdrop-filter:blur(8px) saturate(140%);-webkit-backdrop-filter:blur(8px) saturate(140%);z-index:999;align-items:stretch;justify-content:center;padding:0}
+.modal-box{background:var(--glass-bg-strong);backdrop-filter:blur(var(--glass-blur)) saturate(180%);-webkit-backdrop-filter:blur(var(--glass-blur)) saturate(180%);border:0;box-shadow:none;border-radius:0;padding:32px 26px;width:100vw;max-width:100vw;height:100vh;max-height:100vh;overflow-y:auto}
+.modal-box>*{max-width:640px;width:100%;margin-left:auto;margin-right:auto}
+.mh{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.mh h2{font-size:14px;font-weight:600;color:var(--t0)}
+.mc{background:none;border:none;color:var(--t2);font-size:18px;cursor:pointer}.mc:hover{color:var(--t0)}
+.flash{padding:8px 12px;border-radius:var(--r8);font-size:12px;margin-bottom:12px}
+.f-ok{background:var(--green-d);border:1px solid var(--green);color:var(--green)}
+.f-err{background:var(--red-d);border:1px solid var(--red);color:var(--red)}
+.ph{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:8px}
+.ph h1{font-size:18px;font-weight:700;color:var(--navy)}.ph p{font-size:11px;color:var(--t2);margin-top:2px;font-family:var(--mono)}
+.back{display:inline-flex;align-items:center;gap:5px;color:var(--t2);font-size:12px;margin-bottom:16px;transition:color .15s}
+.back:hover{color:var(--t0);text-decoration:none}
+.co-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r12);padding:14px 16px;margin-bottom:8px;transition:border-color .15s}
+.co-card:hover{border-color:var(--border2)}
+.muted{color:var(--t2)}.mono{font-family:var(--mono)}
+@keyframes fu{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}.fu{animation:fu .3s ease both}
+
+/* ═══ Mobile navigation (hamburger + off-canvas sidebar) ═══ */
+.mobile-menu-btn{display:none;position:fixed;top:12px;left:12px;z-index:210;width:38px;height:38px;background:var(--blue);color:#fff;border:none;border-radius:var(--r8);font-size:17px;cursor:pointer;align-items:center;justify-content:center;box-shadow:0 3px 10px rgba(0,113,227,0.3)}
+.sticky-glass-head{background:var(--glass-bg-strong)!important;backdrop-filter:blur(var(--glass-blur)) saturate(180%);-webkit-backdrop-filter:blur(var(--glass-blur)) saturate(180%)}
+.sb-overlay{display:none;position:fixed;inset:0;background:rgba(29,29,31,0.4);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:149}
+.sb-overlay.show{display:block}
+
+/* ═══ Responsive breakpoints ═══ */
+@media(max-width:900px){
+  .mobile-menu-btn{display:flex}
+  .sb{transform:translateX(-100%);transition:transform .25s ease;z-index:150;width:250px}
+  .sb.mobile-open{transform:translateX(0)}
+  .main{margin-left:0!important;padding:64px 16px 24px;max-width:100%}
+  .sg{grid-template-columns:repeat(2,1fr)}
+  .g2,.r2,.r3{grid-template-columns:1fr}
+  .ph{flex-direction:column;align-items:flex-start}
+  .modal-box{width:94vw;padding:20px 18px}
+}
+@media(max-width:520px){
+  .sg{grid-template-columns:repeat(2,1fr);gap:8px}
+  .sc{padding:10px}
+  .sv{font-size:18px}
+  table{font-size:11px}
+  thead th,tbody td{padding:6px 8px}
+  .modal-box{padding:16px 14px}
+  .ph h1{font-size:16px}
+}
+</style>
+</head>
+<body{% if cur=='verification' %} data-auto-refresh-page="45"{% endif %}>
+
+{% macro sa_sidebar(cur) %}
+<button class="mobile-menu-btn" id="mobile-menu-btn" onclick="toggleMobileSidebar()" aria-label="Menu">☰</button>
+<div class="sb-overlay" id="sb-overlay" onclick="toggleMobileSidebar()"></div>
+<div class="sb" id="main-sidebar">
+  <div class="sb-hdr">
+    <div class="sb-mark"><svg width="14" height="14" fill="none" viewBox="0 0 14 14"><rect x="1.5" y="8" width="2.6" height="4.5" rx="1" fill="white"/><rect x="5.7" y="5" width="2.6" height="7.5" rx="1" fill="white" fill-opacity="0.85"/><rect x="9.9" y="1.5" width="2.6" height="11" rx="1" fill="white" fill-opacity="0.7"/></svg></div>
+    <h2>Data Extraction</h2>
+    <div class="sa-badge">MASTER ADMIN</div>
+    <p>Super Admin Panel</p>
+  </div>
+  <div class="sb-nav">
+    <a href="/superadmin/dashboard" style="text-decoration:none"><div class="ni {{ 'on' if cur=='dashboard' else '' }}">
+      <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><rect x="1" y="1" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="7" y="1" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="7" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="7" y="7" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/></svg>
+      All Companies
+    </div></a>
+    <a href="/superadmin/reg-links" style="text-decoration:none"><div class="ni {{ 'on' if cur=='reglinks' else '' }}">
+      <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><path d="M5 7.5a3 3 0 004.243 0l1.5-1.5A3 3 0 006.5 1.757L5.5 2.757" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M8 5.5a3 3 0 00-4.243 0l-1.5 1.5A3 3 0 006.5 11.243L7.5 10.243" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      Reg Links {% if reg_links_active is defined and reg_links_active %}<span style="background:var(--green);color:#000;border-radius:10px;padding:0 5px;font-size:9px">{{ reg_links_active }}</span>{% endif %}
+    </div></a>
+    <a href="/superadmin/credits" style="text-decoration:none"><div class="ni {{ 'on' if cur=='credits' else '' }}">
+      <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><rect x="1" y="3" width="11" height="7" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M1 6h11" stroke="currentColor" stroke-width="1.2"/></svg>
+      Credits {% if pending_credits is defined and pending_credits %}<span style="background:var(--amber);color:#000;border-radius:10px;padding:0 5px;font-size:9px">{{ pending_credits }}</span>{% endif %}
+    </div></a>
+    <a href="/superadmin/bulk-upload" style="text-decoration:none"><div class="ni {{ 'on' if cur=='bulk' else '' }}">
+      <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><path d="M6.5 9V2M6.5 2L4 4.5M6.5 2L9 4.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M1 10v2h11v-2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      Bulk Upload Users
+    </div></a>
+    <a href="/superadmin/verification" style="text-decoration:none"><div class="ni {{ 'on' if cur=='verification' else '' }}">
+      <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><path d="M2 7l3 3 6-6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Verification Queue {% if vcounts is defined and vcounts.get('pending') %}<span id="verif-pending-badge" data-live-badge="/superadmin/api/verification-pending-count:pending" style="background:var(--amber);color:#000;border-radius:10px;padding:0 5px;font-size:9px">{{ vcounts['pending'] }}</span>{% else %}<span id="verif-pending-badge" data-live-badge="/superadmin/api/verification-pending-count:pending" style="display:none;background:var(--amber);color:#000;border-radius:10px;padding:0 5px;font-size:9px"></span>{% endif %}
+    </div></a>
+    <a href="/superadmin/analytics" style="text-decoration:none"><div class="ni {{ 'on' if cur=='analytics' else '' }}">
+      <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><path d="M1 10L4 6l3 2 3-5 2 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Analytics
+    </div></a>
+    <a href="/superadmin/ai-costing" style="text-decoration:none"><div class="ni {{ 'on' if cur=='ai_costing' else '' }}">
+      <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><circle cx="6.5" cy="6.5" r="5" stroke="currentColor" stroke-width="1.2"/><path d="M6.5 3.5v3l2 2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      AI Costing
+    </div></a>
+    <a href="/superadmin/ai-models" style="text-decoration:none"><div class="ni {{ 'on' if cur=='ai_models' else '' }}">
+      <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><rect x="1.5" y="1.5" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M4 4h5M4 6.5h5M4 9h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      AI Models
+    </div></a>
+    <a href="/superadmin/verifiers" style="text-decoration:none"><div class="ni {{ 'on' if cur=='verifiers' else '' }}">
+      <svg width="13" height="13" fill="none" viewBox="0 0 13 13"><circle cx="6.5" cy="4" r="2.5" stroke="currentColor" stroke-width="1.2"/><path d="M1.5 11c0-2.21 2.239-4 5-4s5 1.79 5 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      Verifier Accounts
+    </div></a>
+  </div>
+  <div class="sb-foot">
+    <div style="font-size:11px;color:var(--t2)">{{ sa_name }}</div>
+    <div style="margin-top:6px"><a href="/superadmin/logout" style="font-size:11px;color:var(--t2)">Sign out →</a></div>
+  </div>
+</div>
+{% endmacro %}
+
+{% macro flashes() %}
+{% for m in get_flashed_messages() %}
+<div class="flash {{ 'f-ok' if m and (m.startswith('✓') or 'updated' in m or 'added' in m or 'Created' in m or 'reset' in m or 'uploaded' in m or 'Approved' in m or 'created' in m or 'revoked' in m or 'allocated' in m) else 'f-err' }}">{{ m }}</div>
+{% endfor %}
+{% endmacro %}
+
+{# ═══ SA LOGIN ═══ #}
+{% if page == "sa_login" %}
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--bg1);border:1px solid var(--border);border-radius:var(--r16);padding:36px 32px;width:100%;max-width:400px">
+    <div class="sa-badge" style="margin-bottom:14px">MASTER ADMIN</div>
+    <h1 style="font-size:20px;font-weight:600;color:var(--t0);margin-bottom:4px">Super Admin Portal</h1>
+    <p style="font-size:12px;color:var(--t2);margin-bottom:24px">Separate from company user login</p>
+    {{ flashes() }}
+    <form method="POST" action="/superadmin/login">
+      <div class="form-g"><label>Username</label><input type="text" name="username" required autofocus value="superadmin"></div>
+      <div class="form-g"><label>Password</label><input type="password" name="password" required></div>
+      <button type="submit" class="btn-p">Sign In to Master Panel</button>
+    </form>
+    <div style="margin-top:16px;padding:12px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r8);font-size:11px;color:var(--t2);font-family:var(--mono)">
+      Default: superadmin / superadmin@2025
+    </div>
+    <div style="margin-top:14px;padding:10px 14px;background:rgba(20,184,166,0.08);border:0.5px solid var(--teal);border-radius:var(--r8);font-size:11px;text-align:center">
+      <span style="color:var(--teal);font-weight:600">Verification Agents</span>
+      <span style="color:var(--t2)"> — use this same login page.<br>Your dashboard loads automatically based on your role.</span>
+    </div>
+    <div style="text-align:center;margin-top:10px;font-size:12px;color:var(--t2)">Company users: <a href="/login">Company Login →</a></div>
+  </div>
+</div>
+
+{# ═══ SA DASHBOARD ═══ #}
+{% elif page == "sa_dashboard" %}
+<div style="display:flex;min-height:100vh">
+  {{ sa_sidebar('dashboard') }}
+  <div class="main">
+    <div class="ph">
+      <div><h1>Companies</h1><p>Manage all pharma companies and their users</p></div>
+      <div style="display:flex;gap:6px">
+        <button class="btn-sm btn-blue" onclick="document.getElementById('add-co-modal').style.display='flex'">+ Add Company</button>
+        <a href="/superadmin/bulk-upload" class="btn-sm btn-grn" style="text-decoration:none">↑ Bulk Users</a>
+      </div>
+    </div>
+    {{ flashes() }}
+    <div class="sg">
+      <div class="sc"><div class="sl">Companies</div><div class="sv bl">{{ total_companies }}</div></div>
+      <div class="sc"><div class="sl">Total Users</div><div class="sv gr">{{ total_users }}</div></div>
+      <div class="sc"><div class="sl">Total Uploads</div><div class="sv am">{{ total_uploads }}</div></div>
+      <div class="sc"><div class="sl">Pending Regs</div><div class="sv re">{{ pending_regs }}</div></div>
+    </div>
+    {% for co in companies %}
+    <div class="co-card fu" style="animation-delay:{{ loop.index0 * 0.03 }}s">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap">
+            {% if co.get('logo_url') %}<img src="/uploads/{{ co['logo_url'] }}" style="height:24px;max-width:80px;object-fit:contain;background:var(--bg3);padding:2px 5px;border-radius:var(--r4)">{% endif %}
+            <div class="td-b" style="font-size:14px">{{ co['name'] }}</div>
+            <span style="font-size:10px;color:var(--t2);font-family:var(--mono);background:var(--bg3);padding:1px 6px;border-radius:3px">{{ co['code'] }}</span>
+            <span class="badge b-{{ co['plan'] }}">{{ co['plan'] }}</span>
+            <span class="badge b-{{ co['status'] }}">{{ co['status'] }}</span>
+            {% if co['pending_regs'] %}<span class="badge" style="background:var(--red-d);color:var(--red)">{{ co['pending_regs'] }} pending</span>{% endif %}
+          </div>
+          <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--t2);font-family:var(--mono)">
+            {% if co['city'] %}<span>{{ co['city'] }}{% if co['state'] %}, {{ co['state'] }}{% endif %}</span>{% endif %}
+            {% if co['contact_person'] %}<span>{{ co['contact_person'] }}</span>{% endif %}
+            {% if co['contact_mobile'] %}<span>{{ co['contact_mobile'] }}</span>{% endif %}
+            <span>{{ co['user_count'] }} / {{ co['max_users'] }} users</span>
+            <span>{{ co['upload_count'] }} uploads</span>
+            <span>{{ co['division_count'] }} divisions</span>
+            <span>{{ co['created_at'][:10] }}</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:5px;flex-shrink:0">
+          <a href="/superadmin/company/{{ co['id'] }}" class="btn-sm btn-act" style="text-decoration:none">Manage</a>
+          <a href="/superadmin/company/{{ co['id'] }}" class="btn-sm btn-act" style="text-decoration:none">Edit →</a>
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <div class="card"><div style="text-align:center;padding:40px;color:var(--t2);font-size:13px">No companies yet. Add the first one above.</div></div>
+    {% endfor %}
+  </div>
+</div>
+
+<div id="add-co-modal" class="modal">
+  <div class="modal-box"><div class="mh"><h2>Add New Company</h2><button class="mc" onclick="this.closest('.modal').style.display='none'">&times;</button></div>
+    <form method="POST" action="/superadmin/companies/add">
+      <div class="r2">
+        <div class="form-g"><label>Company Name *</label><input type="text" name="name" required placeholder="Bharat Pharma Pvt Ltd"></div>
+        <div class="form-g">
+          <label>Company Code <span style="font-size:9px;color:var(--t2);font-weight:400">(auto-generated if blank)</span></label>
+          <input type="text" name="code" placeholder="CMP001 — leave blank to auto-assign" style="text-transform:uppercase;font-family:var(--mono);letter-spacing:.06em">
+        </div>
+      </div>
+      <div class="form-g"><label>Address</label><input type="text" name="address"></div>
+      <div class="r2">
+        <div class="form-g"><label>City</label><input type="text" name="city"></div>
+        <div class="form-g"><label>State</label><input type="text" name="state"></div>
+      </div>
+      <div class="r2">
+        <div class="form-g"><label>GST Number</label><input type="text" name="gst_number"></div>
+        <div class="form-g"><label>Drug License No</label><input type="text" name="drug_license"></div>
+      </div>
+      <div class="r2">
+        <div class="form-g"><label>Contact Person</label><input type="text" name="contact_person"></div>
+        <div class="form-g"><label>Contact Mobile</label><input type="tel" name="contact_mobile"></div>
+      </div>
+      <div class="r2">
+        <div class="form-g"><label>Contact Email</label><input type="email" name="contact_email"></div>
+        <div class="form-g"><label>Website</label><input type="text" name="website" placeholder="https://..."></div>
+      </div>
+      <div class="r3">
+        <div class="form-g"><label>Plan</label><select name="plan"><option value="basic">Basic</option><option value="pro" selected>Pro</option><option value="enterprise">Enterprise</option></select></div>
+        <div class="form-g"><label>Max Users</label><input type="number" name="max_users" value="100" min="1"></div>
+        <div class="form-g"><label>Admin Password</label><input type="text" name="admin_password" value="admin@123"></div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r8);padding:10px 12px;margin-bottom:12px;font-size:11px;color:var(--t2)">
+        ℹ 3 default divisions and a company admin account will be created automatically.
+      </div>
+      <div style="display:flex;gap:8px"><button type="submit" class="btn-p" style="flex:1">Create Company</button><button type="button" onclick="this.closest('.modal').style.display='none'" style="flex:1;padding:9px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r8);color:var(--t1);cursor:pointer;font-family:inherit">Cancel</button></div>
+    </form>
+  </div>
+</div>
+
+{# ═══ SA COMPANY DETAIL ═══ #}
+{% elif page == "sa_company_detail" %}
+<div style="display:flex;min-height:100vh">
+  {{ sa_sidebar('dashboard') }}
+  <div class="main">
+    <a href="/superadmin/dashboard" class="back"><svg width="12" height="12" fill="none" viewBox="0 0 12 12"><path d="M8 2L3 6L8 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg> All Companies</a>
+    <div class="ph">
+      <div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;flex-wrap:wrap">
+          {% if company.get('logo_url') %}<img src="/uploads/{{ company['logo_url'] }}" style="height:36px;max-width:120px;object-fit:contain;background:var(--bg3);padding:4px 8px;border-radius:var(--r8)">{% endif %}
+          <h1>{{ company['name'] }}</h1>
+          <span style="font-size:11px;color:var(--t2);font-family:var(--mono);background:var(--bg3);padding:1px 7px;border-radius:3px">{{ company['code'] }}</span>
+          <span class="badge b-{{ company['plan'] }}">{{ company['plan'] }}</span>
+          <span class="badge b-{{ company['status'] }}">{{ company['status'] }}</span>
+        </div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--t2);font-family:var(--mono)">
+          {% if company['city'] %}<span>{{ company['city'] }}{% if company['state'] %}, {{ company['state'] }}{% endif %}</span>{% endif %}
+          {% if company['gst_number'] %}<span>GST: {{ company['gst_number'] }}</span>{% endif %}
+          {% if company['contact_mobile'] %}<span>{{ company['contact_mobile'] }}</span>{% endif %}
+          <span>{{ stats['users'] }} active users / {{ company['max_users'] }} max</span>
+          <span>{{ stats['uploads'] }} uploads · ₹{{ "{:,.0f}".format(stats['revenue'] or 0) }} revenue</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn-sm btn-act" onclick="openEditCo({{ company['id'] }},{{ company|tojson|safe }})">✏ Edit Company</button>
+        <button class="btn-sm btn-blue" onclick="document.getElementById('logo-modal').style.display='flex'">📷 Logo</button>
+      </div>
+    </div>
+    {{ flashes() }}
+
+    <div class="g2">
+      <div class="card">
+        <div class="ch"><h3>Divisions ({{ divisions|length }})</h3><button class="btn-sm btn-blue" onclick="document.getElementById('add-div-modal').style.display='flex'">+ Add</button></div>
+        <div class="tw"><table><thead><tr><th>Division</th><th>Code</th><th class="r">Members</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>{% for d in divisions %}<tr>
+            <td class="td-b">{{ d['name'] }}</td><td class="mono muted">{{ d['code'] or '' }}</td>
+            <td class="r mono">{{ d['member_count'] }}</td>
+            <td><span class="badge b-{{ d['status'] or 'active' }}">{{ d['status'] or 'active' }}</span></td>
+            <td><button class="btn-sm btn-act" onclick="openEditDiv({{ d['id'] }},{{ company['id'] }},'{{ d['name']|replace("'","\\'") }}','{{ d['code'] or '' }}','{{ d['description'] or '' }}','{{ d['status'] or 'active' }}')">Rename</button></td>
+          </tr>{% else %}<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--t2);font-size:12px">No divisions</td></tr>{% endfor %}</tbody>
+        </table></div>
+      </div>
+      <div class="card">
+        <div class="ch"><h3>Zones ({{ zones|length }})</h3><button class="btn-sm btn-blue" onclick="document.getElementById('add-zone-modal').style.display='flex'">+ Add</button></div>
+        <div class="tw"><table><thead><tr><th>Zone</th><th>Code</th><th>States</th></tr></thead>
+          <tbody>{% for z in zones %}<tr>
+            <td class="td-b">{{ z['name'] }}</td><td class="mono muted">{{ z['code'] or '' }}</td>
+            <td class="muted" style="font-size:11px">{{ z['states'] or '' }}</td>
+          </tr>{% else %}<tr><td colspan="3" style="text-align:center;padding:16px;color:var(--t2);font-size:12px">No zones</td></tr>{% endfor %}</tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><h3>Users — MR → ASM → RSM → ZSM → NSM → Admin</h3><span class="ch-r">{{ users|length }} total</span></div>
+      <div class="tw"><table>
+        <thead><tr><th>Name</th><th>Role</th><th>Emp ID</th><th>Mobile</th><th>Division</th><th>Reports To</th><th>Area</th><th>Status</th><th>Joined</th><th>Action</th></tr></thead>
+        <tbody>{% for u in users %}<tr>
+          <td class="td-b" style="font-size:12px">{{ u['full_name'] }}</td>
+          <td><span class="badge b-{{ u['role'] }}">{{ u['role'].upper() }}</span></td>
+          <td class="mono muted" style="font-size:10px">{{ u['employee_id'] or '—' }}</td>
+          <td class="mono muted" style="font-size:10px">{{ u['mobile'] or '—' }}</td>
+          <td class="muted" style="font-size:11px">{{ u['div_name'] or '—' }}</td>
+          <td class="muted" style="font-size:11px">{{ u['parent_name'] or '—' }}</td>
+          <td class="muted" style="font-size:11px">{{ u['area'] or '—' }}</td>
+          <td><span class="badge b-{{ u['status'] or 'active' }}">{{ u['status'] or 'active' }}</span></td>
+          <td class="mono muted" style="font-size:10px">{{ u['joined_date'] or '—' }}</td>
+          <td>
+            <form method="POST" action="/superadmin/password-reset" style="display:inline">
+              <input type="hidden" name="user_id" value="{{ u['id'] }}">
+              <input type="hidden" name="company_id" value="{{ company['id'] }}">
+              <input type="hidden" name="new_password" value="pass@123">
+              <button type="submit" class="btn-sm btn-act" onclick="return confirm('Reset password to pass@123?')">Reset PW</button>
+            </form>
+          </td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+    </div>
+
+    {% if handovers %}
+    <div class="card">
+      <div class="ch"><h3>Handover Log</h3></div>
+      <div class="tw"><table><thead><tr><th>From (Left)</th><th>To (Replacement)</th><th class="r">Transfers</th><th>Notes</th><th>Date</th></tr></thead>
+        <tbody>{% for h in handovers %}<tr>
+          <td class="td-b">{{ h['from_name'] }}</td><td class="td-b">{{ h['to_name'] }}</td>
+          <td class="r mono">{{ h['transfers'] }}</td><td class="muted" style="font-size:11px">{{ h['notes'] or '—' }}</td>
+          <td class="mono muted" style="font-size:10px">{{ h['done_at'][:10] }}</td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+    </div>{% endif %}
+  </div>
+</div>
+
+<div id="add-div-modal" class="modal">
+  <div class="modal-box"><div class="mh"><h2>Add Division</h2><button class="mc" onclick="this.closest('.modal').style.display='none'">&times;</button></div>
+    <form method="POST" action="/superadmin/divisions/add">
+      <input type="hidden" name="company_id" value="{{ company['id'] }}">
+      <div class="r2"><div class="form-g"><label>Name *</label><input type="text" name="name" required placeholder="e.g. Cardiac Division"></div><div class="form-g"><label>Code</label><input type="text" name="code" placeholder="CARD" style="text-transform:uppercase"></div></div>
+      <div class="form-g"><label>Description</label><input type="text" name="description" placeholder="Optional description"></div>
+      <div style="display:flex;gap:8px"><button type="submit" class="btn-p" style="flex:1">Add Division</button><button type="button" onclick="this.closest('.modal').style.display='none'" style="flex:1;padding:9px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r8);color:var(--t1);cursor:pointer;font-family:inherit">Cancel</button></div>
+    </form>
+  </div>
+</div>
+
+  {# Recent Uploads with Verification Controls #}
+  <div class="card" style="margin-top:16px">
+    <div class="ch">
+      <h3>Recent Uploads</h3>
+      <span class="ch-r">{{ recent_uploads|length }} records</span>
+    </div>
+    <div class="tw" style="max-height:400px;overflow-y:auto">
+      <table>
+        <thead class="sticky-glass-head" style="position:sticky;top:0">
+          <tr>
+            <th>Stockist</th><th>Uploader</th><th>Division</th>
+            <th>Period</th><th class="r">Net ₹</th>
+            <th>Status</th><th>Verif</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for up in recent_uploads %}<tr>
+            <td>
+              <div class="b" style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                {{ up['stockist_name'] or up['original_filename'] or '—' }}
+              </div>
+              <div class="mono muted" style="font-size:9px">{{ up['upload_date'][:10] if up['upload_date'] else '' }}</div>
+            </td>
+            <td>
+              <div style="font-size:11px">{{ up['uploader_name'] }}</div>
+              <span class="badge b-{{ up['uploader_role'] }}" style="font-size:9px">{{ up['uploader_role'].upper() }}</span>
+            </td>
+            <td class="muted" style="font-size:11px">{{ up['division_name'] or '—' }}</td>
+            <td style="font-size:10px;font-family:var(--mono);white-space:nowrap">
+              {% if up['statement_from_date'] %}
+              <span style="color:var(--blue)">{{ up['statement_from_date'] }}</span> →
+              <span style="color:var(--blue)">{{ up['statement_to_date'] or '?' }}</span>
+              {% else %}—{% endif %}
+            </td>
+            <td class="r mono b" style="color:var(--green)">
+              {% if up['invoice_net'] %}₹{{ "{:,.0f}".format(up['invoice_net']) }}{% else %}—{% endif %}
+            </td>
+            <td>
+              <span class="badge {% if up['status']=='done' %}b-done{% elif up['status']=='rejected' %}b-error{% else %}b-pending{% endif %}">
+                {{ up['status'] }}
+              </span>
+            </td>
+            <td>
+              {% if up['mv_status']=='verified' %}
+                <span style="font-size:10px;color:var(--green)">✓ Verified</span>
+              {% elif up['mv_status']=='pending' %}
+                <span style="font-size:10px;color:var(--amber)">⏳ Pending</span>
+              {% elif up['status']=='done' %}
+                <span style="font-size:10px;color:var(--t2)">—</span>
+              {% else %}—{% endif %}
+            </td>
+            <td style="white-space:nowrap">
+              {% if up['status']=='done' %}
+                <a href="/extraction/{{ up['id'] }}" target="_blank"
+                  style="font-size:10px;color:var(--blue)">View</a>
+                {% if not up['mv_id'] %}
+                <form method="POST" action="/superadmin/verification/create/{{ up['id'] }}" style="display:inline">
+                  <button type="submit" class="btn-sm btn-act" style="margin-left:4px;font-size:9px"
+                    onclick="return confirm('Send this upload to manual verification queue?')">
+                    + Verify
+                  </button>
+                </form>
+                {% endif %}
+              {% endif %}
+            </td>
+          </tr>{% else %}
+          <tr><td colspan="8" style="text-align:center;padding:20px;color:var(--t2)">No uploads yet</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+</div>
+</div>
+
+<div id="edit-div-modal" class="modal">
+  <div class="modal-box"><div class="mh"><h2>Rename / Edit Division</h2><button class="mc" onclick="this.closest('.modal').style.display='none'">&times;</button></div>
+    <form id="edit-div-form" method="POST" action="">
+      <input type="hidden" id="ed-cid" name="company_id" value="">
+      <div class="r2"><div class="form-g"><label>Division Name *</label><input type="text" name="name" id="ed-name" required></div><div class="form-g"><label>Code</label><input type="text" name="code" id="ed-code" style="text-transform:uppercase"></div></div>
+      <div class="form-g"><label>Description</label><input type="text" name="description" id="ed-desc"></div>
+      <div class="form-g"><label>Status</label><select name="status" id="ed-status"><option value="active">Active</option><option value="inactive">Inactive</option></select></div>
+      <div style="display:flex;gap:8px"><button type="submit" class="btn-p" style="flex:1">Save Changes</button><button type="button" onclick="this.closest('.modal').style.display='none'" style="flex:1;padding:9px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r8);color:var(--t1);cursor:pointer;font-family:inherit">Cancel</button></div>
+    </form>
+  </div>
+</div>
+<div id="add-zone-modal" class="modal">
+  <div class="modal-box"><div class="mh"><h2>Add Zone</h2><button class="mc" onclick="this.closest('.modal').style.display='none'">&times;</button></div>
+    <form method="POST" action="/superadmin/zones/add">
+      <input type="hidden" name="company_id" value="{{ company['id'] }}">
+      <div class="r2"><div class="form-g"><label>Zone Name *</label><input type="text" name="name" required placeholder="North Zone"></div><div class="form-g"><label>Code</label><input type="text" name="code" placeholder="NORTH" style="text-transform:uppercase"></div></div>
+      <div class="form-g"><label>States Covered</label><input type="text" name="states" placeholder="Delhi, Haryana, Punjab"></div>
+      <div style="display:flex;gap:8px"><button type="submit" class="btn-p" style="flex:1">Add Zone</button><button type="button" onclick="this.closest('.modal').style.display='none'" style="flex:1;padding:9px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r8);color:var(--t1);cursor:pointer;font-family:inherit">Cancel</button></div>
+    </form>
+  </div>
+</div>
+<div id="logo-modal" class="modal">
+  <div class="modal-box"><div class="mh"><h2>Upload Company Logo</h2><button class="mc" onclick="this.closest('.modal').style.display='none'">&times;</button></div>
+    {% if company.get('logo_url') %}<div style="text-align:center;margin-bottom:14px"><img src="/uploads/{{ company['logo_url'] }}" style="max-height:60px;max-width:200px;object-fit:contain;background:var(--bg3);padding:8px;border-radius:var(--r8)"><div style="font-size:10px;color:var(--t2);margin-top:4px">Current logo</div></div>{% endif %}
+    <form method="POST" action="/superadmin/companies/logo/{{ company['id'] }}" enctype="multipart/form-data">
+      <div class="form-g"><label>Logo File (PNG / SVG / JPG recommended)</label><input type="file" name="logo" accept=".jpg,.jpeg,.png,.svg,.webp,.gif" required></div>
+      <div style="font-size:11px;color:var(--t2);margin-bottom:12px">Recommended: 200×60px transparent PNG/SVG. Max 2MB.</div>
+      <div style="display:flex;gap:8px"><button type="submit" class="btn-p" style="flex:1">Upload Logo</button><button type="button" onclick="this.closest('.modal').style.display='none'" style="flex:1;padding:9px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r8);color:var(--t1);cursor:pointer;font-family:inherit">Cancel</button></div>
+    </form>
+  </div>
+</div>
+<div id="edit-co-modal" class="modal">
+  <div class="modal-box"><div class="mh"><h2>Edit Company</h2><button class="mc" onclick="this.closest('.modal').style.display='none'">&times;</button></div>
+    <form id="edit-co-form" method="POST" action="">
+      <div class="form-g"><label>Company Name *</label><input type="text" name="name" id="ec-name" required></div>
+      <div class="form-g"><label>Address</label><input type="text" name="address" id="ec-addr"></div>
+      <div class="r2"><div class="form-g"><label>City</label><input type="text" name="city" id="ec-city"></div><div class="form-g"><label>State</label><input type="text" name="state" id="ec-state"></div></div>
+      <div class="r2"><div class="form-g"><label>GST Number</label><input type="text" name="gst_number" id="ec-gst"></div><div class="form-g"><label>Drug License</label><input type="text" name="drug_license" id="ec-dl"></div></div>
+      <div class="r2"><div class="form-g"><label>Contact Person</label><input type="text" name="contact_person" id="ec-cp"></div><div class="form-g"><label>Contact Mobile</label><input type="tel" name="contact_mobile" id="ec-cm"></div></div>
+      <div class="r2"><div class="form-g"><label>Contact Email</label><input type="email" name="contact_email" id="ec-ce"></div><div class="form-g"><label>Website</label><input type="text" name="website" id="ec-web"></div></div>
+      <div class="r3">
+        <div class="form-g"><label>Plan</label><select name="plan" id="ec-plan"><option value="basic">Basic</option><option value="pro">Pro</option><option value="enterprise">Enterprise</option></select></div>
+        <div class="form-g"><label>Status</label><select name="status" id="ec-status"><option value="active">Active</option><option value="suspended">Suspended</option><option value="trial">Trial</option></select></div>
+        <div class="form-g"><label>Max Users</label><input type="number" name="max_users" id="ec-mu" min="1"></div>
+      </div>
+      <div class="form-g"><label>Notes</label><textarea name="notes" id="ec-notes" rows="2" style="resize:vertical"></textarea></div>
+      <div style="display:flex;gap:8px"><button type="submit" class="btn-p" style="flex:1">Save Changes</button><button type="button" onclick="this.closest('.modal').style.display='none'" style="flex:1;padding:9px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r8);color:var(--t1);cursor:pointer;font-family:inherit">Cancel</button></div>
+    </form>
+  </div>
+</div>
+
+{# ═══ BULK UPLOAD ═══ #}
+{% elif page == "sa_bulk" %}
+<div style="display:flex;min-height:100vh">
+  {{ sa_sidebar('bulk') }}
+  <div class="main">
+    <div class="ph">
+      <div><h1>Bulk Upload Users</h1><p>Create multiple users at once via CSV — division &amp; manager auto-matched</p></div>
+      {% if cid_sel %}
+      <a href="/superadmin/bulk-upload/template?company_id={{ cid_sel }}" class="btn-sm btn-grn" style="text-decoration:none">⬇ Template for this Company</a>
+      {% else %}
+      <a href="/superadmin/bulk-upload/template" class="btn-sm btn-grn" style="text-decoration:none">⬇ Generic Template</a>
+      {% endif %}
+    </div>
+    {{ flashes() }}
+
+    {# Step 1: Select company to load divisions + managers #}
+    <div class="card" style="margin-bottom:16px">
+      <div class="ch"><h3>Step 1 — Select Company</h3></div>
+      <div style="padding:14px">
+        <form method="GET" action="/superadmin/bulk-upload" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+          <div class="form-g" style="min-width:260px;margin:0">
+            <label>Company</label>
+            <select name="company_id" onchange="this.form.submit()" style="min-width:220px">
+              <option value="">— Select Company —</option>
+              {% for co in companies %}<option value="{{ co['id'] }}" {% if co['id']|string==cid_sel|string %}selected{% endif %}>{{ co['name'] }} ({{ co['code'] }})</option>{% endfor %}
+            </select>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    {% if cid_sel %}
+    <div class="g2">
+      {# Upload form #}
+      <div class="card">
+        <div class="ch"><h3>Step 2 — Upload CSV</h3><span class="ch-r">{{ divisions|length }} division(s) · {{ managers|length }} manager(s) available</span></div>
+        <div style="padding:16px">
+          <form method="POST" action="/superadmin/bulk-upload" enctype="multipart/form-data">
+            <input type="hidden" name="company_id" value="{{ cid_sel }}">
+            <div class="form-g"><label>CSV File *</label><input type="file" name="csv_file" accept=".csv" required></div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:8px 10px;background:var(--amber-d);border:0.5px solid var(--amber);border-radius:var(--r8)">
+              <input type="checkbox" name="update_existing" value="1" id="upd_ex" style="accent-color:var(--amber);width:14px;height:14px;cursor:pointer">
+              <label for="upd_ex" style="font-size:11px;color:var(--amber);cursor:pointer;font-family:var(--mono)">Update existing users (overwrite name, role, area, manager for duplicate mobiles)</label>
+            </div>
+            <button type="submit" class="btn-p" style="width:100%">⬆ Upload &amp; Create Users</button>
+          </form>
+
+          {# Available divisions dropdown for reference #}
+          <div style="margin-top:14px;padding:10px;background:var(--bg2);border-radius:var(--r8)">
+            <div style="font-size:10px;font-family:var(--mono);color:var(--t2);margin-bottom:6px">AVAILABLE DIVISIONS (use exact name in CSV)</div>
+            {% for d in divisions %}
+            <span style="display:inline-block;padding:2px 8px;background:var(--blue-d);border:0.5px solid var(--blue);border-radius:10px;font-size:10px;color:var(--blue);font-family:var(--mono);margin:2px">{{ d['name'] }}</span>
+            {% endfor %}
+          </div>
+
+          {# Available managers for reference #}
+          {% if managers %}
+          <div style="margin-top:10px;padding:10px;background:var(--bg2);border-radius:var(--r8)">
+            <div style="font-size:10px;font-family:var(--mono);color:var(--t2);margin-bottom:6px">AVAILABLE MANAGERS (use exact name or mobile in CSV)</div>
+            {% for m in managers %}
+            <div style="font-size:11px;padding:3px 0;border-bottom:0.5px solid var(--border)">
+              <span class="badge b-{{ m['role'] }}" style="font-size:9px">{{ m['role'].upper() }}</span>
+              <strong>{{ m['full_name'] }}</strong>
+              {% if m['employee_id'] %}<span class="mono muted" style="font-size:9px"> · {{ m['employee_id'] }}</span>{% endif %}
+            </div>
+            {% endfor %}
+          </div>{% endif %}
+        </div>
+      </div>
+
+      {# Field reference #}
+      <div class="card">
+        <div class="ch"><h3>CSV Field Reference</h3></div>
+        <div style="padding:14px">
+          <div class="tw"><table>
+            <thead><tr><th>Column</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td class="td-b" style="color:var(--red)">full_name</td><td style="color:var(--red)">✓ Must</td><td class="muted">Employee full name</td></tr>
+              <tr><td class="td-b" style="color:var(--red)">mobile</td><td style="color:var(--red)">✓ Must</td><td class="muted">10-digit, unique per company</td></tr>
+              <tr><td class="td-b" style="color:var(--red)">division</td><td style="color:var(--red)">✓ Must</td><td class="muted">Exact division name or code</td></tr>
+              <tr><td class="td-b">username</td><td class="muted">Auto</td><td class="muted">Defaults to mobile if blank</td></tr>
+              <tr><td class="td-b">password</td><td class="muted">Auto</td><td class="muted">Default: Pass@123</td></tr>
+              <tr><td class="td-b">role</td><td class="muted">Auto=mr</td><td class="muted">mr/asm/rsm/zsm/nsm</td></tr>
+              <tr><td class="td-b">reporting_manager</td><td class="muted">Optional</td><td class="muted">Manager name, mobile or employee_id</td></tr>
+              <tr><td class="td-b">employee_id</td><td class="muted">Optional</td><td class="muted">e.g. MR045</td></tr>
+              <tr><td class="td-b">region</td><td class="muted">Optional</td><td class="muted">North / South / East / West</td></tr>
+              <tr><td class="td-b">area</td><td class="muted">Optional</td><td class="muted">City / territory</td></tr>
+              <tr><td class="td-b">email</td><td class="muted">Optional</td><td class="muted">Work email</td></tr>
+            </tbody>
+          </table></div>
+        </div>
+      </div>
+    </div>
+
+    {# Results #}
+    {% if bulk_result %}
+    <div class="card mt16">
+      <div class="ch">
+        <h3>Upload Result</h3>
+        <div style="display:flex;gap:10px;align-items:center">
+          {% if bulk_result['created'] > 0 %}
+          <span style="font-size:11px;font-family:var(--mono);color:var(--green)">✓ {{ bulk_result['created'] }} created</span>{% endif %}
+          {% if bulk_result.get('updated',0) > 0 %}
+          <span style="font-size:11px;font-family:var(--mono);color:var(--blue)">↺ {{ bulk_result['updated'] }} updated</span>{% endif %}
+          {% if bulk_result['skipped'] > 0 %}
+          <span style="font-size:11px;font-family:var(--mono);color:var(--amber)">⚠ {{ bulk_result['skipped'] }} skipped</span>{% endif %}
+          {% if bulk_result['created']==0 and bulk_result.get('updated',0)==0 and bulk_result['skipped']==0 %}
+          <span style="font-size:11px;font-family:var(--mono);color:var(--t2)">Nothing to process</span>{% endif %}
+        </div>
+      </div>
+      {% if bulk_result['errors'] %}
+      <div style="padding:14px;max-height:280px;overflow-y:auto">
+        {% for err in bulk_result['errors'] %}
+        <div style="font-size:11px;color:var(--amber);padding:4px 0;border-bottom:0.5px solid var(--border);font-family:var(--mono)">
+          ⚠ {{ err }}
+          {% if 'already exists' in err or 'already registered' in err %}
+          <span style="color:var(--t2);font-size:10px"> — tick "Update existing users" to overwrite</span>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>{% endif %}
+    </div>{% endif %}
+    {% endif %}{# cid_sel #}
+  </div>
+</div>
+
+{% elif page == "sa_verification" %}
+<div style="display:flex;min-height:100vh">
+  {{ sa_sidebar('verification') }}
+  <div class="main">
+    <div class="ph">
+      <div>
+        <h1>Manual Verification Queue</h1>
+        <p>Review OCR-extracted data, download Excel, correct &amp; re-upload to update database</p>
+      </div>
+    </div>
+    {{ flashes() }}
+
+    {# Filter bar #}
+    <div class="card" style="margin-bottom:14px">
+      <div style="padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        {# Status pills #}
+        {% for lbl,val,col in [('All','all','var(--t2)'),('Pending','pending','var(--amber)'),('Verified','verified','var(--green)')] %}
+        <a href="/superadmin/verification?status={{ val }}&company_id={{ cid_f }}"
+          style="padding:3px 12px;border-radius:10px;font-size:11px;font-family:var(--mono);text-decoration:none;
+          {% if status_f==val %}background:{{ col }};color:#000;font-weight:700{% else %}background:var(--bg3);color:var(--t2){% endif %}">
+          {{ lbl }} {% if vcounts.get(val) %}({{ vcounts[val] }}){% endif %}
+        </a>{% endfor %}
+        <form method="GET" action="/superadmin/verification" style="display:flex;gap:6px;align-items:center;margin-left:10px">
+          <input type="hidden" name="status" value="{{ status_f }}">
+          <select name="company_id" onchange="this.form.submit()" style="padding:4px 8px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r4);color:var(--t0);font-size:11px">
+            <option value="">All Companies</option>
+            {% for co in companies %}<option value="{{ co['id'] }}" {% if co['id']|string==cid_f|string %}selected{% endif %}>{{ co['name'] }}</option>{% endfor %}
+          </select>
+        </form>
+      </div>
+    </div>
+
+    {# Verification list #}
+    <div class="card">
+      <div class="tw" style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>#</th><th>Company</th><th>Stockist</th><th>Uploader</th>
+            <th>Statement Period</th><th class="r">Parties</th>
+            <th class="r">Net ₹</th><th>Status</th><th>Actions</th>
+          </tr></thead>
+          <tbody>
+            {% for mv in verifications %}<tr>
+              <td class="mono muted" style="font-size:10px">{{ mv['id'] }}</td>
+              <td>
+                <div class="b" style="font-size:12px">{{ mv['company_name'] }}</div>
+                <div class="mono muted" style="font-size:9px">{{ mv['company_code'] }}</div>
+              </td>
+              <td>
+                <div class="b" style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                  {{ mv['stockist_name'] or mv['original_filename'] or '—' }}
+                </div>
+                {% if mv['division_name'] %}<div class="muted" style="font-size:10px">{{ mv['division_name'] }}</div>{% endif %}
+              </td>
+              <td class="muted" style="font-size:11px">
+                {{ mv['uploader_name'] or '—' }}
+                <div style="font-size:9px;font-family:var(--mono)">{{ mv['uploader_area'] or '' }}</div>
+              </td>
+              <td style="font-size:10px;font-family:var(--mono);white-space:nowrap">
+                {% if mv['statement_from_date'] %}
+                <span style="color:var(--blue)">{{ mv['statement_from_date'] }}</span> →
+                <span style="color:var(--blue)">{{ mv['statement_to_date'] or '?' }}</span>
+                {% else %}—{% endif %}
+              </td>
+              <td class="r mono">{{ mv['party_count'] or '—' }}</td>
+              <td class="r mono b" style="color:var(--green)">
+                {% if mv['invoice_net'] %}₹{{ "{:,.0f}".format(mv['invoice_net']) }}{% else %}—{% endif %}
+              </td>
+              <td>
+                <span class="badge {% if mv['status']=='verified' %}b-done{% elif mv['status']=='pending' %}b-processing{% else %}b-pending{% endif %}">
+                  {{ mv['status'] }}
+                </span>
+                {% if mv['status']=='verified' and mv['verified_by_name'] %}
+                <div style="font-size:9px;color:var(--t2);margin-top:2px">by {{ mv['verified_by_name'] }}</div>
+                <div style="font-size:9px;font-family:var(--mono);color:var(--t2)">{{ mv['verified_at'][:10] if mv['verified_at'] else '' }}</div>
+                {% endif %}
+              </td>
+              <td style="white-space:nowrap;min-width:180px">
+                {# Download Excel #}
+                <a href="/superadmin/verification/{{ mv['id'] }}/download-excel"
+                  style="font-size:11px;padding:3px 8px;background:var(--green-d);border:0.5px solid var(--green);border-radius:var(--r4);color:var(--green);text-decoration:none;margin-right:4px">
+                  ⬇ Excel
+                </a>
+                {# Upload corrections #}
+                {% if mv['status']=='pending' %}
+                <button onclick="showUploadModal({{ mv['id'] }})"
+                  style="font-size:11px;padding:3px 8px;background:var(--blue-d);border:0.5px solid var(--blue);border-radius:var(--r4);color:var(--blue);cursor:pointer">
+                  ⬆ Upload Corrections
+                </button>
+                {% endif %}
+                {% if mv['excel_downloaded_at'] %}
+                <div style="font-size:9px;color:var(--t2);margin-top:2px;font-family:var(--mono)">Downloaded {{ mv['excel_downloaded_at'][:10] }}</div>
+                {% endif %}
+              </td>
+            </tr>{% else %}
+            <tr><td colspan="9" style="text-align:center;padding:32px;color:var(--t2)">
+              No verification records found. <br>
+              <small>Go to a company's uploads and click "Send to Verification" to add documents here.</small>
+            </td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Upload corrections modal #}
+<div id="upload-corr-modal" class="modal" style="display:none">
+  <div class="modal-box">
+    <div class="mh"><h2>Upload Corrected Excel</h2><button class="mc" onclick="this.closest('.modal').style.display='none'">&times;</button></div>
+    <div style="padding:18px">
+      <p style="font-size:12px;color:var(--t1);margin-bottom:14px">
+        Upload the corrected Excel sheet. All yellow-cell edits will be applied to the database automatically.
+      </p>
+      <form id="corr-form" method="POST" enctype="multipart/form-data">
+        <div class="form-g"><label>Corrected Excel File *</label><input type="file" name="excel_file" accept=".xlsx,.xls" required></div>
+        <button type="submit" class="btn-p">Apply Corrections &amp; Mark Verified</button>
+      </form>
+    </div>
+  </div>
+</div>
+<script>
+function showUploadModal(mvId){
+  document.getElementById('corr-form').action='/superadmin/verification/'+mvId+'/upload-corrections';
+  document.getElementById('upload-corr-modal').style.display='flex';
+}
+</script>
+
+{% elif page == "sa_reg_links" %}
+<div style="display:flex;min-height:100vh">
+  {{ sa_sidebar('reglinks') }}
+  <div class="main">
+    <div class="ph">
+      <div><h1>Registration Links</h1><p>Generate secure one-time links for company self-onboarding</p></div>
+      <button class="btn-sm btn-blue" onclick="document.getElementById('create-link-modal').style.display='flex'">+ Generate Link</button>
+    </div>
+    {{ flashes() }}
+    <div style="background:var(--blue-d);border:1px solid var(--blue);border-radius:var(--r12);padding:14px 18px;margin-bottom:16px;font-size:12px;color:var(--t1);line-height:1.7">
+      <strong style="color:var(--blue)">How it works:</strong> Generate a link → Share with a company → They register themselves → Company Code is auto-generated as <span style="font-family:var(--mono);color:var(--t0)">XXXX1234</span> → 100 starter credits assigned automatically.
+    </div>
+    <div class="card">
+      <div class="ch"><h3>Links ({{ links|length }})</h3><span class="ch-r">active = single-use, time-limited</span></div>
+      <div class="tw"><table>
+        <thead><tr><th>Registration URL</th><th>Status</th><th>Registered Company</th><th>Expires</th><th>Created</th><th></th></tr></thead>
+        <tbody>{% for lk in links %}<tr>
+          <td style="max-width:280px">
+            {% if lk['status']=='active' %}
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <span style="font-size:10px;font-family:var(--mono);color:var(--blue)">{{ base_url }}/company/register/{{ lk['token'][:10] }}...</span>
+              <button onclick="copyLink('{{ base_url }}/company/register/{{ lk['token'] }}')" class="btn-sm btn-act" style="font-size:9px;padding:2px 6px">Copy</button>
+              <a href="{{ base_url }}/company/register/{{ lk['token'] }}" target="_blank" class="btn-sm btn-blue" style="font-size:9px;padding:2px 7px;text-decoration:none">Open ↗</a>
+            </div>
+            {% else %}
+            <span style="font-size:10px;font-family:var(--mono);color:var(--t2)">{{ lk['token'][:16] }}...  ({{ lk['status'] }})</span>
+            {% endif %}
+          </td>
+          <td><span class="badge {% if lk['status']=='active' %}b-active{% elif lk['status']=='used' %}b-done{% else %}b-error{% endif %}">{{ lk['status'] }}</span></td>
+          <td class="muted" style="font-size:11px">
+            {% if lk['company_name'] %}{{ lk['company_name'] }} <span style="font-family:var(--mono);font-size:10px">[{{ lk['company_code'] }}]</span>{% else %}—{% endif %}
+          </td>
+          <td class="mono muted" style="font-size:10px">{{ lk['expires_at'][:10] }}</td>
+          <td class="mono muted" style="font-size:10px">{{ lk['created_at'][:10] }}</td>
+          <td>{% if lk['status']=='active' %}
+            <form method="POST" action="/superadmin/reg-links/revoke/{{ lk['id'] }}" style="display:inline" onsubmit="return confirm('Revoke this link?')">
+              <button type="submit" class="btn-sm btn-del" style="font-size:10px">Revoke</button>
+            </form>{% endif %}
+          </td>
+        </tr>{% else %}
+        <tr><td colspan="6" style="text-align:center;padding:28px;color:var(--t2);font-size:12px">No links yet. Click "+ Generate Link" to create one.</td></tr>
+        {% endfor %}</tbody>
+      </table></div>
+    </div>
+  </div>
+</div>
+<div id="create-link-modal" class="modal">
+  <div class="modal-box"><div class="mh"><h2>Generate Registration Link</h2><button class="mc" onclick="this.closest('.modal').style.display='none'">&times;</button></div>
+    <form method="POST" action="/superadmin/reg-links/create">
+      <div class="form-g"><label>Link Valid For</label>
+        <select name="expires_days">
+          <option value="3">3 days</option>
+          <option value="7" selected>7 days</option>
+          <option value="14">14 days</option>
+          <option value="30">30 days</option>
+        </select></div>
+      <div style="padding:10px 12px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r8);margin-bottom:14px;font-size:11px;color:var(--t2)">
+        ℹ The link is <strong>single-use</strong> and expires automatically. Share it via WhatsApp, email, or any channel.
+      </div>
+      <div style="display:flex;gap:8px">
+        <button type="submit" class="btn-p" style="flex:1">Generate Link</button>
+        <button type="button" onclick="this.closest('.modal').style.display='none'" style="flex:1;padding:9px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r8);color:var(--t1);cursor:pointer;font-family:inherit">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% elif page == "sa_credits" %}
+<div style="display:flex;min-height:100vh">
+  {{ sa_sidebar('credits') }}
+  <div class="main">
+    <div class="ph">
+      <div><h1>Credit Management</h1><p>Allocate &amp; monitor credits across all companies</p></div>
+      <button class="btn-sm btn-blue" onclick="document.getElementById('alloc-modal').style.display='flex'">+ Allocate Credits</button>
+    </div>
+    {{ flashes() }}
+
+    {% if pending_requests %}
+    <div style="background:var(--amber-d);border:1px solid var(--amber);border-radius:var(--r12);padding:14px 16px;margin-bottom:16px">
+      <div style="font-size:13px;font-weight:600;color:var(--amber);margin-bottom:10px">⏳ {{ pending_requests|length }} Pending Credit Request(s)</div>
+      {% for rq in pending_requests %}
+      <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r8);padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--t0)">{{ rq['company_name'] }} <span class="mono muted" style="font-size:10px">[{{ rq['company_code'] }}]</span></div>
+          <div style="font-size:11px;color:var(--t2);margin-top:3px">{{ rq['requester_name'] }} · <strong style="color:var(--amber)">{{ rq['credits_requested'] }} credits</strong> · {{ rq['created_at'][:10] }}</div>
+          {% if rq['message'] %}<div style="font-size:11px;color:var(--t1);margin-top:4px">{{ rq['message'] }}</div>{% endif %}
+        </div>
+        <form method="POST" action="/superadmin/credits/approve/{{ rq['id'] }}">
+          <button type="submit" class="btn-sm btn-grn">✓ Approve {{ rq['credits_requested'] }}</button>
+        </form>
+      </div>{% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <div class="ch"><h3>All Company Credit Balances</h3><span class="ch-r">{{ companies_credits|length }} companies</span></div>
+      <div class="tw"><table>
+        <thead><tr><th>Company</th><th>Code</th><th>Plan</th><th class="r">Total</th><th class="r">Used</th><th class="r">Remaining</th><th>Usage</th></tr></thead>
+        <tbody>{% for c in companies_credits %}<tr>
+          <td class="td-b" style="font-size:12px"><a href="/superadmin/company/{{ c['id'] }}" style="color:var(--t0);text-decoration:none">{{ c['name'] }}</a></td>
+          <td class="mono muted" style="font-size:11px">{{ c['code'] }}</td>
+          <td><span class="badge" style="background:{% if c['plan']=='paid' %}var(--green-d){% elif c['plan']=='enterprise' %}var(--purple-d){% else %}var(--bg3){% endif %};color:{% if c['plan']=='paid' %}var(--green){% elif c['plan']=='enterprise' %}var(--purple){% else %}var(--t2){% endif %}">{{ (c['plan'] or 'demo')|upper }}</span></td>
+          <td class="r mono">{{ c['total_credits'] or 0 }}</td>
+          <td class="r mono">{{ c['used_credits'] or 0 }}</td>
+          <td class="r mono" style="font-weight:600;color:{% if (c['remaining'] or 0)<=10 %}var(--red){% elif (c['remaining'] or 0)<=30 %}var(--amber){% else %}var(--green){% endif %}">{{ c['remaining'] or 0 }}</td>
+          <td style="min-width:120px">
+            {% set tot = c['total_credits'] or 1 %}
+            {% set pct = (((c['used_credits'] or 0) / tot) * 100)|round(0)|int %}
+            <div style="height:6px;background:var(--bg3);border-radius:3px;overflow:hidden">
+              <div style="height:100%;width:{{ [pct,100]|min }}%;background:{% if pct>=90 %}var(--red){% elif pct>=70 %}var(--amber){% else %}var(--blue){% endif %};border-radius:3px;transition:width .3s"></div>
+            </div>
+            <div style="font-size:9px;color:var(--t2);font-family:var(--mono);margin-top:2px">{{ pct }}%</div>
+          </td>
+        </tr>{% else %}
+        <tr><td colspan="7" style="text-align:center;padding:28px;color:var(--t2);font-size:12px">No companies yet.</td></tr>
+        {% endfor %}</tbody>
+      </table></div>
+    </div>
+  </div>
+</div>
+<div id="alloc-modal" class="modal">
+  <div class="modal-box"><div class="mh"><h2>Allocate Credits to Company</h2><button class="mc" onclick="this.closest('.modal').style.display='none'">&times;</button></div>
+    <form method="POST" action="/superadmin/credits/allocate">
+      <div class="form-g"><label>Company *</label>
+        <select name="company_id" required>
+          <option value="">— Select Company —</option>
+          {% for c in companies_credits %}<option value="{{ c['id'] }}">{{ c['name'] }} [{{ c['code'] }}] — {{ c['remaining'] or 0 }} remaining</option>{% endfor %}
+        </select></div>
+      <div class="r2">
+        <div class="form-g"><label>Credits to Add *</label>
+          <input type="number" name="amount" required min="1" placeholder="500" style="font-family:var(--mono);font-size:16px;font-weight:600"></div>
+        <div class="form-g"><label>Plan</label>
+          <select name="plan">
+            <option value="demo">Demo</option>
+            <option value="paid">Paid</option>
+            <option value="enterprise">Enterprise</option>
+          </select></div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button type="submit" class="btn-p" style="flex:1">Allocate Credits</button>
+        <button type="button" onclick="this.closest('.modal').style.display='none'" style="flex:1;padding:9px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r8);color:var(--t1);cursor:pointer;font-family:inherit">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% elif page == "sa_ai_costing" %}
+<div style="display:flex;min-height:100vh">
+  {{ sa_sidebar('ai_costing') }}
+  <div class="main">
+    <div class="ph">
+      <div><h1>AI Costing</h1><p>Gemini extraction token usage &amp; cost (₹{{ usd_to_inr_rate }}/USD)</p></div>
+      <form method="GET" style="margin-left:auto;display:flex;gap:8px;align-items:center">
+        <select name="days" onchange="this.form.submit()" style="padding:6px 10px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r8);color:var(--t0);font-size:12px">
+          <option value="7" {% if days==7 %}selected{% endif %}>Last 7 days</option>
+          <option value="30" {% if days==30 %}selected{% endif %}>Last 30 days</option>
+          <option value="90" {% if days==90 %}selected{% endif %}>Last 90 days</option>
+          <option value="365" {% if days==365 %}selected{% endif %}>Last 365 days</option>
+        </select>
+      </form>
+      <a href="/superadmin/ai-costing/export?days={{ days }}"
+         style="padding:7px 14px;background:var(--green-d);border:0.5px solid var(--green);border-radius:var(--r8);color:var(--green);font-size:12px;font-weight:500;text-decoration:none;white-space:nowrap">
+        ⬇ Download Report
+      </a>
+    </div>
+    {{ flashes() }}
+
+    {# Totals row #}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:18px">
+      <div class="card" style="padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--t2);font-family:var(--mono);text-transform:uppercase;margin-bottom:4px">Total Cost</div>
+        <div style="font-size:24px;font-weight:700;color:var(--green)">₹{{ "%.2f"|format(totals.get('total_inr',0)) }}</div>
+        <div style="font-size:10px;color:var(--t2);font-family:var(--mono)">${{ "%.2f"|format(totals.get('total_usd',0)) }} USD</div>
+      </div>
+      <div class="card" style="padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--t2);font-family:var(--mono);text-transform:uppercase;margin-bottom:4px">Extractions</div>
+        <div style="font-size:24px;font-weight:700;color:var(--t0)">{{ totals.get('call_count',0) }}</div>
+        <div style="font-size:10px;color:var(--t2);font-family:var(--mono)">{{ totals.get('total_chunks',0) }} chunks total</div>
+      </div>
+      <div class="card" style="padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--t2);font-family:var(--mono);text-transform:uppercase;margin-bottom:4px">Avg Cost / Doc</div>
+        <div style="font-size:24px;font-weight:700;color:var(--blue)">₹{{ "%.3f"|format(avg_cost_inr) }}</div>
+      </div>
+      <div class="card" style="padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--t2);font-family:var(--mono);text-transform:uppercase;margin-bottom:4px">Input Tokens</div>
+        <div style="font-size:20px;font-weight:700;color:var(--t0)">{{ "{:,}".format(totals.get('total_input',0)) }}</div>
+      </div>
+      <div class="card" style="padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--t2);font-family:var(--mono);text-transform:uppercase;margin-bottom:4px">Output+Thinking Tokens</div>
+        <div style="font-size:20px;font-weight:700;color:var(--t0)">{{ "{:,}".format((totals.get('total_output',0)|int) + (totals.get('total_thinking',0)|int)) }}</div>
+      </div>
+    </div>
+
+    {# Daily trend chart #}
+    <div class="chart-card" style="margin-bottom:18px">
+      <h3 style="font-size:13px;margin-bottom:10px">Daily Cost (₹)</h3>
+      <canvas id="ai-cost-chart" height="70"></canvas>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      {# Per-model breakdown #}
+      <div class="card" style="padding:16px">
+        <h3 style="font-size:13px;margin-bottom:10px">By Model</h3>
+        <table style="width:100%;font-size:12px;border-collapse:collapse">
+          <thead><tr style="text-align:left;color:var(--t2);font-size:10px;text-transform:uppercase">
+            <th style="padding:4px 6px">Model</th><th style="padding:4px 6px">Calls</th>
+            <th style="padding:4px 6px" class="r">Input Tok</th>
+            <th style="padding:4px 6px" class="r">Output Tok</th>
+            <th style="padding:4px 6px" class="r">Cost (₹)</th>
+          </tr></thead>
+          <tbody>
+          {% for m in by_model %}
+          <tr style="border-top:0.5px solid var(--border)">
+            <td style="padding:6px" class="mono">{{ m['model_name'] }}</td>
+            <td style="padding:6px">{{ m['calls'] }}</td>
+            <td style="padding:6px" class="r mono">{{ "{:,}".format(m['input_tokens'] or 0) }}</td>
+            <td style="padding:6px" class="r mono">{{ "{:,}".format((m['output_tokens'] or 0) + (m['thinking_tokens'] or 0)) }}</td>
+            <td style="padding:6px" class="r mono">₹{{ "%.2f"|format(m['cost_inr'] or 0) }}</td>
+          </tr>
+          {% else %}<tr><td colspan="5" style="padding:16px;text-align:center;color:var(--t2)">No usage recorded yet</td></tr>{% endfor %}
+          </tbody>
+        </table>
+        <div style="margin-top:12px;font-size:10px;color:var(--t2);font-family:var(--mono)">
+          Current pricing table (USD / 1M tokens):
+          {% for model, p in pricing_table.items() %}<div>{{ model }}: in ${{ p['input'] }}, out ${{ p['output'] }}</div>{% endfor %}
+        </div>
+      </div>
+
+      {# Per-company breakdown #}
+      <div class="card" style="padding:16px">
+        <h3 style="font-size:13px;margin-bottom:10px">By Company (top 50)</h3>
+        <div style="max-height:320px;overflow-y:auto">
+        <table style="width:100%;font-size:12px;border-collapse:collapse">
+          <thead><tr style="text-align:left;color:var(--t2);font-size:10px;text-transform:uppercase">
+            <th style="padding:4px 6px">Company</th><th style="padding:4px 6px">Calls</th>
+            <th style="padding:4px 6px" class="r">Input Tok</th>
+            <th style="padding:4px 6px" class="r">Output Tok</th>
+            <th style="padding:4px 6px" class="r">Cost (₹)</th>
+          </tr></thead>
+          <tbody>
+          {% for co in by_company %}
+          <tr style="border-top:0.5px solid var(--border)">
+            <td style="padding:6px">{{ co['name'] }} <span style="color:var(--t2);font-family:var(--mono);font-size:10px">({{ co['code'] }})</span></td>
+            <td style="padding:6px">{{ co['calls'] }}</td>
+            <td style="padding:6px" class="r mono">{{ "{:,}".format(co['input_tokens'] or 0) }}</td>
+            <td style="padding:6px" class="r mono">{{ "{:,}".format(co['output_tokens'] or 0) }}</td>
+            <td style="padding:6px" class="r mono">₹{{ "%.2f"|format(co['cost_inr'] or 0) }}</td>
+          </tr>
+          {% else %}<tr><td colspan="5" style="padding:16px;text-align:center;color:var(--t2)">No usage recorded yet</td></tr>{% endfor %}
+          </tbody>
+        </table>
+        </div>
+      </div>
+    </div>
+
+    {# Recent individual extractions -- per-document model/token/cost detail #}
+    <div class="card" style="padding:16px;margin-top:16px">
+      <h3 style="font-size:13px;margin-bottom:10px">Recent Extractions (last 100)</h3>
+      <div style="max-height:400px;overflow-y:auto">
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead><tr style="text-align:left;color:var(--t2);font-size:10px;text-transform:uppercase;position:sticky;top:0;background:var(--bg1)">
+          <th style="padding:4px 6px">When</th>
+          <th style="padding:4px 6px">Document</th>
+          <th style="padding:4px 6px">Company</th>
+          <th style="padding:4px 6px">Model Used</th>
+          <th style="padding:4px 6px" class="r">Input Tok</th>
+          <th style="padding:4px 6px" class="r">Output Tok</th>
+          <th style="padding:4px 6px" class="r">Chunks</th>
+          <th style="padding:4px 6px" class="r">Cost (₹)</th>
+        </tr></thead>
+        <tbody>
+        {% for r in recent %}
+        <tr style="border-top:0.5px solid var(--border)">
+          <td style="padding:6px;font-size:10px" class="mono">{{ r['created_at']|string|truncate(16,true,'') }}</td>
+          <td style="padding:6px">{{ r['original_filename'] or ('Upload #' ~ r['upload_id']) }}</td>
+          <td style="padding:6px">{{ r['company_name'] or '—' }}</td>
+          <td style="padding:6px"><span class="mono" style="background:{% if '3.5' in (r['model_name'] or '') %}var(--blue-d);color:var(--blue){% else %}var(--green-d);color:var(--green){% endif %};padding:1px 6px;border-radius:6px;font-size:10px">{{ r['model_name'] }}</span></td>
+          <td style="padding:6px" class="r mono">{{ "{:,}".format(r['input_tokens'] or 0) }}</td>
+          <td style="padding:6px" class="r mono">{{ "{:,}".format((r['output_tokens'] or 0) + (r['thinking_tokens'] or 0)) }}</td>
+          <td style="padding:6px" class="r">{{ r['chunk_count'] }}</td>
+          <td style="padding:6px" class="r mono">₹{{ "%.3f"|format(r['cost_inr'] or 0) }}</td>
+        </tr>
+        {% else %}<tr><td colspan="8" style="padding:16px;text-align:center;color:var(--t2)">No extractions recorded yet</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  const dailyData = {{ daily|tojson|safe }};
+  function loadChart(){
+    if(typeof Chart==='undefined'){ setTimeout(loadChart,150); return; }
+    new Chart(document.getElementById('ai-cost-chart'), {
+      type:'bar',
+      data:{
+        labels: dailyData.map(d=>d.day),
+        datasets:[{ label:'Cost (₹)', data: dailyData.map(d=>d.cost_inr), backgroundColor:'rgba(0,113,227,0.65)', borderColor:'#0071E3' }]
+      },
+      options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}} }
+    });
+  }
+  if(typeof Chart==='undefined'){
+    const s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js';
+    s.onload=loadChart; document.head.appendChild(s);
+  } else { loadChart(); }
+})();
+</script>
+
+{% elif page == "sa_ai_models" %}
+<div style="display:flex;min-height:100vh">
+  {{ sa_sidebar('ai_models') }}
+  <div class="main">
+    <div class="ph">
+      <div><h1>AI Models</h1><p>Which Gemini model handles each file type &amp; what it costs — no restart needed</p></div>
+    </div>
+    {{ flashes() }}
+
+    {# ── Model Settings ── #}
+    <div class="card" style="padding:16px;margin-bottom:16px">
+      <h3 style="font-size:13px;margin-bottom:4px">Model Settings</h3>
+      <p style="font-size:11px;color:var(--t2);margin-bottom:12px">
+        "Default" always follows the .env value for that category, including if it's changed later.
+        Pick a specific model here to override it for testing — takes effect on the next document processed after saving;
+        anything already mid-extraction keeps using whatever model it started with.
+      </p>
+      <form method="POST" action="/superadmin/api/ai-models/routing">
+        <table style="width:100%;font-size:12px;border-collapse:collapse">
+          <thead><tr style="text-align:left;color:var(--t2);font-size:10px;text-transform:uppercase">
+            <th style="padding:4px 6px">Category</th><th style="padding:4px 6px">Description</th><th style="padding:4px 6px">Model</th>
+          </tr></thead>
+          <tbody>
+          {% for cat in categories %}
+          <tr style="border-top:0.5px solid var(--border)">
+            <td style="padding:6px">{{ cat['label'] }}</td>
+            <td style="padding:6px;color:var(--t2);font-size:11px">{{ cat['desc'] }}</td>
+            <td style="padding:6px">
+              <select name="routing[{{ cat['key'] }}]"
+                      style="padding:6px 10px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r8);color:var(--t0);font-size:12px">
+                <option value="" {% if cat['key'] not in routing %}selected{% endif %}>
+                  Default — {{ env_defaults.get(cat['key']) }} (from .env)
+                </option>
+                {% for m in models %}
+                <option value="{{ m['model_id'] }}" {% if routing.get(cat['key']) == m['model_id'] %}selected{% endif %}>{{ m['label'] }}</option>
+                {% endfor %}
+              </select>
+            </td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        <div style="margin-top:12px;text-align:right">
+          <button type="submit" class="btn-sm btn-grn">Save Model Settings</button>
+        </div>
+      </form>
+    </div>
+
+    {# ── Model Pricing ── #}
+    <div class="card" style="padding:16px">
+      <h3 style="font-size:13px;margin-bottom:4px">Model Pricing</h3>
+      <p style="font-size:11px;color:var(--t2);margin-bottom:12px">
+        Edit a price when Google changes one, or add a model Google just shipped.
+        Prices are USD per 1M tokens. A model currently selected in any category above can't be removed —
+        change that category to a different model first. New prices apply to the next document processed with that model,
+        not retroactively to past documents.
+      </p>
+      <form method="POST" action="/superadmin/api/ai-models/pricing">
+        <table style="width:100%;font-size:12px;border-collapse:collapse">
+          <thead><tr style="text-align:left;color:var(--t2);font-size:10px;text-transform:uppercase">
+            <th style="padding:4px 6px">Model ID</th><th style="padding:4px 6px">Label</th>
+            <th style="padding:4px 6px" class="r">Input $/1M</th><th style="padding:4px 6px" class="r">Output $/1M</th>
+            <th style="padding:4px 6px"></th>
+          </tr></thead>
+          <tbody>
+          {% for m in models %}
+          <tr style="border-top:0.5px solid var(--border)">
+            <td style="padding:6px" class="mono">{{ m['model_id'] }}
+              {% if m['source'] == 'custom' %}<span style="margin-left:4px;background:var(--amber-d);color:var(--amber);border-radius:6px;padding:1px 5px;font-size:9px">custom</span>{% endif %}
+            </td>
+            <td style="padding:6px">
+              <input name="label[{{ m['model_id'] }}]" value="{{ m['label'] }}"
+                     style="width:100%;padding:5px 8px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r6);color:var(--t0);font-size:12px">
+            </td>
+            <td style="padding:6px" class="r">
+              <input type="number" step="0.000001" min="0" name="input[{{ m['model_id'] }}]"
+                     value="{{ m['input'] if m['input'] is not none else '' }}" placeholder="—"
+                     style="width:88px;padding:5px 8px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r6);color:var(--t0);font-size:12px;text-align:right">
+            </td>
+            <td style="padding:6px" class="r">
+              <input type="number" step="0.000001" min="0" name="output[{{ m['model_id'] }}]"
+                     value="{{ m['output'] if m['output'] is not none else '' }}" placeholder="—"
+                     style="width:88px;padding:5px 8px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r6);color:var(--t0);font-size:12px;text-align:right">
+            </td>
+            <td style="padding:6px" class="r">
+              <button type="submit" name="model_id" value="{{ m['model_id'] }}"
+                      class="btn-sm btn-del"
+                      formaction="/superadmin/api/ai-models/pricing/delete" formmethod="post"
+                      onclick="return confirm('Remove {{ m['model_id'] }} from pricing?')">Remove</button>
+            </td>
+          </tr>
+          {% endfor %}
+          </tbody>
+          <tfoot>
+          <tr style="border-top:1px solid var(--border)">
+            <td colspan="2" style="padding:8px 6px">
+              <input name="new_model_id" placeholder="New model id, e.g. gemini-3.1-flash-lite"
+                     style="width:46%;padding:5px 8px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r6);color:var(--t0);font-size:12px">
+              <input name="new_model_label" placeholder="Label"
+                     style="width:40%;padding:5px 8px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r6);color:var(--t0);font-size:12px">
+            </td>
+            <td style="padding:8px 6px" class="r">
+              <input type="number" step="0.000001" min="0" name="new_model_input" placeholder="$/1M"
+                     style="width:88px;padding:5px 8px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r6);color:var(--t0);font-size:12px;text-align:right">
+            </td>
+            <td style="padding:8px 6px" class="r">
+              <input type="number" step="0.000001" min="0" name="new_model_output" placeholder="$/1M"
+                     style="width:88px;padding:5px 8px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r6);color:var(--t0);font-size:12px;text-align:right">
+            </td>
+            <td></td>
+          </tr>
+          </tfoot>
+        </table>
+        <div style="margin-top:12px;text-align:right">
+          <button type="submit" class="btn-sm btn-blue">Save Pricing</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% elif page == "sa_analytics" %}
+<div style="display:flex;min-height:100vh">
+  {{ sa_sidebar('analytics') }}
+  <div class="main">
+    <div class="ph"><div><h1>Super Admin Analytics</h1><p>Cross-company upload activity, verification performance &amp; revenue</p></div></div>
+    {{ flashes() }}
+
+    {# Totals row #}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:18px">
+      {% for lbl,val,col in [
+        ('Companies', totals.get('companies',0), 'var(--blue)'),
+        ('Active Users', totals.get('active_users',0), 'var(--green)'),
+        ('Total Uploads', totals.get('total_uploads',0), 'var(--t0)'),
+        ('Done', totals.get('done_uploads',0), 'var(--green)'),
+        ('Rejected', totals.get('rejected_uploads',0), 'var(--red)'),
+        ('Verified', totals.get('verified_uploads',0), 'var(--teal)'),
+        ('Pending Verif', totals.get('pending_verif',0), 'var(--amber)'),
+      ] %}
+      <div class="card" style="padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--t2);font-family:var(--mono);text-transform:uppercase;margin-bottom:4px">{{ lbl }}</div>
+        <div style="font-size:24px;font-weight:700;color:{{ col }}">{{ val }}</div>
+      </div>{% endfor %}
+    </div>
+
+    {# Company breakdown #}
+    <div class="card" style="margin-bottom:16px">
+      <div class="ch"><h3>Company Breakdown</h3><span class="ch-r">{{ company_stats|length }} companies</span></div>
+      <div class="tw"><table>
+        <thead><tr>
+          <th>Company</th><th>Status</th><th class="r">Users</th>
+          <th class="r">Uploads</th><th class="r">Done</th><th class="r">Rejected</th>
+          <th class="r">Verified</th><th class="r">Pending Verif</th>
+          <th class="r">Revenue ₹</th><th class="r">Credits Used</th>
+        </tr></thead>
+        <tbody>{% for co in company_stats %}<tr>
+          <td>
+            <a href="/superadmin/company/{{ co['id'] }}" style="font-weight:600;font-size:12px;color:var(--blue)">{{ co['name'] }}</a>
+            <div class="mono muted" style="font-size:9px">{{ co['code'] }}</div>
+          </td>
+          <td><span class="badge {% if co['status']=='active' %}b-done{% else %}b-error{% endif %}">{{ co['status'] }}</span></td>
+          <td class="r mono">{{ co['active_users'] or 0 }}</td>
+          <td class="r mono">{{ co['total_uploads'] or 0 }}</td>
+          <td class="r mono" style="color:var(--green)">{{ co['done_uploads'] or 0 }}</td>
+          <td class="r mono" style="color:{% if (co['rejected_uploads'] or 0)>0 %}var(--red){% else %}var(--t2){% endif %}">{{ co['rejected_uploads'] or 0 }}</td>
+          <td class="r mono" style="color:var(--teal)">{{ co['verified_uploads'] or 0 }}</td>
+          <td class="r mono" style="color:{% if (co['pending_verif'] or 0)>0 %}var(--amber){% else %}var(--t2){% endif %}">{{ co['pending_verif'] or 0 }}</td>
+          <td class="r mono b" style="color:var(--green)">₹{{ "{:,.0f}".format(co['total_revenue'] or 0) }}</td>
+          <td class="r mono">{{ co['used_credits'] or 0 }}/{{ co['total_credits'] or 0 }}</td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+    </div>
+
+    <div class="g2">
+      {# Top uploaders #}
+      <div class="card">
+        <div class="ch"><h3>User Upload Activity</h3><span class="ch-r">top 50 active users</span></div>
+        <div class="tw" style="max-height:400px;overflow-y:auto"><table>
+          <thead class="sticky-glass-head" style="position:sticky;top:0"><tr>
+            <th>User</th><th>Company</th><th>Division</th>
+            <th class="r">Uploads</th><th class="r">Done</th>
+            <th class="r">Rejected</th><th class="r">Verified</th>
+            <th class="r">Revenue ₹</th><th>Last Upload</th>
+          </tr></thead>
+          <tbody>{% for u in user_activity %}<tr>
+            <td>
+              <div class="b" style="font-size:12px">{{ u['full_name'] }}</div>
+              <div style="display:flex;gap:4px;margin-top:2px">
+                <span class="badge b-{{ u['role'] }}" style="font-size:9px">{{ u['role'].upper() }}</span>
+                {% if u['area'] %}<span class="muted" style="font-size:10px">{{ u['area'] }}</span>{% endif %}
+              </div>
+            </td>
+            <td class="muted" style="font-size:11px">{{ u['company_name'] }}<div class="mono" style="font-size:9px">{{ u['company_code'] }}</div></td>
+            <td class="muted" style="font-size:11px">{{ u['division_name'] or '—' }}</td>
+            <td class="r mono b">{{ u['total_uploads'] }}</td>
+            <td class="r mono" style="color:var(--green)">{{ u['done_uploads'] or 0 }}</td>
+            <td class="r mono" style="color:{% if (u['rejected_uploads'] or 0)>0 %}var(--red){% else %}var(--t2){% endif %}">{{ u['rejected_uploads'] or 0 }}</td>
+            <td class="r mono" style="color:var(--teal)">{{ u['verified_uploads'] or 0 }}</td>
+            <td class="r mono" style="color:var(--green)">₹{{ "{:,.0f}".format(u['revenue'] or 0) }}</td>
+            <td class="mono muted" style="font-size:10px">{{ u['last_upload'][:10] if u['last_upload'] else '—' }}</td>
+          </tr>{% endfor %}</tbody>
+        </table></div>
+      </div>
+
+      {# Right column #}
+      <div>
+        {# Monthly trend #}
+        <div class="card" style="margin-bottom:14px">
+          <div class="ch"><h3>Monthly Upload Trend</h3></div>
+          <div class="tw"><table>
+            <thead><tr><th>Month</th><th class="r">Total</th><th class="r" style="color:var(--green)">Done</th><th class="r" style="color:var(--red)">Rejected</th><th class="r" style="color:var(--teal)">Verified</th></tr></thead>
+            <tbody>{% for m in monthly_trend|reverse %}
+              <tr>
+                <td class="b mono">{{ m['month'] }}</td>
+                <td class="r mono">{{ m['total'] }}</td>
+                <td class="r mono" style="color:var(--green)">{{ m['done'] or 0 }}</td>
+                <td class="r mono" style="color:{% if (m['rejected'] or 0)>0 %}var(--red){% else %}var(--t2){% endif %}">{{ m['rejected'] or 0 }}</td>
+                <td class="r mono" style="color:var(--teal)">{{ m['verified'] or 0 }}</td>
+              </tr>
+            {% else %}<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--t2)">No data yet</td></tr>{% endfor %}</tbody>
+          </table></div>
+        </div>
+
+        {# Agent Verification Analytics — full section #}
+        {% if verifier_stats %}
+        <div class="card" style="margin-top:16px">
+          <div class="ch">
+            <h3>🕵 Agent Verification Performance</h3>
+            <span class="ch-r">{{ verifier_stats|length }} agents</span>
+          </div>
+          <div class="tw"><table>
+            <thead><tr>
+              <th>Agent</th>
+              <th class="r">Total Verified</th>
+              <th class="r">Today</th>
+              <th class="r">This Week</th>
+              <th class="r">This Month</th>
+              <th class="r">Rejected</th>
+              <th class="r">Avg Hours</th>
+              <th>First Verified</th>
+              <th>Last Active</th>
+            </tr></thead>
+            <tbody>{% for v in verifier_stats %}<tr>
+              <td>
+                <div class="b" style="font-size:13px">{{ v['verifier'] }}</div>
+                <div class="mono muted" style="font-size:9px">{{ v['username'] }}</div>
+              </td>
+              <td class="r mono b" style="color:var(--teal);font-size:14px">{{ v['total_verified'] }}</td>
+              <td class="r mono" style="color:{% if v['today'] > 0 %}var(--green){% else %}var(--t2){% endif %}">{{ v['today'] or '—' }}</td>
+              <td class="r mono">{{ v['this_week'] or '—' }}</td>
+              <td class="r mono">{{ v['this_month'] or '—' }}</td>
+              <td class="r mono" style="color:{% if v['total_rejected'] > 0 %}var(--red){% else %}var(--t2){% endif %}">{{ v['total_rejected'] or '—' }}</td>
+              <td class="r mono muted">{{ v['avg_hours_to_verify'] or '—' }}</td>
+              <td class="mono muted" style="font-size:10px">{{ v['first_verified'][:10] if v['first_verified'] else '—' }}</td>
+              <td class="mono" style="font-size:10px;color:{% if v['last_verified'] %}var(--t1){% else %}var(--t2){% endif %}">
+                {{ v['last_verified'][:16].replace('T',' ') if v['last_verified'] else '—' }}
+              </td>
+            </tr>{% endfor %}</tbody>
+          </table></div>
+        </div>
+
+        {# Agent company coverage #}
+        {% if agent_company_coverage %}
+        <div class="card" style="margin-top:16px">
+          <div class="ch"><h3>Agent × Company Coverage</h3><span class="ch-r muted" style="font-size:10px">docs verified per agent per company</span></div>
+          <div class="tw"><table>
+            <thead><tr><th>Agent</th><th>Company</th><th class="r">Docs</th><th class="r">Net ₹ Verified</th></tr></thead>
+            <tbody>{% set ns=namespace(prev='') %}{% for row in agent_company_coverage %}<tr>
+              <td style="font-size:11px;{% if row['agent_name']==ns.prev %}color:var(--t2){% else %}font-weight:600{% endif %}">
+                {% if row['agent_name']!=ns.prev %}{% set ns.prev=row['agent_name'] %}{{ row['agent_name'] }}{% else %}↳{% endif %}
+              </td>
+              <td style="font-size:11px">{{ row['company_name'] }}</td>
+              <td class="r mono">{{ row['count'] }}</td>
+              <td class="r mono b" style="color:var(--green)">₹{{ "{:,.0f}".format(row['net_value'] or 0) }}</td>
+            </tr>{% endfor %}</tbody>
+          </table></div>
+        </div>{% endif %}
+
+        {# Recent verification log #}
+        {% if agent_verif_log %}
+        <div class="card" style="margin-top:16px">
+          <div class="ch"><h3>📋 Recent Verifications Log</h3><span class="ch-r muted" style="font-size:10px">last 100 across all agents</span></div>
+          <div class="tw" style="max-height:480px;overflow-y:auto"><table>
+            <thead class="sticky-glass-head" style="position:sticky;top:0"><tr>
+              <th>Agent</th><th>Stockist</th><th>Company</th><th>Uploader</th>
+              <th>Period</th><th class="r">Net ₹</th><th>Status</th><th>Verified At</th>
+            </tr></thead>
+            <tbody>{% for log in agent_verif_log %}<tr>
+              <td>
+                <div class="b" style="font-size:11px;color:var(--teal)">{{ log['agent_name'] }}</div>
+                <div class="mono muted" style="font-size:9px">{{ log['agent_username'] }}</div>
+              </td>
+              <td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                {{ log['stockist_name'] or log['original_filename'] or '—' }}
+              </td>
+              <td>
+                <div style="font-size:11px;font-weight:600">{{ log['company_name'] }}</div>
+                <div class="mono muted" style="font-size:9px">{{ log['company_code'] }}</div>
+              </td>
+              <td class="muted" style="font-size:10px">{{ log['uploader_name'] or '—' }}</td>
+              <td class="mono" style="font-size:10px;white-space:nowrap">
+                {% if log['statement_from_date'] %}
+                <span style="color:var(--blue)">{{ log['statement_from_date'] }}</span> →
+                <span style="color:var(--blue)">{{ log['statement_to_date'] or '?' }}</span>
+                {% else %}—{% endif %}
+              </td>
+              <td class="r mono b" style="color:var(--green)">
+                {% if log['invoice_net'] %}₹{{ "{:,.0f}".format(log['invoice_net']) }}{% else %}—{% endif %}
+              </td>
+              <td>
+                <span class="badge {% if log['mv_status']=='verified' %}b-done{% else %}b-error{% endif %}" style="font-size:9px">
+                  {{ log['mv_status'] }}
+                </span>
+              </td>
+              <td class="mono muted" style="font-size:10px">
+                {{ log['verified_at'][:16].replace('T',' ') if log['verified_at'] else '—' }}
+              </td>
+            </tr>{% endfor %}</tbody>
+          </table></div>
+        </div>{% endif %}
+
+        {% endif %}{# end verifier_stats #}
+      </div>
+    </div>
+  </div>
+</div>
+
+{% elif page == "sa_verifiers" %}
+<div style="display:flex;min-height:100vh">
+  {{ sa_sidebar('verifiers') }}
+  <div class="main">
+    <div class="ph"><div><h1>Verifier Accounts</h1><p>Manage super admin &amp; manual verification staff credentials</p></div></div>
+    {{ flashes() }}
+
+    {# Security notice #}
+    <div style="background:rgba(255,180,0,0.08);border:1px solid var(--amber);border-radius:var(--r8);padding:14px 18px;margin-bottom:18px;font-size:12px;line-height:1.7">
+      <div style="font-weight:600;color:var(--amber);margin-bottom:6px">🔒 Data Security Guidelines</div>
+      <div style="color:var(--t1)">
+        1. <strong>Never share passwords via WhatsApp, email or chat</strong> — use a password manager or direct in-person handover.<br>
+        2. Each verifier gets their own account — <strong>no shared logins</strong>.<br>
+        3. Deactivate accounts immediately when a staff member leaves.<br>
+        4. Minimum password length: 10 characters. Use uppercase + numbers + symbols.<br>
+        5. All verification actions are logged with verifier identity for full audit trail.
+      </div>
+    </div>
+
+    <div class="g2">
+      {# Existing verifiers #}
+      <div class="card">
+        <div class="ch"><h3>Current Accounts</h3><span class="ch-r">{{ verifiers|length }} total</span></div>
+        <div class="tw"><table>
+          <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Companies</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+          <tbody>{% for v in verifiers %}<tr>
+            <td class="b">{{ v['full_name'] }}<div class="muted" style="font-size:10px">{{ v['email'] or '' }}</div></td>
+            <td class="mono" style="font-size:11px">{{ v['username'] }}</td>
+            <td>
+              <span class="badge {% if v['role']=='superadmin' %}b-done{% else %}b-pending{% endif %}" style="font-size:10px">
+                {{ 'SUPER ADMIN' if v['role']=='superadmin' else 'AGENT' }}
+              </span>
+            </td>
+            <td style="font-size:10px;max-width:140px">
+              <span class="muted">All companies</span>
+            </td>
+            <td>
+              <span class="badge {% if v['status']=='active' %}b-done{% else %}b-error{% endif %}">{{ v['status'] }}</span>
+            </td>
+            <td class="mono muted" style="font-size:10px">{{ v['created_at'][:10] if v['created_at'] else '—' }}</td>
+            <td style="white-space:nowrap">
+              <form method="POST" action="/superadmin/verifiers/toggle/{{ v['id'] }}" style="display:inline">
+                <button type="submit" class="btn-sm {% if v['status']=='active' %}btn-del{% else %}btn-grn{% endif %}"
+                  onclick="return confirm('{% if v['status']=='active' %}Deactivate{% else %}Activate{% endif %} {{ v['full_name'] }}?')">
+                  {% if v['status']=='active' %}Deactivate{% else %}Activate{% endif %}
+                </button>
+              </form>
+              <button class="btn-sm btn-act" style="margin-left:4px"
+                onclick="document.getElementById('rpw-{{ v['id'] }}').style.display='block'">Reset PW</button>
+              <div id="rpw-{{ v['id'] }}" style="display:none;margin-top:6px">
+                <form method="POST" action="/superadmin/verifiers/reset-password/{{ v['id'] }}" style="display:flex;gap:4px">
+                  <input type="password" name="new_password" required minlength="10" placeholder="Min 10 chars"
+                    style="padding:4px 8px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r4);color:var(--t0);font-size:11px;width:140px">
+                  <button type="submit" class="btn-sm btn-p">Set</button>
+                </form>
+              </div>
+            </td>
+          </tr>{% else %}
+          <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--t2)">No verifier accounts yet.</td></tr>
+          {% endfor %}</tbody>
+        </table></div>
+      </div>
+
+      {# Create new verifier #}
+      <div class="card">
+        <div class="ch"><h3>Create Account</h3></div>
+        <div style="padding:16px">
+          <form method="POST" action="/superadmin/verifiers/add">
+            <div class="form-g"><label>Full Name *</label><input type="text" name="full_name" required placeholder="e.g. Ravi Kumar"></div>
+            <div class="form-g"><label>Username *</label>
+              <input type="text" name="username" required placeholder="e.g. ravi.verifier"
+                pattern="[a-z0-9._]+" title="Lowercase letters, numbers, dots, underscores only"
+                style="text-transform:lowercase">
+              <div style="font-size:10px;color:var(--t2);margin-top:3px">Lowercase only. No spaces.</div>
+            </div>
+            <div class="form-g"><label>Email</label><input type="email" name="email" placeholder="work email (optional)"></div>
+            <div class="form-g"><label>Role *</label>
+              <select name="role" id="role-sel" onchange="toggleCompanyAssign(this.value)">
+                <option value="agent">Verification Agent</option>
+                <option value="superadmin">Super Admin (full access)</option>
+              </select>
+              <div style="font-size:10px;color:var(--t2);margin-top:3px">Agent: restricted to assigned companies. Super Admin: full access.</div>
+            </div>
+            <div style="padding:8px 12px;background:var(--bg3);border:0.5px solid var(--border2);border-radius:var(--r4);margin-bottom:14px;font-size:11px;color:var(--t2)">
+              ℹ Agents can see and claim tasks from <strong style="color:var(--t0)">all companies</strong>. They self-select workload by claiming tasks from the Unassigned pool. No company restriction needed.
+            </div>
+            <div class="form-g"><label>Password *</label>
+              <input type="password" name="password" required minlength="10" placeholder="Min 10 characters">
+              <div style="font-size:10px;color:var(--amber);margin-top:3px">⚠ Share via secure channel only — never via chat/WhatsApp</div>
+            </div>
+            <button type="submit" class="btn-p" style="width:100%">Create Account</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endif %}
+
+<script>
+function openEditCo(id,co){
+  document.getElementById('edit-co-form').action='/superadmin/companies/edit/'+id;
+  const s=(eid,v)=>{const el=document.getElementById(eid);if(el)el.value=v==null?'':v;};
+  s('ec-name',co.name);s('ec-addr',co.address);s('ec-city',co.city);s('ec-state',co.state);
+  s('ec-gst',co.gst_number);s('ec-dl',co.drug_license);
+  s('ec-cp',co.contact_person);s('ec-cm',co.contact_mobile);
+  s('ec-ce',co.contact_email);s('ec-web',co.website);
+  s('ec-notes',co.notes);s('ec-mu',co.max_users||100);
+  const pl=document.getElementById('ec-plan');if(pl)pl.value=co.plan||'basic';
+  const st=document.getElementById('ec-status');if(st)st.value=co.status||'active';
+  document.getElementById('edit-co-modal').style.display='flex';
+}
+function openEditDiv(did,cid,name,code,desc,status){
+  const f=document.getElementById('edit-div-form');if(!f)return;
+  f.action='/superadmin/divisions/edit/'+did;
+  const s=(eid,v)=>{const el=document.getElementById(eid);if(el)el.value=v||'';};
+  s('ed-cid',cid);s('ed-name',name);s('ed-code',code);s('ed-desc',desc);
+  const st=document.getElementById('ed-status');if(st)st.value=status||'active';
+  document.getElementById('edit-div-modal').style.display='flex';
+}
+function copyLink(url){
+  navigator.clipboard.writeText(url)
+    .then(()=>{ const b=event.target; b.textContent='Copied!'; setTimeout(()=>b.textContent='Copy',2000); })
+    .catch(()=>{ const ta=document.createElement('textarea'); ta.value=url; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); alert('Copied!'); });
+}
+document.addEventListener('click',function(e){
+  document.querySelectorAll('.modal').forEach(m=>{if(e.target===m)m.style.display='none';});
+});
+
+// Mobile off-canvas sidebar toggle
+function toggleMobileSidebar(){
+  const sb=document.getElementById('main-sidebar');
+  const ov=document.getElementById('sb-overlay');
+  if(!sb)return;
+  sb.classList.toggle('mobile-open');
+  if(ov)ov.classList.toggle('show');
+}
+document.addEventListener('DOMContentLoaded',function(){
+  document.querySelectorAll('.sb-nav a').forEach(function(el){
+    el.addEventListener('click',function(){
+      if(window.innerWidth<=900)toggleMobileSidebar();
+    });
+  });
+});
+
+// Auto-refresh verification upload form — show spinner on submit
+document.addEventListener('DOMContentLoaded',function(){
+  const corrForm = document.getElementById('corr-form');
+  if(corrForm){
+    corrForm.addEventListener('submit',function(){
+      const btn = corrForm.querySelector('button[type=submit]');
+      if(btn){ btn.disabled=true; btn.textContent='⏳ Applying corrections...'; }
+    });
+  }
+  // Bulk upload spinner
+  const bulkForm = document.querySelector('form[enctype="multipart/form-data"]');
+  if(bulkForm && bulkForm.querySelector('[name="csv_file"]')){
+    bulkForm.addEventListener('submit',function(){
+      const btn = bulkForm.querySelector('button[type=submit]');
+      if(btn){ btn.disabled=true; btn.textContent='⏳ Processing...'; }
+    });
+  }
+  // If flash message is present and contains "✓", it means an action just completed
+  // Scroll to flash messages
+  const flash = document.querySelector('.flash, .f-ok, .f-err');
+  if(flash) flash.scrollIntoView({behavior:'smooth', block:'center'});
+});
+</script>
+<script>window.SESSION_LOGIN_URL = '/superadmin/login';</script>
+<script src="/static/session-timeout.js"></script>
+<script src="/static/live-refresh.js"></script>
+</body>
+</html>

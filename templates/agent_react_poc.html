@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Verify #{{ mv_id }} (React preview) — Data Extraction</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg0:#F5F5F7;--bg1:#FFFFFF;--bg2:#F5F5F7;--bg3:#E8E8ED;
+    --t0:#1D1D1F;--t1:#6E6E73;--t2:#8E8E93;
+    --blue:#0071E3;--blue-d:#E8F1FD;
+    --green:#248A3D;--green-d:#E3F6E9;
+    --red:#D70015;--red-d:#FCE7E9;
+    --amber:#B4650A;
+    --border:#E5E5EA;--border2:#D2D2D7;
+    --r8:8px;--r12:12px;--mono:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg0);color:var(--t0);font-family:'Inter',system-ui,sans-serif;font-size:14px}
+  #root{max-width:980px;margin:0 auto;padding:20px}
+</style>
+</head>
+<body>
+<div id="root">
+  <div style="padding:60px;text-align:center;color:var(--t2)">Loading editor…</div>
+</div>
+<script>
+  window.__MV_ID__ = {{ mv_id }};
+  window.__MV__ = {{ mv|tojson|safe }};
+</script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="/static/agent-editor-react.js"></script>
+</body>
+</html>
