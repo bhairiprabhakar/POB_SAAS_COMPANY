@@ -27,7 +27,12 @@ _HO_RANK = 7
 
 
 def _descendants(conn, root_user_id: int) -> list[int]:
-    """All user ids whose reporting chain leads to root_user_id."""
+    """All user ids whose reporting chain leads to root_user_id.
+
+    Cycle-safe: a parent_id cycle (which the update-user guard now rejects at
+    write time) must not hang every hierarchical query, so each node is
+    visited at most once.
+    """
     c = conn.cursor()
     c.execute("SELECT id, parent_id FROM users")
     rows = c.fetchall()
@@ -35,10 +40,14 @@ def _descendants(conn, root_user_id: int) -> list[int]:
     for uid, parent in rows:
         children.setdefault(parent, []).append(uid)
     out = []
+    visited = {root_user_id}
     stack = [root_user_id]
     while stack:
         node = stack.pop()
         for child in children.get(node, []):
+            if child in visited:
+                continue
+            visited.add(child)
             out.append(child)
             stack.append(child)
     return out

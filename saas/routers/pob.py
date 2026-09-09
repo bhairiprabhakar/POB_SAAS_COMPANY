@@ -591,7 +591,16 @@ async def submit_pob(
     if not c.fetchone():
         raise HTTPException(400, "Chemist not found")
 
-    # validate product POB bounds
+    # POB amount / PTR / MRP are derived from the product master (mirroring the
+    # bulk import path) so the caller cannot inflate the authorised POB amount by
+    # sending its own pob_amount / ptr / mrp in the form.
+    ptr = float(product.get("ptr") or 0)
+    mrp = float(product.get("mrp") or 0)
+    if ptr <= 0:
+        raise HTTPException(400, "Product has no PTR configured — set the PTR in Campaign Builder before submitting")
+    pob_amount = round(quantity * ptr, 2)
+
+    # validate product POB bounds (against the server-derived amount)
     if product["scheme_eligibility"]:
         min_pob = product["min_pob"] or 0
         max_pob = product["max_pob"]
@@ -601,9 +610,6 @@ async def submit_pob(
             raise HTTPException(400, f"POB amount is below the campaign minimum ({min_pob})")
         if product["min_quantity"] and quantity < product["min_quantity"]:
             raise HTTPException(400, f"Quantity below the campaign minimum ({product['min_quantity']})")
-
-    if not pob_amount and ptr and quantity:
-        pob_amount = round(quantity * ptr, 2)
 
     # persist invoice
     invoice_path = None

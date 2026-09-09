@@ -237,7 +237,7 @@ def _pob_lines(conn, row):
 def claim_verification(vid: int, ctx: TenantContext = Depends(require_permission("verification.view"))):
     conn = ctx.conn
     c = conn.cursor()
-    c.execute("SELECT * FROM pob_verifications WHERE id=%s", (vid,))
+    c.execute("SELECT * FROM pob_verifications WHERE id=%s FOR UPDATE", (vid,))
     v = fetchone_dict(c)
     if not v:
         raise HTTPException(404, "verification not found")
@@ -261,7 +261,7 @@ def approve_verification(vid: int, body: dict = None, request: Request = None,
               "FROM pob_verifications v "
               "JOIN pob_activities pa ON pa.id=v.pob_id "
               "JOIN campaigns cmp ON cmp.id=pa.campaign_id "
-              "JOIN users u ON u.id=pa.user_id WHERE v.id=%s", (vid,))
+              "JOIN users u ON u.id=pa.user_id WHERE v.id=%s FOR UPDATE OF v", (vid,))
     v = fetchone_dict(c)
     if not v:
         raise HTTPException(404, "verification not found")
@@ -377,7 +377,7 @@ def reject_verification(vid: int, body: dict, request: Request = None,
     conn = ctx.conn
     c = conn.cursor()
     c.execute("SELECT v.*, pa.user_id, pa.invoice_number FROM pob_verifications v "
-              "JOIN pob_activities pa ON pa.id=v.pob_id WHERE v.id=%s", (vid,))
+              "JOIN pob_activities pa ON pa.id=v.pob_id WHERE v.id=%s FOR UPDATE OF v", (vid,))
     v = fetchone_dict(c)
     if not v:
         raise HTTPException(404, "verification not found")

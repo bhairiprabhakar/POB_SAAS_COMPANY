@@ -173,38 +173,84 @@ function UserModal({ editing, base, roles, levels, divisions, allUsers, isEdit, 
 function BulkUpload({ base, open, onClose, onDone }) {
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
   const submit = async (e) => {
     e.preventDefault();
     if (!file) return;
     setBusy(true);
     try {
       const r = await uploadFile(`${base}/users/bulk-upload`, file);
+      setResult(r);
       if (r.created > 0) toast(`Created ${r.created} users`, 'success');
       if (r.errors?.length) toast(`${r.errors.length} row(s) failed`, 'error');
+      if (!r.generated?.length) { try { onDone(); } catch (e) { /* ignore */ } }
     } catch (err) {
       toast(err.message, 'error');
     } finally {
       setBusy(false);
-      // Always notify parent that upload attempt finished so parent can close modal and refresh list.
-      try { onDone(); } catch (e) { /* ignore */ }
     }
   };
+  const finish = () => { setFile(null); setResult(null); onDone(); };
   return (
-    <Modal open={open} title="Bulk upload users" onClose={onClose} footer={(
-      <>
-        <button className="btn" onClick={() => { setFile(null); onClose(); }} disabled={false}>Cancel</button>
-        <button className="btn btn-primary" form="bulk-upload-form" disabled={busy || !file}>{busy ? 'Uploading…' : 'Upload'}</button>
-      </>
-    )}>
-      <form id="bulk-upload-form" onSubmit={submit}>
-        <p className="muted">Expected columns: username, full_name, password, email, mobile, employee_id,
-          division, hierarchy_level, role, parent_username, region, area, territory.</p>
-        <button type="button" className="btn btn-sm" onClick={() =>
-          downloadFile(`${base}/hierarchy/bulk-template`, 'users_template.xlsx')}>Download template</button>
-        <div style={{ margin: '12px 0' }}>
-          <input type="file" accept=".xlsx,.xls" onChange={(e) => setFile(e.target.files[0])} required />
+    <Modal open={open} title="Bulk upload users" onClose={onClose} footer={
+      result ? (
+        <button className="btn btn-primary" onClick={finish}>Done</button>
+      ) : (
+        <>
+          <button className="btn" onClick={() => { setFile(null); onClose(); }} disabled={false}>Cancel</button>
+          <button className="btn btn-primary" form="bulk-upload-form" disabled={busy || !file}>{busy ? 'Uploading…' : 'Upload'}</button>
+        </>
+      )
+    }>
+      {result ? (
+        <div>
+          <p><Badge tone={result.generated?.length ? 'green' : 'gray'}>
+            {result.created} created{result.errors?.length ? ` · ${result.errors.length} failed` : ''}
+          </Badge></p>
+          {result.generated?.length > 0 && (
+            <div className="card" style={{ marginTop: 10 }}>
+              <h5 className="form-section">Temporary passwords</h5>
+              <p className="muted">Rows with a blank password got a random one. Share each with the user
+                — they aren't shown again after this screen closes.</p>
+              <table className="data-table">
+                <tbody>
+                  {result.generated.map((g) => (
+                    <tr key={g.username}>
+                      <td><strong>{g.full_name || g.username}</strong><div className="muted">@{g.username}</div></td>
+                      <td><code className="mono">{g.temp_password}</code></td>
+                      <td>
+                        <button className="btn-link" onClick={() => {
+                          navigator.clipboard?.writeText(g.temp_password);
+                          toast(`Password copied for ${g.username}`, 'success');
+                        }}>Copy</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {result.errors?.length > 0 && (
+            <div className="card" style={{ marginTop: 10 }}>
+              <h5 className="form-section">Rows skipped</h5>
+              <ul className="muted" style={{ fontSize: 12, margin: 0, paddingLeft: 18 }}>
+                {result.errors.map((m, i) => <li key={i}>{m}</li>)}
+              </ul>
+            </div>
+          )}
         </div>
-      </form>
+      ) : (
+        <form id="bulk-upload-form" onSubmit={submit}>
+          <p className="muted">Expected columns: username, full_name, password, email, mobile, employee_id,
+            division, hierarchy_level, role, parent_username, region, area, territory.
+            Leave <strong>password</strong> blank and a secure random temp password is generated and shown here.</p>
+          <button type="button" className="btn btn-sm" onClick={() =>
+            downloadFile(`${base}/hierarchy/bulk-template`, 'users_template.xlsx')}>Download template</button>
+          <div style={{ margin: '12px 0' }}>
+            <input type="file" accept=".xlsx,.xls" onChange={(e) => setFile(e.target.files[0])} required />
+          </div>
+        </form>
+      )}
     </Modal>
   );
 }

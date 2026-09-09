@@ -179,6 +179,7 @@ def _transition(conn, gid, event, detail, actor_id, new_status=None, updates=Non
     g = fetchone_dict(c)
     if not g:
         raise HTTPException(404, "gratification not found")
+    visible = visible_user_ids(conn, ctx)
     if updates:
         sets = ", ".join(f"{k}=%s" for k in updates)
         params = list(updates.values())
@@ -192,17 +193,33 @@ def _transition(conn, gid, event, detail, actor_id, new_status=None, updates=Non
     return g
 
 
+def _scoped_gratification(conn, ctx, gid):
+    """Fetch a gratification and enforce the caller's user-visibility scope.
+
+    Mirrors the read-path check in GET /gratification/{id}. Write transitions
+    previously resolved the row by id without this check, letting a hierarchy-
+    scoped actor (e.g. a division admin) dispatch / approve / pay / redeem
+    gratifications for users outside their visible set.
+    """
+    c = conn.cursor()
+    c.execute("SELECT * FROM gratifications WHERE id=%s", (gid,))
+    g = fetchone_dict(c)
+    if not g:
+        raise HTTPException(404, "gratification not found")
+    visible = visible_user_ids(conn, ctx)
+    if visible is not None and g["user_id"] not in visible:
+        raise HTTPException(403, "not allowed to act on this gratification")
+    return g
+
+
 # ── Workflow: physical gift ─────────────────────────────────────────────────
 
 @router.post("/gratification/{gid}/dispatch")
 def dispatch_gift(gid: int, body: dict, ctx: TenantContext = Depends(require_permission("gratification.dispatch"))):
     conn = ctx.conn
     gift_id = body.get("gift_id")
+    g = _scoped_gratification(conn, ctx, gid)
     c = conn.cursor()
-    c.execute("SELECT * FROM gratifications WHERE id=%s", (gid,))
-    g = fetchone_dict(c)
-    if not g:
-        raise HTTPException(404, "gratification not found")
     if g["type_code"] != "physical_gift":
         raise HTTPException(400, "only physical_gift gratifications can be dispatched")
     if gift_id:
@@ -230,11 +247,8 @@ async def deliver_gift(gid: int,
                        photo: UploadFile = File(None),
                        ctx: TenantContext = Depends(require_permission("gratification.dispatch"))):
     conn = ctx.conn
+    g = _scoped_gratification(conn, ctx, gid)
     c = conn.cursor()
-    c.execute("SELECT * FROM gratifications WHERE id=%s", (gid,))
-    g = fetchone_dict(c)
-    if not g:
-        raise HTTPException(404, "gratification not found")
     if g["status"] not in ("dispatched", "delivered"):
         raise HTTPException(409, f"cannot deliver a {g['status']} gratification")
     photo_path = g.get("photo_path")
@@ -267,6 +281,7 @@ def acknowledge_gift(gid: int, body: dict, ctx: TenantContext = Depends(require_
     if not ack:
         raise HTTPException(400, "acknowledgement required")
     conn = ctx.conn
+    g = _scoped_gratification(conn, ctx, gid)
     c = conn.cursor()
     c.execute("UPDATE gratifications SET status='completed', acknowledgement=%s, completed_at=CURRENT_TIMESTAMP "
               "WHERE id=%s", (ack, gid))
@@ -282,11 +297,8 @@ def acknowledge_gift(gid: int, body: dict, ctx: TenantContext = Depends(require_
 @router.post("/gratification/{gid}/approve")
 def approve_cashback(gid: int, body: dict, ctx: TenantContext = Depends(require_permission("gratification.approve"))):
     conn = ctx.conn
+    g = _scoped_gratification(conn, ctx, gid)
     c = conn.cursor()
-    c.execute("SELECT * FROM gratifications WHERE id=%s", (gid,))
-    g = fetchone_dict(c)
-    if not g:
-        raise HTTPException(404, "gratification not found")
     if g["type_code"] not in ("cashback", "upi"):
         raise HTTPException(400, "only cashback/upi gratifications can be cashback-approved")
     c.execute("UPDATE gratifications SET status='approved', upi_id=%s WHERE id=%s",
@@ -302,11 +314,8 @@ def approve_cashback(gid: int, body: dict, ctx: TenantContext = Depends(require_
 def pay_cashback(gid: int, body: dict, ctx: TenantContext = Depends(require_permission("gratification.pay"))):
     payment_ref = (body.get("payment_ref") or "").strip()
     conn = ctx.conn
+    g = _scoped_gratification(conn, ctx, gid)
     c = conn.cursor()
-    c.execute("SELECT * FROM gratifications WHERE id=%s", (gid,))
-    g = fetchone_dict(c)
-    if not g:
-        raise HTTPException(404, "gratification not found")
     if g["type_code"] not in ("cashback", "upi"):
         raise HTTPException(400, "only cashback/upi gratifications can be paid")
     if g["status"] != "approved":
@@ -333,11 +342,8 @@ def generate_voucher(gid: int, body: dict, ctx: TenantContext = Depends(require_
         alphabet = string.ascii_uppercase + string.digits
         code = "VCH-" + "".join(secrets.choice(alphabet) for _ in range(10))
     conn = ctx.conn
+    g = _scoped_gratification(conn, ctx, gid)
     c = conn.cursor()
-    c.execute("SELECT * FROM gratifications WHERE id=%s", (gid,))
-    g = fetchone_dict(c)
-    if not g:
-        raise HTTPException(404, "gratification not found")
     if g["type_code"] != "voucher":
         raise HTTPException(400, "only voucher gratifications can generate vouchers")
     c.execute("UPDATE gratifications SET status='generated', voucher_code=%s, voucher_status='generated' "
@@ -352,11 +358,8 @@ def generate_voucher(gid: int, body: dict, ctx: TenantContext = Depends(require_
 @router.post("/gratification/{gid}/send-voucher")
 def send_voucher(gid: int, body: dict, ctx: TenantContext = Depends(require_permission("gratification.manage"))):
     conn = ctx.conn
+    g = _scoped_gratification(conn, ctx, gid)
     c = conn.cursor()
-    c.execute("SELECT * FROM gratifications WHERE id=%s", (gid,))
-    g = fetchone_dict(c)
-    if not g:
-        raise HTTPException(404, "gratification not found")
     c.execute("UPDATE gratifications SET status='sent', voucher_status='sent' WHERE id=%s", (gid,))
     c.execute("INSERT INTO gratification_events (gratification_id, event, detail, actor_id) "
               "VALUES (%s,'sent',%s,%s)", (gid, body.get("to") or "Sent to recipient", ctx.user["id"]))
@@ -370,11 +373,8 @@ def send_voucher(gid: int, body: dict, ctx: TenantContext = Depends(require_perm
 @router.post("/gratification/{gid}/redeem-voucher")
 def redeem_voucher(gid: int, body: dict, ctx: TenantContext = Depends(require_permission("gratification.manage"))):
     conn = ctx.conn
+    g = _scoped_gratification(conn, ctx, gid)
     c = conn.cursor()
-    c.execute("SELECT * FROM gratifications WHERE id=%s", (gid,))
-    g = fetchone_dict(c)
-    if not g:
-        raise HTTPException(404, "gratification not found")
     if g["type_code"] != "voucher":
         raise HTTPException(400, "only vouchers can be redeemed")
     c.execute("UPDATE gratifications SET status='completed', voucher_status='redeemed', "

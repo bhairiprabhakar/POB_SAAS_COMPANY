@@ -3,6 +3,7 @@ Company-scoped router: settings, dynamic hierarchy, users (incl. Excel bulk
 upload), roles and the permission catalog.
 """
 import io
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from openpyxl import Workbook, load_workbook
@@ -358,6 +359,28 @@ def _enforce_user_limit(conn, ctx):
         raise HTTPException(409, f"User limit ({limit}) reached for this division")
 
 
+def _would_create_parent_cycle(conn, uid: int, new_parent_id) -> bool:
+    """True if assigning users[uid].parent_id = new_parent_id closes a cycle.
+
+    Walking the chain upwards from the new parent must never reach the target
+    user; otherwise scoping._descendants (a stack DFS) would loop forever and
+    hang every hierarchy-scoped request.
+    """
+    if new_parent_id == uid:
+        return True
+    c = conn.cursor()
+    seen = set()
+    node = new_parent_id
+    while node is not None and node not in seen:
+        seen.add(node)
+        if node == uid:
+            return True
+        c.execute("SELECT parent_id FROM users WHERE id=%s", (node,))
+        row = c.fetchone()
+        node = row[0] if row else None
+    return False
+
+
 @router.put("/users/{uid}")
 def update_user(uid: int, body: dict, ctx: TenantContext = Depends(require_permission("user.manage"))):
     conn = ctx.conn
@@ -374,6 +397,11 @@ def update_user(uid: int, body: dict, ctx: TenantContext = Depends(require_permi
             raise HTTPException(400, "invalid division_id")
     div = division_scope(conn, ctx)
     if div:
+        # a division-scoped actor may only manage users inside their division
+        c.execute("SELECT division_id FROM users WHERE id=%s", (uid,))
+        row = c.fetchone()
+        if not row or row[0] != div:
+            raise HTTPException(403, "user does not belong to your division")
         # division admins cannot move users between divisions
         body["division_id"] = div
         if "division" not in body:
@@ -390,6 +418,15 @@ def update_user(uid: int, body: dict, ctx: TenantContext = Depends(require_permi
     if body.get("password"):
         sets.append("password=%s")
         params.append(hash_pw(body["password"]))
+    if body.get("parent_id") is not None and _would_create_parent_cycle(conn, uid, body["parent_id"]):
+        raise HTTPException(400, "parent_id would create a reporting cycle")
+    if uid == ctx.user.get("id") and any(f in body for f in
+                                         ("role_id", "parent_id", "hierarchy_level_id", "division_id", "status")):
+        raise HTTPException(400, "you cannot change your own role, reporting line, division or status via this endpoint")
+    if "role_id" in body:
+        c.execute("SELECT id FROM roles WHERE id=%s", (body["role_id"],))
+        if not c.fetchone():
+            raise HTTPException(400, "invalid role_id")
     if not sets:
         raise HTTPException(400, "Nothing to update")
     params.append(uid)
@@ -427,7 +464,11 @@ async def bulk_upload_users(file: UploadFile = File(...),
                             ctx: TenantContext = Depends(require_permission("user.manage"))):
     """Excel upload of users. Expected columns:
     username, full_name, password, email, mobile, employee_id, division,
-    hierarchy_level, role, parent_username, region, area, territory"""
+    hierarchy_level, role, parent_username, region, area, territory.
+
+    Leave `password` blank and the API generates a secure random temporary
+    password per user (returned in `generated`) instead of using a known
+    default. Never store real passwords in the spreadsheet."""
     data = await file.read()
     try:
         validate_upload(data, filename=file.filename or "", allowed_kinds=SPREADSHEET_KINDS,
@@ -444,6 +485,7 @@ async def bulk_upload_users(file: UploadFile = File(...),
     conn = ctx.conn
     c = conn.cursor()
     created, errors = 0, []
+    generated = []
     user_ids = {}
     user_contacts = {}
 
@@ -458,7 +500,7 @@ async def bulk_upload_users(file: UploadFile = File(...),
         d = {headers[j]: (row[j] if j < len(row) else None) for j in range(len(headers))}
         username = col(d, "username")
         full_name = col(d, "full_name")
-        password = col(d, "password") or "changeme123"
+        password = col(d, "password") or secrets.token_hex(6)
         if not username or not full_name:
             errors.append(f"row {i}: username and full_name required")
             continue
@@ -486,6 +528,9 @@ async def bulk_upload_users(file: UploadFile = File(...),
             user_ids[username] = c.fetchone()[0]
             user_contacts[username] = (d.get("email"), col(d, "mobile"))
             created += 1
+            if not col(d, "password"):
+                generated.append({"username": username, "full_name": full_name,
+                                  "temp_password": password})
         except Exception as exc:
             errors.append(f"row {i}: {exc}")
 
@@ -511,7 +556,7 @@ async def bulk_upload_users(file: UploadFile = File(...),
         email, mobile = user_contacts.get(uname, (None, None))
         sync_user(tenant_db, uname, uid, email=email, mobile=mobile)
     log_action(conn, ctx.user["id"], "user.bulk_upload", "user", None, {"created": created, "errors": len(errors)})
-    return {"created": created, "errors": errors}
+    return {"created": created, "errors": errors, "generated": generated}
 
 
 def _resolve_level(conn, value):

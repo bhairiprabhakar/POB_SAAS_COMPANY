@@ -1243,4 +1243,18 @@ ALTER TABLE ocr_usage ADD COLUMN IF NOT EXISTS model_name TEXT;
 ALTER TABLE ocr_usage ADD COLUMN IF NOT EXISTS input_tokens INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE ocr_usage ADD COLUMN IF NOT EXISTS output_tokens INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_ocr_usage_user ON ocr_usage (user_id);
+
+-- ── Security: one gratification per POB (3.4.1) ─────────────────────────────
+-- Each POB may produce at most one gratification. A concurrent double-approve
+-- (or a manual re-grant) would otherwise mint a second reward row. Dedupe any
+-- legacy duplicates first (keep the earliest row, events cascade on delete),
+-- then enforce uniqueness so relational integrity holds at the database level.
+DO $$
+BEGIN
+    DELETE FROM gratifications g
+    USING gratifications keep
+    WHERE keep.pob_id = g.pob_id AND keep.id < g.id;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_gratifications_pob_id
+    ON gratifications (pob_id);
 """
