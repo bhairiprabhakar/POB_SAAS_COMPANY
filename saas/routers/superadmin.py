@@ -987,6 +987,219 @@ def platform_analytics(days: int = 0, claims=Depends(require_superadmin)):
     return data
 
 
+# -- AI usage / Gemini costing (division-wise + user-wise) --
+
+_COSTING_TTL = 60
+_costing_cache: dict = {"at": 0.0, "key": None, "data": None}
+
+
+def _costing_where(days: int, model: str):
+    """Return (sql, params) for the ocr_usage WHERE clause shared by every
+    costing aggregate. `model` matches the model that served the call."""
+    sql, params = [], []
+    if days:
+        sql.append("created_at >= now() - make_interval(days => %s)")
+        params.append(int(days))
+    if model:
+        sql.append("model_name = %s")
+        params.append(model)
+    return ("WHERE " + " AND ".join(sql)) if sql else "", params
+
+
+@router.get("/costing")
+def platform_costing(days: int = 0, division_id: int = 0, model: str = "",
+                     claims=Depends(require_superadmin)):
+    """Aggregate Gemini invoice-extraction spend across every division tenant.
+
+    Reports input/output tokens, cost and model used -- summarised platform-wide,
+    per division, per model and per user, plus the newest extraction calls.
+    `days=0` means all time; `division_id` / `model` narrow the view.
+    """
+    import time as _time
+    from .. import config
+    now = _time.time()
+    key = (days, division_id, model)
+    if (_costing_cache["data"] is not None and _costing_cache["key"] == key
+            and now - _costing_cache["at"] < _COSTING_TTL):
+        return _costing_cache["data"]
+
+    conn = platform_db.get_db()
+    try:
+        c = conn.cursor()
+        if division_id:
+            c.execute("SELECT id, name, code, status, tenant_db_name FROM divisions WHERE id=%s",
+                      (division_id,))
+        else:
+            c.execute("""SELECT id, name, code, status, tenant_db_name
+                         FROM divisions WHERE tenant_db_name IS NOT NULL ORDER BY id""")
+        divisions = fetchall_dict(c)
+    finally:
+        conn.close()
+
+    where_sql, where_params = _costing_where(days, model)
+
+    summary = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cost": 0.0,
+               "reported_divisions": 0, "unreachable_divisions": 0}
+    by_division: dict = {}
+    by_model: dict = {}
+    by_user: dict = {}
+    monthly: dict = {}
+    recent: list = []
+    unreachable: list = []
+    currency = config.OCR_COST_CURRENCY or "USD"
+
+    for div in divisions:
+        tdb = div.get("tenant_db_name")
+        if not tdb:
+            continue
+        tconn = None
+        try:
+            from .. import migrations
+            migrations.ensure_migrated(tdb)
+            tconn = _direct_tenant_conn(tdb)
+            tc = tconn.cursor()
+
+            # ── Division totals ───────────────────────────────────────────
+            tc.execute(
+                f"""SELECT count(*), coalesce(sum(input_tokens),0),
+                           coalesce(sum(output_tokens),0), coalesce(sum(cost),0)
+                    FROM ocr_usage {where_sql}""",
+                where_params,
+            )
+            row = tc.fetchone() or (0, 0, 0, 0)
+            calls = int(row[0] or 0)
+            itok = int(row[1] or 0)
+            otok = int(row[2] or 0)
+            cost = float(row[3] or 0)
+            summary["calls"] += calls
+            summary["input_tokens"] += itok
+            summary["output_tokens"] += otok
+            summary["cost"] += cost
+            summary["reported_divisions"] += 1
+            div_id = div["id"]
+            drec = {
+                "division_id": div_id, "name": div["name"], "code": div["code"],
+                "calls": calls, "input_tokens": itok, "output_tokens": otok,
+                "cost": round(cost, 6), "models": [],
+            }
+            by_division[div_id] = drec
+
+            # ── Per model ─────────────────────────────────────────────────
+            tc.execute(
+                f"""SELECT COALESCE(model_name, '(text)') m,
+                           count(*), coalesce(sum(input_tokens),0),
+                           coalesce(sum(output_tokens),0), coalesce(sum(cost),0)
+                    FROM ocr_usage {where_sql} GROUP BY 1""",
+                where_params,
+            )
+            for m, cnt, it, ot, cst in tc.fetchall():
+                model = m or "(text)"
+                slot = by_model.setdefault(model, {"model": model, "calls": 0,
+                                                   "input_tokens": 0, "output_tokens": 0, "cost": 0.0})
+                slot["calls"] += int(cnt or 0)
+                slot["input_tokens"] += int(it or 0)
+                slot["output_tokens"] += int(ot or 0)
+                slot["cost"] = round(slot["cost"] + float(cst or 0), 6)
+                drec["models"].append({"model": model, "calls": int(cnt or 0),
+                                       "input_tokens": int(it or 0),
+                                       "output_tokens": int(ot or 0),
+                                       "cost": round(float(cst or 0), 6)})
+
+            # ── Per user (joined across the tenant's ocr_usage) ───────────
+            tc.execute(
+                f"""SELECT COALESCE(u.id, 0) uid, COALESCE(u.username, '(deleted)'),
+                           COALESCE(u.full_name, '—') fname, r.name rn,
+                           count(*) calls, coalesce(sum(o.input_tokens),0),
+                           coalesce(sum(o.output_tokens),0), coalesce(sum(o.cost),0)
+                    FROM ocr_usage o
+                    LEFT JOIN users u ON u.id = o.user_id
+                    LEFT JOIN roles r ON r.id = u.role_id
+                    {where_sql} GROUP BY 1, 2, 3, 4""",
+                where_params,
+            )
+            for uid, uname, fname, rn, cnt, it, ot, cst in tc.fetchall():
+                ukey = f"{div_id}:{uid}"
+                uslot = by_user.setdefault(ukey, {
+                    "division_id": div_id, "division_name": div["name"],
+                    "division_code": div["code"], "user_id": uid,
+                    "username": uname, "full_name": fname, "role": rn or "—",
+                    "calls": 0, "input_tokens": 0, "output_tokens": 0, "cost": 0.0,
+                })
+                uslot["calls"] += int(cnt or 0)
+                uslot["input_tokens"] += int(it or 0)
+                uslot["output_tokens"] += int(ot or 0)
+                uslot["cost"] = round(uslot["cost"] + float(cst or 0), 6)
+
+            # ── Monthly trend for the spend chart ─────────────────────────
+            tc.execute(
+                f"""SELECT to_char(created_at, 'YYYY-MM') m, count(*),
+                           coalesce(sum(input_tokens),0), coalesce(sum(output_tokens),0),
+                           coalesce(sum(cost),0)
+                    FROM ocr_usage {where_sql} GROUP BY 1""",
+                where_params,
+            )
+            for mth, cnt, it, ot, cst in tc.fetchall():
+                ms = monthly.setdefault(mth, {"month": mth, "calls": 0,
+                                              "input_tokens": 0, "output_tokens": 0, "cost": 0.0})
+                ms["calls"] += int(cnt or 0)
+                ms["input_tokens"] += int(it or 0)
+                ms["output_tokens"] += int(ot or 0)
+                ms["cost"] = round(ms["cost"] + float(cst or 0), 6)
+
+            # ── Newest calls (detail table) ───────────────────────────────
+            tc.execute(
+                f"""SELECT o.id, COALESCE(u.full_name, '—'), COALESCE(u.username, ''),
+                           o.engine, o.model_name, o.input_tokens, o.output_tokens,
+                           o.cost, o.currency, o.status, o.invoice_number, o.filename,
+                           to_char(o.created_at, 'YYYY-MM-DD HH24:MI:SS')
+                    FROM ocr_usage o
+                    LEFT JOIN users u ON u.id = o.user_id
+                    {where_sql} ORDER BY o.created_at DESC, o.id DESC LIMIT %s""",
+                where_params + [200],
+            )
+            for _id, fname, uname, engine, mdl, it, ot, cst, cur, st, inv, fn, ts in tc.fetchall():
+                recent.append({
+                    "id": _id, "division_id": div_id, "division_name": div["name"],
+                    "division_code": div["code"], "full_name": fname, "username": uname,
+                    "engine": engine, "model": mdl, "input_tokens": int(it or 0),
+                    "output_tokens": int(ot or 0), "cost": round(float(cst or 0), 6),
+                    "currency": cur, "status": st, "invoice_number": inv, "filename": fn,
+                    "created_at": ts,
+                })
+        except Exception as exc:
+            unreachable.append({"division_id": div["id"], "name": div["name"],
+                                "code": div["code"], "error": str(exc).strip().split("\n")[0][:200]})
+        finally:
+            if tconn:
+                try:
+                    tconn.close()
+                except Exception:
+                    pass
+
+    by_model_list = [{"model": m["model"], "calls": m["calls"],
+                      "input_tokens": m["input_tokens"], "output_tokens": m["output_tokens"],
+                      "cost": round(m["cost"], 6)}
+                     for m in sorted(by_model.values(), key=lambda x: x["cost"], reverse=True)]
+    by_user_list = sorted(by_user.values(), key=lambda x: x["cost"], reverse=True)[:500]
+    div_list = sorted(by_division.values(), key=lambda x: x["cost"], reverse=True)
+    summary["cost"] = round(summary["cost"], 6)
+    summary["avg_cost"] = round(summary["cost"] / summary["calls"], 6) if summary["calls"] else 0.0
+
+    data = {
+        "days": days,
+        "currency": currency,
+        "summary": summary,
+        "by_division": div_list,
+        "by_model": by_model_list,
+        "by_user": by_user_list,
+        "monthly": sorted(monthly.values(), key=lambda m: m["month"]),
+        "recent": recent,
+        "unreachable": unreachable,
+    }
+    _costing_cache.update({"at": now, "key": key, "data": data})
+    return data
+
+
 # -- Backups --
 
 @router.get("/backups")

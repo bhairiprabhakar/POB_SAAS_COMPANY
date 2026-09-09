@@ -90,7 +90,7 @@ export default function SuperDashboard() {
       key: 'name',
       label: 'Division',
       render: (r) => (
-        <Link to={`/superadmin/divisions/${r.division_id}/campaigns`} className="cell-link">
+        <Link to={`/superadmin/divisions/${r.division_id}?tab=campaigns`} className="cell-link">
           <strong>{r.name}</strong>
           <span className="muted cell-sub">{r.code}</span>
         </Link>

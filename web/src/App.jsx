@@ -31,6 +31,7 @@ import Audit from './pages/app/Audit';
 import Security from './pages/app/Security';
 import Jobs from './pages/app/Jobs';
 import SuperAnalytics from './pages/superadmin/Analytics';
+import Costing from './pages/superadmin/Costing';
 import PlatformSettings from './pages/superadmin/PlatformSettings';
 import ErrorBoundary from './ErrorBoundary';
 import ManageCampaigns from './pages/app/ManageCampaigns';
@@ -120,6 +121,9 @@ export default function App() {
         } />
         <Route path="/superadmin/analytics" element={
           <ProtectedSuper><AppShell kind="sa"><SuperAnalytics /></AppShell></ProtectedSuper>
+        } />
+        <Route path="/superadmin/costing" element={
+          <ProtectedSuper><AppShell kind="sa"><Costing /></AppShell></ProtectedSuper>
         } />
         <Route path="/superadmin/audit" element={
           <ProtectedSuper><AppShell kind="sa"><AuditLog /></AppShell></ProtectedSuper>

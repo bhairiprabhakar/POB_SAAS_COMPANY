@@ -268,7 +268,7 @@ def _extract_gemini(data: bytes, filename: str) -> dict:
         pass
     confidence = 0.92 if fields.get("invoice_number") and fields.get("invoice_amount") else 0.4
     return {"fields": fields, "confidence": confidence, "engine": "gemini",
-            "raw": {"text": raw}, "usage": usage}
+            "model": model, "raw": {"text": raw}, "usage": usage}
 
 
 def extraction_cost(extraction) -> float:

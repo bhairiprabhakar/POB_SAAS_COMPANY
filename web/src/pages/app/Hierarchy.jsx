@@ -9,8 +9,14 @@ function TreeNode({ node, depth = 0, onEdit, onDelete }) {
   return (
     <div className={`tree-node`} style={{ paddingLeft: depth * 22 }}>
       <div className="tree-row">
-        <button className="tree-toggle" onClick={() => setOpen(!open)} disabled={!node.children?.length}>
-          {node.children?.length ? (open ? '▾' : '▸') : '·'}
+        <button className={`tree-toggle${open ? ' open' : ''}`} onClick={() => setOpen(!open)} disabled={!node.children?.length}>
+          {node.children?.length ? (
+            <span className="acc-chev" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path fill="currentColor" d="M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6z" />
+              </svg>
+            </span>
+          ) : <span className="tree-leaf">·</span>}
         </button>
         <span className={`tree-dot rank-${node.rank}`} />
         <strong>{node.name}</strong>

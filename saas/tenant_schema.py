@@ -781,9 +781,13 @@ CREATE TABLE IF NOT EXISTS ocr_usage (
     status TEXT NOT NULL DEFAULT 'success',   -- success | error
     invoice_number TEXT,
     filename TEXT,
+    model_name TEXT,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_ocr_usage_created_at ON ocr_usage (created_at);
+CREATE INDEX IF NOT EXISTS idx_ocr_usage_user ON ocr_usage (user_id);
 
 -- ── Phase 5: audit enrichment ──────────────────────────────────────────────
 ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_agent TEXT;
@@ -1079,9 +1083,13 @@ CREATE TABLE IF NOT EXISTS ocr_usage (
     status TEXT NOT NULL DEFAULT 'success',   -- success | error
     invoice_number TEXT,
     filename TEXT,
+    model_name TEXT,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_ocr_usage_created_at ON ocr_usage (created_at);
+CREATE INDEX IF NOT EXISTS idx_ocr_usage_user ON ocr_usage (user_id);
 
 -- OCR usage / Gemini cost statements are super-admin-managed (platform
 -- console). Tenant roles no longer hold the statement permission.
@@ -1227,4 +1235,12 @@ WHERE c.id = sub.chemist_id AND c.created_by IS NULL;
 
 -- ── Drop campaign project_name (not used by this project) ─────────────────
 ALTER TABLE campaigns DROP COLUMN IF EXISTS project_name;
+
+-- ── Phase 10: Gemini token + model attribution on ocr_usage (3.4.0) ────────
+-- Costing dashboard needs to report input/output tokens and the model that
+-- served each invoice extraction, not just a lump-sum cost.
+ALTER TABLE ocr_usage ADD COLUMN IF NOT EXISTS model_name TEXT;
+ALTER TABLE ocr_usage ADD COLUMN IF NOT EXISTS input_tokens INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE ocr_usage ADD COLUMN IF NOT EXISTS output_tokens INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_ocr_usage_user ON ocr_usage (user_id);
 """

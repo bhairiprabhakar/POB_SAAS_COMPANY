@@ -59,12 +59,20 @@ export default function Campaigns() {
 function CampaignCard({ c, expanded, onToggle, onOpen }) {
   return (
     <div className={`camp-card${expanded ? ' open' : ''}`}>
-      <div className="camp-head" onClick={onToggle}>
-        <div className="camp-main">
-          <strong>{c.name}</strong>
-          <span className="muted">
-            {(c.brand_names?.length ? c.brand_names.join(' + ') : (c.brand_name || '—'))}
-            {' · '}{c.division_name || c.division || '—'}
+      <div className="camp-head acc-head" role="button" aria-expanded={expanded}
+        aria-controls={`camp-panel-${c.id}`} onClick={onToggle}>
+        <div className="camp-title-row">
+          <div className="camp-main">
+            <strong>{c.name}</strong>
+            <span className="muted">
+              {(c.brand_names?.length ? c.brand_names.join(' + ') : (c.brand_name || '—'))}
+              {' · '}{c.division_name || c.division || '—'}
+            </span>
+          </div>
+          <span className="acc-chev" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path fill="currentColor" d="M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6z" />
+            </svg>
           </span>
         </div>
         <div className="camp-meta">
@@ -73,16 +81,17 @@ function CampaignCard({ c, expanded, onToggle, onOpen }) {
           <span>{c.product_count} products</span>
           <span>{c.pob_count} POBs</span>
         </div>
-        <span className="camp-chev">{expanded ? '▾' : '▸'}</span>
       </div>
-      {expanded && (
-        <div className="camp-body">
-          <MemberTree members={c.members} />
-          <div className="camp-actions">
-            <button className="btn btn-sm" onClick={onOpen}>View details</button>
+      <div className="acc-panel" id={`camp-panel-${c.id}`}>
+        <div className="acc-panel-inner">
+          <div className="camp-body">
+            <MemberTree members={c.members} />
+            <div className="camp-actions">
+              <button className="btn btn-sm" onClick={onOpen}>View details</button>
+            </div>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

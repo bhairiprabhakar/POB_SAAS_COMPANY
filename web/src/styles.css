@@ -531,7 +531,6 @@ a.user-chip:hover { border-color: var(--primary); text-decoration: none; }
 .tree-node { border-left: 1px dashed var(--border); margin-left: 8px; }
 .tree-row { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; }
 .tree-row:hover { background: var(--bg-3); }
-.tree-toggle { background: none; border: none; color: var(--muted); cursor: pointer; width: 16px; }
 .tree-dot { width: 10px; height: 10px; border-radius: 3px; background: var(--gray); }
 .tree-dot.rank-6 { background: #b45309; }
 .tree-dot.rank-5 { background: #d97706; }
@@ -764,18 +763,47 @@ a.user-chip:hover { border-color: var(--primary); text-decoration: none; }
   border-radius: var(--radius-lg); margin-bottom: 10px; box-shadow: var(--shadow);
 }
 .camp-head {
-  display: flex; align-items: center; gap: 14px;
   padding: 12px 14px; cursor: pointer;
-}
+  transition: background .15s ease;
+  }
 .camp-head:hover { background: var(--bg-3); }
+.camp-title-row { display: flex; align-items: center; gap: 14px; }
 .camp-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .camp-main strong { font-size: 15px; font-weight: 500; }
 .camp-main .muted { font-size: 12px; }
-.camp-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.camp-meta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 8px; }
 .camp-dates { white-space: nowrap; }
-.camp-chev { color: var(--muted); font-size: 12px; flex-shrink: 0; }
+
+/* ── Google-style accordion: animated panel + rotating Material chevron ── */
+.acc-chev {
+  width: 24px; height: 24px; flex: 0 0 auto; color: var(--text-2);
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: transform .2s ease, color .2s ease;
+}
+.acc-chev svg { display: block; width: 20px; height: 20px; }
+.acc-head[aria-expanded='true'] .acc-chev { transform: rotate(180deg); }
+.acc-head:hover .acc-chev { color: var(--text); }
+
+.acc-panel {
+  display: grid; grid-template-rows: 0fr;
+  transition: grid-template-rows .24s ease;
+}
+.acc-panel-inner { overflow: hidden; min-height: 0; }
+.acc-head[aria-expanded='true'] + .acc-panel { grid-template-rows: 1fr; }
+
+.tree-toggle {
+  width: 20px; height: 20px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; color: var(--muted);
+  cursor: pointer; flex: 0 0 auto;
+}
+.tree-toggle .acc-chev { width: 18px; height: 18px; }
+.tree-toggle.open .acc-chev { transform: rotate(180deg); }
+.tree-toggle:disabled { color: var(--gray); cursor: default; }
+.tree-leaf { color: var(--gray); }
+
 .camp-card.open .camp-head { border-bottom: 1px solid var(--border); }
-.camp-body { padding: 12px 14px; }
+.camp-body { padding: 14px 16px; }
 .camp-actions { display: flex; gap: 8px; margin-top: 12px; }
 
 /* â”€â”€ Campaign detail page: logo + banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
@@ -857,8 +885,6 @@ a.user-chip:hover { border-color: var(--primary); text-decoration: none; }
   .stats-grid { grid-template-columns: 1fr 1fr; }
   .auth-card { padding: 24px 18px; }
   .table-wrap { border-radius: 10px; }
-  .camp-head { flex-wrap: wrap; }
-  .camp-meta { width: 100%; }
   .member-stats { gap: 8px; }
   .lg-num { font-size: 11px; }
 }
@@ -2339,3 +2365,16 @@ body {
   100% { transform: translateX(100%); }
 }
 .skel-avatar { border-radius: 50%; }
+
+/* ── AI usage & cost page ─────────────────────────────────────────────────── */
+.model-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.model-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: 1px solid var(--border); background: var(--bg-3);
+  border-radius: 12px; padding: 2px 8px;
+  font-size: 11px; color: var(--text);
+}
+.model-chip b { font-weight: 600; color: var(--primary); }
+table.data-table .num { text-align: right; }
+table.data-table th.num { text-align: right; }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }

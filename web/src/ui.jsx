@@ -294,6 +294,7 @@ function SuperSidebar({ onNavigate, open, collapsed, onToggleCollapse }) {
     { to: '/superadmin', label: 'Dashboard', icon: '▦', end: true, group: 'Core modules', tone: 'primary' },
     { to: '/superadmin/divisions', label: 'Divisions', icon: '▣', group: 'Core modules', tone: 'blue' },
     { to: '/superadmin/analytics', label: 'Analytics', icon: '📈', group: 'Core modules', tone: 'amber' },
+    { to: '/superadmin/costing', label: 'Usage & cost', icon: '₹', group: 'Core modules', tone: 'teal' },
     { to: '/superadmin/settings', label: 'Settings', icon: '⚙', group: 'Quick access', tone: 'gray' },
     { to: '/superadmin/audit', label: 'Audit Log', icon: '✎', group: 'Quick access', tone: 'gray' },
   ];

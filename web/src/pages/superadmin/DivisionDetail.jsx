@@ -1,10 +1,18 @@
 import { useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, fmtDateTime } from '../../api';
 import {
-  Badge, ErrorBox, Field, Modal, PageHeader, Select, Skeleton, StatCard, StatSkeleton,
-  StatusBadge, TextArea, TextInput, toast, useAsync,
+  Badge, ErrorBox, Field, Modal, PageHeader, SearchBox, Select, Skeleton, StatCard,
+  StatSkeleton, StatusBadge, Table, TableSkeleton, Tabs, TextArea, TextInput, toast, useAsync,
 } from '../../ui';
+
+const TABS = [
+  { value: 'overview', label: 'Overview' },
+  { value: 'users', label: 'Users' },
+  { value: 'roles', label: 'Roles & hierarchy' },
+  { value: 'brands', label: 'Brands' },
+  { value: 'campaigns', label: 'Campaigns' },
+];
 
 const loginUrl = (code) => (code ? `${window.location.origin}/login/${encodeURIComponent(code)}` : null);
 const initialsOf = (a) => (a.full_name || a.username || '?').trim()
@@ -12,8 +20,16 @@ const initialsOf = (a) => (a.full_name || a.username || '?').trim()
 
 export default function DivisionDetail() {
   const { did } = useParams();
-  const { data, loading, error, run } = useAsync(() => api(`/api/v1/superadmin/divisions/${did}`), [did]);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requested = searchParams.get('tab');
+  const [tab, setTab] = useState(TABS.some((t) => t.value === requested) ? requested : 'overview');
   const [editOpen, setEditOpen] = useState(false);
+  const { data, loading, error, run } = useAsync(() => api(`/api/v1/superadmin/divisions/${did}`), [did]);
+
+  const changeTab = (v) => {
+    setTab(v);
+    setSearchParams(v === 'overview' ? {} : { tab: v }, { replace: true });
+  };
 
   if (loading) {
     return (
@@ -66,77 +82,88 @@ export default function DivisionDetail() {
           </>
         } />
 
-      <div className="stats-grid">
-        <StatCard label="Users" value={c.user_count ?? '—'} icon="👥" />
-        <StatCard label="POBs" value={c.pob_count ?? '—'} icon="📄" />
-        <StatCard label="Campaigns" value={c.campaign_count ?? '—'} icon="◎" />
-      </div>
+      <Tabs items={TABS} active={tab} onChange={changeTab} />
 
-      <div className="card" style={{ marginTop: 12 }}>
-        <h4 className="section-title">Division details</h4>
-        <table className="detail-table">
-          <tbody>
-            <tr>
-              <th>Status</th>
-              <td><Badge tone={c.status}>{c.status}</Badge></td>
-            </tr>
-            <tr>
-              <th>Tenant database</th>
-              <td>{c.tenant_db_name ? <code>{c.tenant_db_name}</code> : 'Not provisioned'}</td>
-            </tr>
-            <tr>
-              <th>Sign-in link</th>
-              <td>
-                {c.code
-                  ? <><a href={loginUrl(c.code)} target="_blank" rel="noreferrer">/login/{c.code}</a>{' '}
-                      <button className="btn-link" onClick={() => { navigator.clipboard?.writeText(loginUrl(c.code)); toast('Sign-in link copied', 'success'); }}>Copy</button></>
-                  : '—'}
-              </td>
-            </tr>
-            <tr>
-              <th>Created</th>
-              <td>{fmtDateTime(c.created_at)}</td>
-            </tr>
-            <tr>
-              <th>Description</th>
-              <td>{c.description || '—'}</td>
-            </tr>
-            <tr>
-              <th>Contact</th>
-              <td>{c.contact_person || '—'}{c.contact_email ? ` (${c.contact_email})` : ''}{c.contact_mobile ? ` · ${c.contact_mobile}` : ''}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div className="card" style={{ marginTop: 12 }}>
-        <h4 className="section-title">Division branding</h4>
-        <p className="muted">This identity is shown on the division's sign-in page and inside the app sidebar.</p>
-        <div className="branding-grid">
-          <div className="branding-preview">
-            <div className="branding-screen">
-              <div className="branding-login-card">
-                {c.logo_path
-                  ? <img src={`/api/v1/auth/division-logo/${c.id}`} alt="Division logo" className="branding-logo-img" />
-                  : <span className="branding-mark">{(c.name || 'D').charAt(0)}</span>}
-                <div className="branding-name">{c.name}</div>
-                <div className="branding-fields">
-                  <span className="branding-field" />
-                  <span className="branding-field" />
-                </div>
-                <div className="branding-signin">Sign in</div>
-              </div>
-            </div>
-            <div className="branding-caption">Sign-in page preview — /login/{c.code || '…'}</div>
+      {tab === 'overview' && (
+        <>
+          <div className="stats-grid">
+            <StatCard label="Users" value={c.user_count ?? '—'} icon="👥" />
+            <StatCard label="POBs" value={c.pob_count ?? '—'} icon="📄" />
+            <StatCard label="Campaigns" value={c.campaign_count ?? '—'} icon="◎" />
           </div>
-          <LogoUpload division={c} onDone={run} />
-        </div>
-      </div>
 
-      <div className="card" style={{ marginTop: 12 }}>
-        <h4 className="section-title">Division admins</h4>
-        <AdminsCard did={c.id} />
-      </div>
+          <div className="card" style={{ marginTop: 12 }}>
+            <h4 className="section-title">Division details</h4>
+            <table className="detail-table">
+              <tbody>
+                <tr>
+                  <th>Status</th>
+                  <td><Badge tone={c.status}>{c.status}</Badge></td>
+                </tr>
+                <tr>
+                  <th>Tenant database</th>
+                  <td>{c.tenant_db_name ? <code>{c.tenant_db_name}</code> : 'Not provisioned'}</td>
+                </tr>
+                <tr>
+                  <th>Sign-in link</th>
+                  <td>
+                    {c.code
+                      ? <><a href={loginUrl(c.code)} target="_blank" rel="noreferrer">/login/{c.code}</a>{' '}
+                          <button className="btn-link" onClick={() => { navigator.clipboard?.writeText(loginUrl(c.code)); toast('Sign-in link copied', 'success'); }}>Copy</button></>
+                      : '—'}
+                  </td>
+                </tr>
+                <tr>
+                  <th>Created</th>
+                  <td>{fmtDateTime(c.created_at)}</td>
+                </tr>
+                <tr>
+                  <th>Description</th>
+                  <td>{c.description || '—'}</td>
+                </tr>
+                <tr>
+                  <th>Contact</th>
+                  <td>{c.contact_person || '—'}{c.contact_email ? ` (${c.contact_email})` : ''}{c.contact_mobile ? ` · ${c.contact_mobile}` : ''}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div className="card" style={{ marginTop: 12 }}>
+            <h4 className="section-title">Division branding</h4>
+            <p className="muted">This identity is shown on the division's sign-in page and inside the app sidebar.</p>
+            <div className="branding-grid">
+              <div className="branding-preview">
+                <div className="branding-screen">
+                  <div className="branding-login-card">
+                    {c.logo_path
+                      ? <img src={`/api/v1/auth/division-logo/${c.id}`} alt="Division logo" className="branding-logo-img" />
+                      : <span className="branding-mark">{(c.name || 'D').charAt(0)}</span>}
+                    <div className="branding-name">{c.name}</div>
+                    <div className="branding-fields">
+                      <span className="branding-field" />
+                      <span className="branding-field" />
+                    </div>
+                    <div className="branding-signin">Sign in</div>
+                  </div>
+                </div>
+                <div className="branding-caption">Sign-in page preview — /login/{c.code || '…'}</div>
+              </div>
+              <LogoUpload division={c} onDone={run} />
+            </div>
+          </div>
+
+          <div className="card" style={{ marginTop: 12 }}>
+            <h4 className="section-title">Division admins</h4>
+            <AdminsCard did={c.id} />
+          </div>
+        </>
+      )}
+
+      {tab === 'users' && <UsersTab did={c.id} />}
+      {tab === 'roles' && <RolesTab did={c.id} />}
+      {tab === 'brands' && <BrandsTab did={c.id} />}
+      {tab === 'campaigns' && <CampaignsTab did={c.id} />}
 
       {editOpen && (
         <DivisionEditModal division={c}
@@ -479,6 +506,146 @@ function LogoUpload({ division, onDone }) {
       <p className="muted branding-hint">
         The logo appears on the division's sign-in page and inside the app sidebar. A transparent PNG looks best.
       </p>
+    </div>
+  );
+}
+
+// ── Drill-down tabs: read-only visibility into the division tenant ─────────
+
+function UsersTab({ did }) {
+  const [q, setQ] = useState('');
+  const { data, loading, error, run } = useAsync(
+    () => api(`/api/v1/superadmin/divisions/${did}/users?q=${encodeURIComponent(q)}`),
+    [did, q]);
+  if (loading) return <TableSkeleton cols={7} rows={6} />;
+  if (error) return <ErrorBox error={error} onRetry={run} />;
+  const users = data?.items || [];
+  const cols = [
+    {
+      key: 'name', label: 'User',
+      render: (r) => (<><strong>{r.full_name || '—'}</strong><div className="muted">@{r.username}</div></>),
+    },
+    { key: 'role_name', label: 'Role', render: (r) => <Badge tone="blue">{r.role_name || '—'}</Badge> },
+    { key: 'hierarchy_level_name', label: 'Level' },
+    { key: 'status', label: 'Status', render: (r) => <StatusBadge value={r.status} /> },
+    { key: 'email', label: 'Email' },
+    { key: 'mobile', label: 'Mobile' },
+    { key: 'employee_id', label: 'Emp ID' },
+    { key: 'last_login', label: 'Last login', render: (r) => r.last_login ? fmtDateTime(r.last_login) : '—' },
+  ];
+  return (
+    <div className="card">
+      <div className="toolbar">
+        <SearchBox value={q} onChange={setQ} placeholder="Search name / username / email…" />
+        <span className="muted">{data?.total ?? users.length} user{data?.total === 1 ? '' : 's'}</span>
+      </div>
+      <Table cols={cols} rows={users} keyOf={(r) => r.id} empty="No users found" />
+    </div>
+  );
+}
+
+function RolesTab({ did }) {
+  const roles = useAsync(() => api(`/api/v1/superadmin/divisions/${did}/roles`));
+  const tree = useAsync(() => api(`/api/v1/superadmin/divisions/${did}/hierarchy/tree`));
+  if (roles.loading || tree.loading) return <TableSkeleton cols={4} rows={5} />;
+  if (roles.error) return <ErrorBox error={roles.error} onRetry={roles.run} />;
+  const cols = [
+    { key: 'name', label: 'Role', render: (r) => <strong>{r.name}</strong> },
+    { key: 'description', label: 'Description' },
+    { key: 'perm_count', label: 'Permissions', render: (r) => <>{r.perm_count ?? r.permissions?.length ?? 0}</> },
+    { key: 'data_entry', label: 'Data entry', render: (r) => r.data_entry ? <Badge tone="green">yes</Badge> : '—' },
+  ];
+  return (
+    <>
+      <div className="card">
+        <h4 className="section-title">Roles</h4>
+        <Table cols={cols} rows={roles.data?.items || []} keyOf={(r) => r.id} empty="No roles defined" />
+      </div>
+      <div className="card" style={{ marginTop: 12 }}>
+        <h4 className="section-title">Reporting hierarchy</h4>
+        {tree.error
+          ? <ErrorBox error={tree.error} onRetry={tree.run} />
+          : (tree.data?.items?.length
+              ? tree.data.items.map((n) => <ReadOnlyNode key={n.id} node={n} />)
+              : <p className="muted">No hierarchy levels defined.</p>)}
+      </div>
+    </>
+  );
+}
+
+function ReadOnlyNode({ node, depth = 0 }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="tree-node" style={{ paddingLeft: depth * 22 }}>
+      <div className="tree-row">
+        <button className={`tree-toggle${open ? ' open' : ''}`} onClick={() => setOpen(!open)}
+          disabled={!node.children?.length}
+          aria-label={`${open ? 'Collapse' : 'Expand'} ${node.name}`}>
+          {node.children?.length ? (
+            <span className="acc-chev" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path fill="currentColor" d="M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6z" />
+              </svg>
+            </span>
+          ) : <span className="tree-leaf">·</span>}
+        </button>
+        <span className={`tree-dot rank-${node.rank}`} />
+        <strong>{node.name}</strong>
+        <span className="muted">{node.label} · rank {node.rank}</span>
+        {node.users?.length > 0 && (
+          <span className="muted"> — {node.users.map((u) => u.full_name || u.username).join(', ')}</span>
+        )}
+      </div>
+      {open && (node.children || []).map((ch) => (
+        <ReadOnlyNode key={ch.id} node={ch} depth={depth + 1} />
+      ))}
+    </div>
+  );
+}
+
+function BrandsTab({ did }) {
+  const { data, loading, error, run } = useAsync(() => api(`/api/v1/superadmin/divisions/${did}/brands`));
+  if (loading) return <TableSkeleton cols={5} rows={4} />;
+  if (error) return <ErrorBox error={error} onRetry={run} />;
+  const cols = [
+    { key: 'name', label: 'Brand', render: (r) => <strong>{r.name}</strong> },
+    { key: 'code', label: 'Code', render: (r) => r.code ? <code>{r.code}</code> : '—' },
+    { key: 'status', label: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
+    { key: 'description', label: 'Description' },
+    { key: 'created_at', label: 'Created', render: (r) => fmtDateTime(r.created_at) },
+  ];
+  return (
+    <div className="card">
+      <h4 className="section-title">Brands</h4>
+      <Table cols={cols} rows={data || []} keyOf={(r) => r.id} empty="No brands yet" />
+    </div>
+  );
+}
+
+function CampaignsTab({ did }) {
+  const [q, setQ] = useState('');
+  const { data, loading, error, run } = useAsync(
+    () => api(`/api/v1/superadmin/divisions/${did}/campaigns?q=${encodeURIComponent(q)}`),
+    [did, q]);
+  if (loading) return <TableSkeleton cols={7} rows={5} />;
+  if (error) return <ErrorBox error={error} onRetry={run} />;
+  const campaigns = data?.items || [];
+  const cols = [
+    { key: 'name', label: 'Campaign', render: (r) => <strong>{r.name}</strong> },
+    { key: 'status', label: 'Status', render: (r) => <Badge tone={r.status || 'active'}>{r.status || 'active'}</Badge> },
+    { key: 'active', label: 'Active', render: (r) => r.active ? <Badge tone="green">yes</Badge> : <Badge tone="gray">no</Badge> },
+    { key: 'brand_names', label: 'Brands', render: (r) => (r.brand_names || []).join(', ') || '—' },
+    { key: 'product_count', label: 'Products' },
+    { key: 'pob_count', label: 'POBs' },
+    { key: 'created_at', label: 'Created', render: (r) => fmtDateTime(r.created_at) },
+  ];
+  return (
+    <div className="card">
+      <div className="toolbar">
+        <SearchBox value={q} onChange={setQ} placeholder="Search campaigns…" />
+        <span className="muted">{campaigns.length} campaign{campaigns.length === 1 ? '' : 's'}</span>
+      </div>
+      <Table cols={cols} rows={campaigns} keyOf={(r) => r.id} empty="No campaigns yet" />
     </div>
   );
 }
