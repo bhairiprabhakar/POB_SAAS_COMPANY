@@ -13,9 +13,10 @@ from .. import config, platform_db, pools, security, storage
 from ..db_utils import fetchone_dict
 from ..deps import get_tenant_context
 from ..ratelimit import login_allowed, login_failed, login_reset, login_succeeded
-from app.security import verify_pw
+from app.security import hash_pw, verify_pw
 
 import os
+import json
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -50,12 +51,14 @@ def superadmin_login(body: dict, request: Request):
         access = security.create_access_token(
             subject=str(sa["id"]), scope="superadmin",
             division_id=None, tenant_db=None, role="superadmin",
-            extra={"username": sa["username"], "full_name": sa["full_name"]},
+            extra={"username": sa["username"], "full_name": sa["full_name"],
+                   "sa_role": sa.get("role") or "full"},
         )
         refresh = security.issue_refresh_token(conn, sa["id"], "superadmin")
         _audit(conn, sa, "superadmin.login", "super_admin", sa["id"], request)
         return {"access_token": access, "refresh_token": refresh,
-                "user": {"id": sa["id"], "username": sa["username"], "full_name": sa["full_name"]}}
+                "user": {"id": sa["id"], "username": sa["username"], "full_name": sa["full_name"],
+                         "owner": bool(sa.get("owner_flag")), "role": sa.get("role") or "full"}}
     finally:
         conn.close()
 
@@ -75,7 +78,8 @@ def superadmin_refresh(body: dict):
             raise HTTPException(401, "Account disabled")
         access = security.create_access_token(
             subject=str(sa["id"]), scope="superadmin", division_id=None, tenant_db=None,
-            role="superadmin", extra={"username": sa["username"], "full_name": sa["full_name"]},
+            role="superadmin", extra={"username": sa["username"], "full_name": sa["full_name"],
+                                      "sa_role": sa.get("role") or "full"},
         )
         return {"access_token": access, "refresh_token": res["token"]}
     finally:
@@ -95,6 +99,108 @@ def superadmin_logout(body: dict):
             conn.commit()
         return {"ok": True}
     finally:
+        conn.close()
+
+
+# -- Company owner registration (single-company, first run) --
+
+def _registration_open(conn) -> bool:
+    c = conn.cursor()
+    c.execute("SELECT id FROM companies WHERE id=1")
+    return c.fetchone() is None
+
+
+@router.get("/register-status")
+def register_status():
+    """Public: whether first-run company-owner registration is still open.
+    Once the single Company exists, registration is permanently closed."""
+    conn = platform_db.get_db()
+    try:
+        return {"registration_open": _registration_open(conn)}
+    finally:
+        conn.close()
+
+
+@router.post("/register")
+def register(body: dict, request: Request):
+    """First-run registration: creates the single Company (id=1) plus the
+    Company Owner, who is marked as the owning super admin (owner_flag=TRUE).
+    Registration is structurally a one-shot: `companies` is a single-row
+    (id=1) table and the insert is race-safe via ON CONFLICT DO NOTHING.
+    On success returns super admin tokens exactly like /superadmin/login,
+    so the owner is dropped straight into the platform console."""
+    conn = platform_db.get_db()
+    try:
+        if not _registration_open(conn):
+            raise HTTPException(409, "Registration is closed. A company has already been registered.")
+
+        company = body.get("company") or {}
+        owner = body.get("owner") or {}
+
+        legal_name = (company.get("legal_name") or "").strip()
+        display_name = (company.get("display_name") or legal_name).strip()
+        if not legal_name or not display_name:
+            raise HTTPException(400, "Company legal name and display name are required")
+        username = (owner.get("username") or "").strip()
+        password = owner.get("password") or ""
+        full_name = (owner.get("full_name") or "").strip()
+        if not username or not full_name:
+            raise HTTPException(400, "Owner username and full name are required")
+        if len(password) < 6:
+            raise HTTPException(400, "Password must be at least 6 characters")
+
+        c = conn.cursor()
+        c.execute("SELECT id FROM super_admins WHERE username=%s", (username,))
+        if c.fetchone():
+            raise HTTPException(409, f"Username '{username}' is already taken")
+
+        ok = c.execute(
+            """INSERT INTO companies (id, legal_name, display_name, code, logo_path,
+               address, city, state, pincode, gstin, contact_number, official_email, website)
+               VALUES (1, %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               ON CONFLICT (id) DO NOTHING""",
+            (legal_name, display_name, (company.get("code") or "").strip(), None,
+             (company.get("address") or "").strip(), (company.get("city") or "").strip(),
+             (company.get("state") or "").strip(), (company.get("pincode") or "").strip(),
+             (company.get("gstin") or "").strip(), (company.get("contact_number") or "").strip(),
+             (company.get("official_email") or "").strip(), (company.get("website") or "").strip()),
+        )
+        if c.rowcount == 0:
+            raise HTTPException(409, "Registration is closed. A company has already been registered.")
+
+        c.execute(
+            """INSERT INTO super_admins (username, password, full_name, email, owner_flag, company_id, role)
+               VALUES (%s,%s,%s,%s,TRUE,1,'owner') RETURNING id""",
+            (username, hash_pw(password), full_name,
+             (owner.get("email") or "").strip()),
+        )
+        sa_id = c.fetchone()[0]
+        conn.commit()
+
+        access = security.create_access_token(
+            subject=str(sa_id), scope="superadmin", division_id=None, tenant_db=None,
+            role="superadmin", extra={"username": username, "full_name": full_name, "sa_role": "owner"},
+        )
+        refresh = security.issue_refresh_token(conn, sa_id, "superadmin")
+
+        c.execute(
+            "INSERT INTO platform_audit_logs (super_admin_id, actor, action, entity_type, entity_id, detail) "
+            "VALUES (%s,%s,%s,%s,%s,%s)",
+            (sa_id, username, "superadmin.register", "company", 1,
+             json.dumps({"company": legal_name, "designation": (owner.get("designation") or "Owner").strip()})),
+        )
+        conn.commit()
+
+        return {
+            "access_token": access,
+            "refresh_token": refresh,
+            "user": {"id": sa_id, "username": username, "full_name": full_name, "owner": True, "role": "owner"},
+        }
+    finally:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         conn.close()
 
 
@@ -239,6 +345,28 @@ def _resolve_division_by_tenant_db(tenant_db: str | None) -> dict:
         conn.close()
 
 
+def _password_change_required(user: dict, division: dict, tenant_db: str) -> dict:
+    """A user who signed in with a generated temporary password must set a real
+    one before using the app. Return a short-lived `password_change` token
+    instead of real session tokens: deps.get_claims rejects that token_type for
+    every normal API route, so only the /change-password endpoint accepts it."""
+    token = security.create_access_token(
+        subject=str(user["id"]), scope="tenant",
+        division_id=division["id"], tenant_db=tenant_db,
+        role=user.get("role_name"),
+        extra={"username": user["username"], "full_name": user["full_name"]},
+        token_type="password_change", ttl_seconds=900,
+    )
+    return {
+        "password_change_required": True,
+        "password_change_token": token,
+        "user": {"id": user["id"], "username": user["username"],
+                 "full_name": user["full_name"]},
+        "division": {"id": division["id"], "name": division.get("name"),
+                     "code": division.get("code")},
+    }
+
+
 def _issue_tenant_tokens(conn, user: dict, division: dict, level: dict | None):
     """Issue access + refresh tokens for a tenant user (shared by login,
     refresh and the MFA completion step)."""
@@ -328,6 +456,34 @@ def tenant_login(body: dict, request: Request):
                          "full_name": user["full_name"]},
             }
 
+        # Temporary-password users get no working session until they set their
+        # own password -- the password_change token only unlocks /change-password.
+        if user.get("must_change_password"):
+            return _password_change_required(user, division, tenant_db)
+
+        # First-login onboarding: freshly invited admins complete TOTP enrollment
+        # and their profile before the dashboard is reachable. These steps are
+        # frontend-routed; the token below is a real session so the endpoints
+        # used by the onboarding steps (/mfa/setup, /mfa/enable, /auth/me) work.
+        step = _onboarding_step(user)
+        if step:
+            from ..audit import log_action_req
+            log_action_req(conn, user["id"], "auth.login_onboarding", request, "user",
+                           user["id"], {"division": division_code, "role": user.get("role_name"),
+                                        "step": step})
+
+            level = None
+            if user.get("hierarchy_level_id"):
+                c.execute("SELECT id, name, label, rank FROM hierarchy_levels WHERE id=%s",
+                          (user["hierarchy_level_id"],))
+                level = fetchone_dict(c)
+            resp = _issue_tenant_tokens(conn, user, division, level)
+            c.execute("UPDATE users SET last_login=CURRENT_TIMESTAMP WHERE id=%s", (user["id"],))
+            conn.commit()
+            resp["user"]["onboarding"] = step
+            resp["onboarding"] = step
+            return resp
+
         from ..audit import log_action_req
         log_action_req(conn, user["id"], "auth.login", request, "user", user["id"],
                        {"division": division_code, "role": user.get("role_name")})
@@ -343,6 +499,15 @@ def tenant_login(body: dict, request: Request):
         return resp
     finally:
         conn.close()
+
+
+def _onboarding_step(user: dict) -> str | None:
+    """First-login onboarding gate: 'mfa' (enroll TOTP) then 'profile'."""
+    if user.get("mfa_setup_required") and not user.get("mfa_enabled"):
+        return "mfa"
+    if user.get("profile_pending"):
+        return "profile"
+    return None
 
 
 @router.post("/mfa/verify")
@@ -381,6 +546,27 @@ def mfa_verify(body: dict, request: Request):
             raise HTTPException(401, "Invalid two-factor code")
         login_succeeded(request, division_code, username)
 
+        if user.get("must_change_password"):
+            return _password_change_required(user, division, division["tenant_db_name"])
+
+        step = _onboarding_step(user)
+        if step:
+            from ..audit import log_action_req
+            log_action_req(conn, user["id"], "auth.login_onboarding", request, "user",
+                           user["id"], {"division": division_code, "role": user.get("role_name"),
+                                        "step": step, "mfa": True})
+            level = None
+            if user.get("hierarchy_level_id"):
+                c.execute("SELECT id, name, label, rank FROM hierarchy_levels WHERE id=%s",
+                          (user["hierarchy_level_id"],))
+                level = fetchone_dict(c)
+            resp = _issue_tenant_tokens(conn, user, division, level)
+            c.execute("UPDATE users SET last_login=CURRENT_TIMESTAMP WHERE id=%s", (user["id"],))
+            conn.commit()
+            resp["user"]["onboarding"] = step
+            resp["onboarding"] = step
+            return resp
+
         from ..audit import log_action_req
         log_action_req(conn, user["id"], "auth.login", request, "user", user["id"],
                        {"division": division_code, "role": user.get("role_name"), "mfa": True})
@@ -416,6 +602,10 @@ def tenant_refresh(body: dict):
         user = fetchone_dict(c)
         if not user or user["status"] != "active":
             raise HTTPException(401, "Account disabled")
+        if user.get("must_change_password"):
+            # a temp-password user must not keep a session alive — they must
+            # complete /change-password before they can use the app
+            raise HTTPException(403, "Password change required")
         access = security.create_access_token(
             subject=str(user["id"]), scope="tenant",
             division_id=division["id"], tenant_db=division["tenant_db_name"],
@@ -425,6 +615,57 @@ def tenant_refresh(body: dict):
         return {"access_token": access, "refresh_token": res["token"]}
     finally:
         conn.close()
+
+
+@router.post("/change-password")
+def change_password(body: dict):
+    """Set a real password for a user who signed in with a temporary one.
+
+    The short-lived `password_change` token from the login response unlocks
+    this endpoint (a normal access token also works while a session is still
+    valid). The current password must be supplied; on success
+    must_change_password is cleared and every existing session is revoked."""
+    username = (body.get("username") or "").strip()
+    token = body.get("password_change_token") or ""
+    current_password = body.get("current_password") or ""
+    new_password = body.get("new_password") or ""
+    if len(new_password) < 6:
+        raise HTTPException(400, "new password must be at least 6 characters")
+    try:
+        claims = security.decode_access_token(token)
+    except Exception:
+        raise HTTPException(401, "Invalid or expired password-change session")
+    if (claims.get("scope") != "tenant"
+            or claims.get("token_type") not in ("password_change", "access", None)
+            or (claims.get("username") or "") != username):
+        raise HTTPException(401, "Invalid or expired password-change session")
+
+    division = _resolve_division_by_tenant_db(claims.get("tenant_db"))
+    conn = pools.get_tenant_conn(division["tenant_db_name"])
+    try:
+        c = conn.cursor()
+        c.execute(
+            "SELECT u.*, r.name AS role_name FROM users u LEFT JOIN roles r ON r.id=u.role_id "
+            "WHERE u.id=%s",
+            (claims["sub"],),
+        )
+        user = fetchone_dict(c)
+        if not user or user["status"] != "active":
+            raise HTTPException(401, "Account unavailable")
+        if claims.get("token_type") == "password_change" and not user.get("must_change_password"):
+            raise HTTPException(400, "Password change is not required for this account")
+        if not verify_pw(user["password"], current_password):
+            raise HTTPException(401, "Current password is incorrect")
+        c.execute("UPDATE users SET password=%s, must_change_password=FALSE, "
+                  "last_login=CURRENT_TIMESTAMP WHERE id=%s",
+                  (hash_pw(new_password), user["id"]))
+        security.revoke_all_for_user(conn, user["id"])
+        conn.commit()
+        from ..audit import log_action
+        log_action(conn, user["id"], "auth.change_password", "user", user["id"])
+    finally:
+        conn.close()
+    return {"ok": True, "message": "Password updated. You can sign in now."}
 
 
 @router.post("/logout")
@@ -501,6 +742,10 @@ def impersonate_user(body: dict, request: Request, claims=Depends(__import__('sa
 
 @router.get("/me")
 def tenant_me(ctx=Depends(get_tenant_context)):
+    return _tenant_me(ctx)
+
+
+def _tenant_me(ctx):
     conn = ctx.conn
     c = conn.cursor()
     c.execute("SELECT users.id, users.username, users.full_name, users.email, users.mobile, "
@@ -509,10 +754,14 @@ def tenant_me(ctx=Depends(get_tenant_context)):
               "users.last_login, users.created_at, "
               "users.division, users.division_id, d.name AS division_name, "
               "COALESCE(users.mfa_enabled, FALSE) AS mfa_enabled, "
+              "COALESCE(users.mfa_setup_required, FALSE) AS mfa_setup_required, "
+              "COALESCE(users.profile_pending, FALSE) AS profile_pending, "
               "COALESCE((SELECT data_entry FROM roles WHERE id=users.role_id), FALSE) AS data_entry "
               "FROM users LEFT JOIN divisions d ON d.id=users.division_id WHERE users.id=%s",
               (ctx.user["id"],))
     me = fetchone_dict(c)
+    if me:
+        me["onboarding"] = _onboarding_step(me)
     level = None
     if me and me.get("hierarchy_level_id"):
         c.execute("SELECT id, name, label, rank FROM hierarchy_levels WHERE id=%s", (me["hierarchy_level_id"],))
@@ -523,6 +772,32 @@ def tenant_me(ctx=Depends(get_tenant_context)):
         manager = fetchone_dict(c)
     return {"user": me, "hierarchy_level": level, "manager": manager, "permissions": sorted(ctx.perms),
             "role": ctx.user.get("role_name")}
+
+
+@router.put("/me")
+def update_me(body: dict, ctx=Depends(get_tenant_context)):
+    """Self-service profile update (used by the first-login onboarding step)."""
+    conn = ctx.conn
+    allowed = ("full_name", "email", "mobile", "employee_id")
+    sets, params = [], []
+    for f in allowed:
+        if f in body and body[f] is not None:
+            sets.append(f"{f}=%s")
+            params.append(body[f])
+    if body.get("mobile") and str(body["mobile"]).strip():
+        sets.append("profile_pending=FALSE")
+    if not sets:
+        raise HTTPException(400, "Nothing to update")
+    params.append(ctx.user["id"])
+    c = conn.cursor()
+    c.execute(f"UPDATE users SET {', '.join(sets)} WHERE id=%s", params)
+    conn.commit()
+    from ..audit import log_action
+    log_action(conn, ctx.user["id"], "profile.update", "user", ctx.user["id"],
+               {k: True for k in allowed if k in body and body[k] is not None})
+    resp = _tenant_me(ctx)
+    return {"ok": True, "user": resp["user"], "permissions": resp["permissions"],
+            "role": resp["role"]}
 
 
 def _audit(conn, sa: dict, action: str, entity_type: str, entity_id, request: Request):

@@ -72,6 +72,9 @@ CREATE TABLE IF NOT EXISTS users (
     division TEXT,
     division_id INTEGER REFERENCES divisions(id),
     status TEXT DEFAULT 'active',          -- active | inactive | left
+    must_change_password BOOLEAN NOT NULL DEFAULT FALSE,  -- temp-pw users, set on first real password
+    mfa_setup_required BOOLEAN NOT NULL DEFAULT FALSE,  -- first-login onboarding: enroll TOTP (3.5.0)
+    profile_pending BOOLEAN NOT NULL DEFAULT FALSE,    -- first-login onboarding: complete profile (3.5.0)
     last_login TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -369,7 +372,9 @@ PERMISSION_CATALOG = [
     ("brand",        [("brand.view", "View brands"), ("brand.manage", "Create/edit/delete brands")]),
     ("campaign",     [("campaign.view", "View campaigns"), ("campaign.manage", "Create/edit/delete campaigns")]),
     ("product",      [("product.view", "View products")]),
-    ("chemist",      [("chemist.view", "View chemists"), ("chemist.manage", "Manage chemists")]),
+    ("chemist",      [("chemist.view", "View chemists"), ("chemist.manage", "Manage chemists"),
+                      ("chemist.classification.view", "View chemist classification masters"),
+                      ("chemist.classification.manage", "Manage chemist classification masters")]),
     ("pob",          [("pob.submit", "Submit POB activities"), ("pob.view", "View POB activities"), ("pob.manage", "Manage POB activities")]),
     ("verification", [("verification.view", "View verification queue"), ("verification.approve", "Approve POBs"),
                       ("verification.reject", "Reject POBs"), ("verification.manage", "Manage verification")]),
@@ -419,11 +424,15 @@ DEFAULT_ROLES = {
             "brand.view", "chemist.view", "chemist.manage", "pob.view", "verification.view",
             "verification.approve", "report.view", "notification.view"],
     "mr":  ["dashboard.view", "pob.submit", "campaign.view", "product.view", "chemist.view",
-            "chemist.manage", "notification.view", "visit.view", "visit.manage"],
+            "chemist.manage", "chemist.classification.view", "gratification.view",
+            "notification.view", "visit.view", "visit.manage"],
     "psr": ["dashboard.view", "pob.submit", "campaign.view", "product.view", "chemist.view",
-            "chemist.manage", "notification.view", "visit.view", "visit.manage"],
+            "chemist.manage", "chemist.classification.view", "gratification.view",
+            "notification.view", "visit.view", "visit.manage"],
     "verifier": ["dashboard.view", "verification.view", "verification.approve", "verification.reject",
                  "report.view", "notification.view", "pob.view"],
+    "verification_agent": ["dashboard.view", "verification.view", "verification.approve",
+                           "verification.reject", "report.view", "notification.view", "pob.view"],
     "auditor": ["dashboard.view", "report.view", "report.export", "audit.view", "verification.view",
                 "notification.view", "apikey.view", "webhook.view"],
     "finance": ["dashboard.view", "gratification.view", "gratification.approve", "gratification.pay",
@@ -1257,4 +1266,181 @@ BEGIN
 END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_gratifications_pob_id
     ON gratifications (pob_id);
+
+-- ── Security: force password change for temporary passwords (3.4.2) ─────────
+-- Users created via bulk upload with a blank `password` column receive a
+-- generated temporary password and must set their own before using the app.
+-- Existing users default to FALSE (no forced change), so this is additive and
+-- reversible. See scoping-visible gates in routers/auth.py (login gate, the
+-- /change-password endpoint and the refresh guard).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- ── First-login onboarding gates (3.5.0) ──────────────────────────────────────
+-- Division admins Provisioned by the platform get: a TOTP enrollment step and a
+-- profile-completion step before the dashboard is reachable. Existing users
+-- default to FALSE (no forced onboarding), so this is additive and reversible.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_setup_required BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_pending BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- ── Campaign approval lifecycle (3.6.0) ───────────────────────────────────────
+-- Campaigns now move: draft -> pending_approval -> scheduled -> active ->
+-- completed (or rejected->draft for rework). The extra columns record who/when
+-- so the audit trail shows the whole chain. `rejection_note` survives rework,
+-- giving the submitters a reason they can see on the next detail view.
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMP;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS submitted_by INTEGER;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS approved_by INTEGER;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMP;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS rejected_by INTEGER;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS rejection_note TEXT;
+
+-- ── Campaign -> employee assignment (3.6.0) ───────────────────────────────────
+-- Decides WHO is allowed to execute a campaign. One or more rows; each row is a
+-- rule:
+--   mode 'all'      -> everyone (division-wide / all eligible employees)
+--   mode 'region'   -> every active user whose region matches
+--   mode 'employee' -> one specific employee
+--   mode 'hierarchy'-> one manager + all their subordinates (reporting tree)
+-- A campaign with NO rule rows keeps the legacy behaviour (everyone eligible).
+SELECT 1;
+CREATE TABLE IF NOT EXISTS campaign_assignments (
+    id SERIAL PRIMARY KEY,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    mode TEXT NOT NULL CHECK (mode IN ('all','region','employee','hierarchy')),
+    region TEXT,
+    employee_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    manager_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    created_by INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_campaign_assignments_campaign ON campaign_assignments (campaign_id);
+
+-- ── Verification Agent role (3.7.0) ───────────────────────────────────────────
+-- Each division runs its own verification agent. The role is a non-global,
+-- domain-scoped role (see saas/scoping.visible_user_ids): an agent only sees
+-- and decides POBs submitted by users in their own division. Permissions mirror
+-- the global `verifier` role and are granted by permission code so existing
+-- tenants pick them up without re-running seed_tenant.
+INSERT INTO roles (name, description, is_system, data_entry)
+VALUES ('verification_agent', 'System role: verification_agent', TRUE, FALSE)
+ON CONFLICT (name) DO NOTHING;
+INSERT INTO role_permissions (role_id, permission_code)
+SELECT r.id, p.code
+FROM roles r
+CROSS JOIN permissions p
+WHERE r.name = 'verification_agent'
+  AND p.code IN ('dashboard.view','verification.view','verification.approve',
+                 'verification.reject','pob.view','report.view','notification.view')
+ON CONFLICT (role_id, permission_code) DO NOTHING;
+
+-- ── Chemist classification + UPI scanning + gratification master (3.8.0) ────
+-- End User profile enhancement: recruitable (attachment/institution) masters,
+-- potential/classification fields on chemists, campaign eligibility segments,
+-- captured UPI QR scan records, gratification type controls, and the scoped
+-- end-user gratification.view grant (MR/PSR). Every statement is idempotent.
+CREATE TABLE IF NOT EXISTS chemist_attachment_types (
+    id SERIAL PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    description TEXT,
+    active BOOLEAN DEFAULT TRUE,
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS chemist_potential_categories (
+    id SERIAL PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    description TEXT,
+    active BOOLEAN DEFAULT TRUE,
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+INSERT INTO chemist_attachment_types (code, name, description, sort_order) VALUES
+    ('hospital', 'Hospital / Clinic', 'Doctor-owned hospital or clinic', 10),
+    ('nursing_home', 'Nursing Home', 'Nursing home / elder care facility', 20),
+    ('dispensary', 'Dispensary', 'Institution dispensary', 30),
+    ('polyclinic', 'Polyclinic', 'Multi-doctor polyclinic', 40),
+    ('pathology_lab', 'Pathology Lab', 'Diagnostic / pathology laboratory', 50),
+    ('multi_speciality_hospital', 'Multi-Speciality Hospital', 'Multi-department hospital', 60),
+    ('super_speciality_hospital', 'Super-Speciality Hospital', 'Single-speciality super hospital', 70),
+    ('gated_community', 'Gated Community', 'Pharmacy inside a gated community', 80),
+    ('standalone_retail', 'Standalone Retail', 'Standalone retail chemist', 90),
+    ('chain_retail', 'Chain Retail', 'Part of a retail pharmacy chain', 100),
+    ('online_pharmacy', 'Online Pharmacy', 'Online / delivery pharmacy', 110),
+    ('others', 'Others', 'Any other attachment type', 999)
+ON CONFLICT (code) DO NOTHING;
+INSERT INTO chemist_potential_categories (code, name, description, sort_order) VALUES
+    ('low', 'Low', 'Low monthly business potential', 10),
+    ('medium', 'Medium', 'Medium monthly business potential', 20),
+    ('high', 'High', 'High monthly business potential', 30),
+    ('very_high', 'Very High', 'Very high monthly business potential', 40),
+    ('key_account', 'Key Account', 'Strategic key account (KA)', 50),
+    ('not_defined', 'Not Defined', 'Potential not yet assessed', 999)
+ON CONFLICT (code) DO NOTHING;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS chemist_code TEXT;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS attachment_type TEXT;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS potential_category TEXT;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS institution_name TEXT;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS institution_type TEXT;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS institution_department TEXT;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS institution_contact_person TEXT;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS institution_address TEXT;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS monthly_business_potential REAL;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS estimated_monthly_sales REAL;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS brand_potential TEXT;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS strategic_importance TEXT;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS last_visit_date DATE;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS visit_frequency TEXT;
+CREATE INDEX IF NOT EXISTS idx_chemists_attachment_type ON chemists (attachment_type);
+CREATE INDEX IF NOT EXISTS idx_chemists_potential_category ON chemists (potential_category);
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS eligible_chemist_attachment_types TEXT[] DEFAULT '{}';
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS eligible_chemist_potential_categories TEXT[] DEFAULT '{}';
+ALTER TABLE gratification_types ADD COLUMN IF NOT EXISTS min_value REAL DEFAULT 0;
+ALTER TABLE gratification_types ADD COLUMN IF NOT EXISTS max_value REAL;
+ALTER TABLE gratification_types ADD COLUMN IF NOT EXISTS requires_approval BOOLEAN DEFAULT FALSE;
+ALTER TABLE gratification_types ADD COLUMN IF NOT EXISTS fulfilment_method TEXT;
+CREATE TABLE IF NOT EXISTS upi_scans (
+    id SERIAL PRIMARY KEY,
+    chemist_id INTEGER NOT NULL REFERENCES chemists(id) ON DELETE CASCADE,
+    upi_id TEXT NOT NULL,
+    payee_name TEXT,
+    merchant_name TEXT,
+    bank_ref TEXT,
+    qr_type TEXT,
+    raw_payload TEXT,
+    source TEXT DEFAULT 'qr' CHECK (source IN ('qr','manual')),
+    validation_status TEXT DEFAULT 'valid',
+    name_score REAL,
+    confirmed BOOLEAN DEFAULT FALSE,
+    confirmed_by INTEGER REFERENCES users(id),
+    confirmed_at TIMESTAMP,
+    created_by INTEGER REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_upi_scans_chemist ON upi_scans (chemist_id);
+-- End-user gratitude visibility: MR/PSR may now view their own gratifications
+-- (list/detail are already scoped to their own rows by visible_user_ids) and
+-- peek at chemist classification masters. New permission codes are inserted for
+-- existing tenants before they are granted.
+INSERT INTO permissions (code, label, module) VALUES
+    ('chemist.classification.view', 'View chemist classification masters', 'chemist'),
+    ('chemist.classification.manage', 'Manage chemist classification masters', 'chemist')
+ON CONFLICT (code) DO NOTHING;
+INSERT INTO role_permissions (role_id, permission_code)
+SELECT r.id, p.code
+FROM roles r
+JOIN (VALUES
+    ('mr', 'gratification.view'),
+    ('psr', 'gratification.view'),
+    ('mr', 'chemist.classification.view'),
+    ('psr', 'chemist.classification.view'),
+    ('division_admin', 'chemist.classification.view'),
+    ('division_admin', 'chemist.classification.manage'),
+    ('campaignos_admin', 'chemist.classification.view'),
+    ('campaignos_admin', 'chemist.classification.manage')) AS t(role_name, code)
+  ON t.role_name = r.name
+JOIN permissions p ON p.code = t.code
+ON CONFLICT (role_id, permission_code) DO NOTHING;
 """

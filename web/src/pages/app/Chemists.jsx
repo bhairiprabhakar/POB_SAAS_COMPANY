@@ -10,6 +10,10 @@ const BLANK = {
   name: '', shop_name: '', owner_name: '', mobile: '', alternate_mobile: '', email: '',
   gst: '', dl_number: '', upi_id: '', ocid: '', doctor_name: '', category: '', area: '',
   address: '', city: '', district: '', state: '', pin: '', latitude: '', longitude: '',
+  attachment_type: '', potential_category: '', institution_name: '', institution_type: '',
+  institution_department: '', institution_contact_person: '', institution_address: '',
+  monthly_business_potential: '', estimated_monthly_sales: '', brand_potential: '',
+  strategic_importance: '', last_visit_date: '', visit_frequency: '',
   status: 'active',
 };
 
@@ -233,6 +237,9 @@ function ChemistRow({ row, campaignId, campaigns, canManage, onAction, onEdit })
       </td>
       <td><StatusBadge value={r.status} /></td>
       <td className="nowrap" style={{ whiteSpace: 'nowrap' }}>
+        <button className="btn btn-sm" onClick={() => onAction('upi')} title={`Scan UPI QR for ${r.name}`}>
+          Scan UPI
+        </button>
         {canManage ? (
           <>
             {canSubmitPob && (
@@ -270,11 +277,89 @@ function del(r, run) {
 
 function InlineAction({ chemist, campaignId, campaigns, action, onClose, onDone }) {
   return (
-    <Modal open wide title={action === 'pob' ? 'Submit POB' : 'Upload Invoice Proof'} onClose={onClose}>
+    <Modal open wide title={action === 'pob' ? 'Submit POB' : action === 'invoice' ? 'Upload Invoice Proof' : `Scan UPI — ${chemist.name}`} onClose={onClose}>
       {action === 'pob'
         ? <InlinePOBForm chemist={chemist} campaignId={campaignId} campaigns={campaigns} onDone={onDone} />
-        : <InlineInvoiceForm chemist={chemist} campaignId={campaignId} campaigns={campaigns} onDone={onDone} />}
+        : action === 'invoice'
+          ? <InlineInvoiceForm chemist={chemist} campaignId={campaignId} campaigns={campaigns} onDone={onDone} />
+          : <UpiScanForm chemist={chemist} onDone={onDone} />}
     </Modal>
+  );
+}
+
+function UpiScanForm({ chemist, onDone }) {
+  const [payload, setPayload] = useState('');
+  const [decoded, setDecoded] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const cid = chemist.id;
+
+  const decode = async (e) => {
+    e.preventDefault();
+    if (!payload.trim()) { toast('Paste the scanned UPI QR payload or the VPA', 'error'); return; }
+    setBusy(true);
+    try {
+      const r = await api(`/api/v1/chemists/${cid}/upi/decode`, { method: 'POST', body: { payload } });
+      setDecoded(r.details);
+      if (r.details.valid) toast('QR decoded — verify the payee name', 'success');
+      else toast(r.details.error || 'Not a valid UPI payload', 'error');
+    } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
+  };
+
+  const confirm = async () => {
+    setSaving(true);
+    try {
+      const d = decoded;
+      await api(`/api/v1/chemists/${cid}/upi`, {
+        method: 'POST',
+        body: {
+          upi_id: d.upi_id, source: 'qr', raw_payload: payload,
+          payee_name: d.payee_name, name_score: d.name_score, confirmed: true,
+        },
+      });
+      toast('UPI address saved & confirmed', 'success');
+      setDecoded(null); setPayload('');
+      onDone();
+    } catch (err) { toast(err.message, 'error'); } finally { setSaving(false); }
+  };
+
+  return (
+    <form onSubmit={decode}>
+      <p style={{ marginBottom: 12 }}>
+        <strong>{chemist.name}</strong>{chemist.shop_name ? ` — ${chemist.shop_name}` : ''}
+      </p>
+      <Field label="Scanned UPI payload / VPA" required
+        hint="Paste the UPI QR text (e.g. upi://pay?pa=shop@upi&pn=Shop Name) or a bare VPA">
+        <TextArea rows={3} value={payload} onChange={(e) => setPayload(e.target.value)}
+          placeholder="upi://pay?pa=chemist@bank&pn=Chemist Name&am=100.00" />
+      </Field>
+      <button className="btn btn-primary" type="submit" disabled={busy || saving}>
+        {busy ? 'Decoding…' : 'Decode QR / VPA'}
+      </button>
+
+      {decoded && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div className="kv-grid">
+            <span>VPA <strong>{decoded.masked_upi_id}</strong></span>
+            <span>Payee <strong>{decoded.payee_name || '—'}</strong></span>
+            <span>Valid <strong>{decoded.valid ? 'Yes' : 'No'}</strong></span>
+            <span>Name match {decoded.name_score != null ? <strong>{Math.round(decoded.name_score * 100)}%</strong> : <strong>—</strong>}</span>
+          </div>
+          {decoded.valid ? (
+            <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button type="button" className="btn btn-primary" onClick={confirm} disabled={saving}>
+                {saving ? 'Saving…' : (decoded.name_score ?? 0) < 0.6 ? 'Save anyway' : 'Confirm & save'}
+              </button>
+              {(decoded.name_score ?? 0) < 0.6 && (
+                <span className="muted" style={{ fontSize: 12 }}>Payee name doesn't strongly match — only save if you verified it with the shop.</span>
+              )}
+            </div>
+          ) : (
+            <p className="muted" style={{ marginTop: 10 }}>{decoded.error}</p>
+          )}
+        </div>
+      )}
+    </form>
   );
 }
 
@@ -544,7 +629,13 @@ function RegisterModal({ row, onClose, onSaved }) {
   const [posts, setPosts] = useState(null);
   const [lookup, setLookup] = useState('idle');
   const [looking, setLooking] = useState(null);
+  const [dups, setDups] = useState(null);
+  const [masters, setMasters] = useState({ attachment_types: [], potential_categories: [] });
   const set = (k) => (e) => setF((p) => ({ ...p, [k]: e.target.value }));
+
+  useEffect(() => {
+    api('/api/v1/chemist-masters').then(setMasters).catch(() => {});
+  }, []);
 
   const lookupPin = async (pin) => {
     const value = (pin ?? f.pin ?? '').trim();
@@ -586,11 +677,31 @@ function RegisterModal({ row, onClose, onSaved }) {
     if (!f.name.trim()) { toast('Name is required', 'error'); return; }
     setBusy(true);
     try {
-      await api(`/api/v1/chemists${isEdit ? `/${row.id}` : ''}`, {
-        method: isEdit ? 'PUT' : 'POST',
-        body: { ...f, latitude: f.latitude === '' ? null : f.latitude, longitude: f.longitude === '' ? null : f.longitude },
-      });
+      if (!isEdit) {
+        const r = await api('/api/v1/chemists', {
+          method: 'POST',
+          body: { ...f, latitude: f.latitude === '' ? null : f.latitude, longitude: f.longitude === '' ? null : f.longitude },
+        });
+        if (r?.ok === false) { setDups(r.duplicates || []); return; }
+      } else {
+        await api(`/api/v1/chemists/${row.id}`, {
+          method: 'PUT',
+          body: { ...f, latitude: f.latitude === '' ? null : f.latitude, longitude: f.longitude === '' ? null : f.longitude },
+        });
+      }
       toast(isEdit ? 'Chemist updated' : 'Chemist registered', 'success');
+      onSaved();
+    } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
+  };
+
+  const forceRegister = async () => {
+    setBusy(true);
+    try {
+      await api('/api/v1/chemists', {
+        method: 'POST',
+        body: { ...f, duplicate_checks: [], latitude: f.latitude === '' ? null : f.latitude, longitude: f.longitude === '' ? null : f.longitude },
+      });
+      toast('Chemist registered', 'success');
       onSaved();
     } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
   };
@@ -647,6 +758,36 @@ function RegisterModal({ row, onClose, onSaved }) {
           <button type="button" className="btn" onClick={detectLocation}>Use my location</button>
         </div>
 
+        <h4 className="section-title" style={{ marginTop: 18 }}>Classification &amp; potential</h4>
+        <div className="grid-2">
+          <Field label="Attachment type" hint="Hospital, retail, chain, online pharmacy…">
+            <Select value={f.attachment_type || ''} onChange={set('attachment_type')}
+              options={(masters.attachment_types || []).map((m) => ({ value: m.code, label: `${m.name} (${m.code})` }))} />
+          </Field>
+          <Field label="Potential category">
+            <Select value={f.potential_category || ''} onChange={set('potential_category')}
+              options={(masters.potential_categories || []).map((m) => ({ value: m.code, label: `${m.name} (${m.code})` }))} />
+          </Field>
+          <Field label="Institution name"><TextInput value={f.institution_name || ''} onChange={set('institution_name')} /></Field>
+          <Field label="Institution type"><TextInput value={f.institution_type || ''} onChange={set('institution_type')} /></Field>
+          <Field label="Department"><TextInput value={f.institution_department || ''} onChange={set('institution_department')} /></Field>
+          <Field label="Contact person"><TextInput value={f.institution_contact_person || ''} onChange={set('institution_contact_person')} /></Field>
+          <Field label="Institution address" className="span-2"><TextInput value={f.institution_address || ''} onChange={set('institution_address')} /></Field>
+          <Field label="Monthly business potential (INR)">
+            <TextInput type="number" min="0" value={f.monthly_business_potential || ''} onChange={set('monthly_business_potential')} />
+          </Field>
+          <Field label="Estimated monthly sales (INR)">
+            <TextInput type="number" min="0" value={f.estimated_monthly_sales || ''} onChange={set('estimated_monthly_sales')} />
+          </Field>
+          <Field label="Brand potential"><TextInput value={f.brand_potential || ''} onChange={set('brand_potential')} /></Field>
+          <Field label="Strategic importance"><TextInput value={f.strategic_importance || ''} onChange={set('strategic_importance')} /></Field>
+          <Field label="Visit frequency">
+            <Select value={f.visit_frequency || ''} onChange={set('visit_frequency')} placeholder="— select —"
+              options={['daily', 'weekly', 'monthly', 'quarterly'].map((o) => ({ value: o, label: o }))} />
+          </Field>
+          <Field label="Last visit date"><TextInput type="date" value={f.last_visit_date || ''} onChange={set('last_visit_date')} /></Field>
+        </div>
+
         <h4 className="section-title" style={{ marginTop: 18 }}>Status</h4>
         <div className="grid-2">
           <Field label="Status">
@@ -655,6 +796,31 @@ function RegisterModal({ row, onClose, onSaved }) {
           </Field>
         </div>
       </form>
+
+      {dups && (
+        <Modal open title="A chemist like this already exists" onClose={() => setDups(null)}
+          footer={
+            <>
+              <button className="btn" onClick={() => setDups(null)}>Use existing</button>
+              <button className="btn btn-primary" onClick={forceRegister} disabled={busy}>
+                {busy ? 'Registering…' : 'Register anyway (new shop)'}
+              </button>
+            </>
+          }>
+          <p className="muted">Existing chemist(s) matching your details were found. Re-check to avoid registering the same shop twice.</p>
+          <div className="card" style={{ marginTop: 12 }}>
+            {dups.map((d, i) => (
+              <div key={i} style={{ padding: '8px 0', borderBottom: i < dups.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                <strong>{d.chemist.name}</strong>{d.chemist.shop_name ? ` — ${d.chemist.shop_name}` : ''}
+                {d.chemist.city ? `, ${d.chemist.city}` : ''}
+                <div className="muted" style={{ fontSize: 12 }}>
+                  Matched on {d.rule.replace('_', ' ')}{d.chemist.mobile ? ` · ☎ ${d.chemist.mobile}` : ''} · #{d.chemist.id}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
     </Modal>
   );
 }

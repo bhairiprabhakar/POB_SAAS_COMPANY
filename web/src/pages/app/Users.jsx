@@ -75,7 +75,8 @@ export default function Users({ base = '/api/v1' }) {
           <strong>they cannot sign in through a division link</strong>
         </div>
       )}
-      <Table cols={cols} rows={rows} keyOf={(r) => r.id} empty="No users match" />
+      <Table cols={cols} rows={rows} keyOf={(r) => r.id} empty="No users match"
+        onRowClick={(r) => setEditing({ ...r })} />
 
       {editing && (
         <UserModal editing={editing} base={base} roles={roles.data?.items || []} levels={levels.data?.items || []}
@@ -92,8 +93,24 @@ function UserModal({ editing, base, roles, levels, divisions, allUsers, isEdit, 
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [resetResult, setResetResult] = useState(null);
+  const [resetBusy, setResetBusy] = useState(false);
   const singleDivision = divisions.length <= 1;
   const set = (k) => (e) => setF((p) => ({ ...p, [k]: e.target.value }));
+  const assignableRoles = (!f.role_id ? roles : roles.filter((r) => !r.global || r.id === f.role_id));
+
+  const resetPassword = async () => {
+    if (!window.confirm(`Reset ${editing.full_name}'s password? They'll get a temporary password and must change it at next sign-in.`)) return;
+    setResetBusy(true); setError(null);
+    try {
+      const r = await api(`${base}/users/${editing.id}/reset-password`, { method: 'POST' });
+      setResetResult(r);
+      toast('Password reset — share the temporary password', 'success');
+    } catch (err) {
+      const msg = err.message || 'Reset failed';
+      setError(msg); toast(msg, 'error');
+    } finally { setResetBusy(false); }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -130,11 +147,24 @@ function UserModal({ editing, base, roles, levels, divisions, allUsers, isEdit, 
     <Modal open wide title={isEdit ? `Edit ${editing.full_name}` : 'New user'} onClose={onClose}
       footer={<>
         {isEdit && <button className="btn btn-danger" onClick={deactivate}>Deactivate</button>}
+        {isEdit && <button className="btn" onClick={resetPassword} disabled={resetBusy || busy}>{resetBusy ? 'Resetting…' : 'Reset password'}</button>}
         <button className="btn" onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" form="user-form" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
       </>}>
       <form id="user-form" className="grid-2" onSubmit={submit}>
         {error && <div className="span-2"><ErrorBox error={error} /></div>}
+        {resetResult && (
+          <div className="card span-2" style={{ marginBottom: 8 }}>
+            <h5 className="form-section">Temporary password</h5>
+            <p className="muted">Share this once — it isn't shown again. {editing.full_name} must change it at next sign-in.
+              Existing sessions were revoked.</p>
+            <code className="mono" style={{ fontSize: 15 }}>{resetResult.temp_password}</code>{' '}
+            <button className="btn-link" onClick={() => {
+              navigator.clipboard?.writeText(resetResult.temp_password);
+              toast('Temporary password copied', 'success');
+            }}>Copy</button>
+          </div>
+        )}
         <Field label="Username" required><TextInput value={f.username || ''} onChange={set('username')} required /></Field>
         <Field label="Full name" required><TextInput value={f.full_name || ''} onChange={set('full_name')} required /></Field>
         {!isEdit ? (
@@ -155,7 +185,7 @@ function UserModal({ editing, base, roles, levels, divisions, allUsers, isEdit, 
           })} options={divisions.map((d) => ({ value: d.id, label: d.name }))} /></Field>
         )}
         <Field label="Role"><Select value={f.role_id || ''} onChange={set('role_id')}
-          options={roles.map((r) => ({ value: r.id, label: r.name }))} /></Field>
+          options={assignableRoles.map((r) => ({ value: r.id, label: r.name }))} /></Field>
         <Field label="Hierarchy level"><Select value={f.hierarchy_level_id || ''} onChange={set('hierarchy_level_id')}
           options={levels.map((l) => ({ value: l.id, label: `${l.name} (${l.label})` }))} /></Field>
         <Field label="Reports to"><Select value={f.parent_id || ''} onChange={set('parent_id')}

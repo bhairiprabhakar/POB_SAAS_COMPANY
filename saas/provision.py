@@ -7,6 +7,8 @@ tenant DB directly to apply the schema + seed + bootstrap the division admin.
 """
 import os
 import re
+import secrets
+import string
 
 from . import config
 from . import db_utils
@@ -15,6 +17,12 @@ from .tenant_schema import TENANT_DDL, seed_tenant
 from app.security import hash_pw
 
 SCHEMA_VERSION = "1.0.0"
+
+
+def generate_temp_password(length: int = 10) -> str:
+    """Random temporary password for invited users (shown once at creation)."""
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 def tenant_db_name(division_id: int, division_name: str | None = None) -> str:
@@ -72,7 +80,10 @@ def is_valid_db_identifier(name: str) -> bool:
 
 def provision_tenant(division_id: int, admin_username: str, admin_password: str,
                      admin_email: str | None = None, admin_full_name: str | None = None,
-                     division_name: str | None = None, division_code: str | None = None) -> str:
+                     division_name: str | None = None, division_code: str | None = None,
+                     must_change_password: bool = True,
+                     mfa_setup_required: bool = True,
+                     profile_pending: bool = True) -> str:
     """Provision a new division database. Returns the tenant db name.
 
     Every division gets its own Postgres database AND its own LOGIN role with a
@@ -117,11 +128,13 @@ def provision_tenant(division_id: int, admin_username: str, admin_password: str,
         role_id = _role_id(conn, "division_admin")
         admin_user = admin_full_name or "Division Administrator"
         cur.execute(
-            """INSERT INTO users (username, password, full_name, email, role_id, status)
-               VALUES (%s,%s,%s,%s,%s,'active')
+            """INSERT INTO users (username, password, full_name, email, role_id, status,
+                                  must_change_password, mfa_setup_required, profile_pending)
+               VALUES (%s,%s,%s,%s,%s,'active',%s,%s,%s)
                ON CONFLICT (username) DO NOTHING
                RETURNING id""",
-            (admin_username, hash_pw(admin_password), admin_user, admin_email, role_id),
+            (admin_username, hash_pw(admin_password), admin_user, admin_email, role_id,
+             must_change_password, mfa_setup_required, profile_pending),
         )
         row = cur.fetchone()
         admin_uid = row[0] if row else None

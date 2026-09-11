@@ -29,8 +29,28 @@ _VERIFIER_FIELDS = {
 
 
 def _is_verifier_or_admin(ctx):
-    role = (ctx.user.get("role") or "").lower()
+    role = (ctx.user.get("role_name") or "").lower()
     return role in ("verification_agent", "verifier", "company_admin", "division_admin")
+
+
+def _assert_scope(conn, ctx, vid):
+    """Bar cross-division access on single-verification actions.
+
+    Division-scoped roles (e.g. verification_agent) may only act on a
+    verification whose POB belongs to a user in their view. Unrestricted roles
+    (verifier / campaignos_admin / unassigned division admin) pass through.
+    """
+    visible = visible_user_ids(conn, ctx)
+    if visible is None:
+        return
+    c = conn.cursor()
+    c.execute("SELECT pa.user_id FROM pob_verifications v "
+              "JOIN pob_activities pa ON pa.id=v.pob_id WHERE v.id=%s", (vid,))
+    row = c.fetchone()
+    if not row:
+        raise HTTPException(404, "verification not found")
+    if row[0] not in visible:
+        raise HTTPException(403, "not allowed to act on this verification")
 
 
 def _filter_for_role(row, ctx):
@@ -44,6 +64,7 @@ def _full_query(extra_where="", params=()):
     sql = f"""
       SELECT v.id AS verification_id, v.status AS v_status, v.reason, v.duplicate_of,
              v.started_at, v.verified_at, v.created_at AS v_created_at,
+             v.pipeline_status,
              pa.id AS pob_id, pa.user_id, pa.product_id, pa.quantity, pa.ptr, pa.mrp,
              pa.invoice_amount, pa.pob_amount, pa.invoice_number, pa.invoice_date,
              pa.invoice_path, pa.invoice_original_name, pa.remarks, pa.workflow_id,
@@ -78,12 +99,22 @@ def _full_query(extra_where="", params=()):
 @router.get("/stats")
 def verification_stats(ctx: TenantContext = Depends(require_permission("verification.view"))):
     conn = ctx.conn
+    visible = visible_user_ids(conn, ctx)
+    sc, sp = "", ()
+    if visible is not None:
+        sc = " WHERE pa.user_id = ANY(%s)"
+        sp = (visible,)
     c = conn.cursor()
-    c.execute("SELECT status, count(*) FROM pob_verifications GROUP BY status")
-    rows = c.fetchall()
-    stats = {r[0]: r[1] for r in rows}
+    c.execute("SELECT v.status, count(*) FROM pob_verifications v "
+              f"JOIN pob_activities pa ON pa.id=v.pob_id{sc} GROUP BY v.status", sp)
+    stats = {r[0]: r[1] for r in c.fetchall()}
     for s in ("pending", "approved", "rejected", "duplicate", "needs_review", "auto_approved", "superseded"):
         stats.setdefault(s, 0)
+    # Manual-review queue = pipelined to an agent but not yet decided.
+    and_scope = f" AND {sc[7:]}" if sc else ""
+    c.execute("SELECT count(*) FROM pob_verifications v JOIN pob_activities pa ON pa.id=v.pob_id "
+              f"WHERE v.pipeline_status='pending_agent'{and_scope}", sp)
+    stats["manual_review"] = c.fetchone()[0]
     c.execute("SELECT coalesce(avg(extract(epoch from (verified_at - created_at)))/3600.0, 0) "
               "FROM pob_verifications WHERE verified_at IS NOT NULL")
     stats["avg_tat_hours"] = round(c.fetchone()[0], 2)
@@ -101,7 +132,9 @@ def verification_queue(status: str = "pending", q: str = "", limit: int = PageLi
         where.append("pa.user_id = ANY(%s)")
         params.append(visible)
     if status:
-        if status == "auto_approved":
+        if status == "pending_agent":
+            where.append("v.pipeline_status='pending_agent'")
+        elif status == "auto_approved":
             where.append("v.status=%s AND pa.auto_verified=TRUE")
             params.append("approved")
         else:
@@ -241,6 +274,7 @@ def claim_verification(vid: int, ctx: TenantContext = Depends(require_permission
     v = fetchone_dict(c)
     if not v:
         raise HTTPException(404, "verification not found")
+    _assert_scope(conn, ctx, vid)
     if v["status"] != "pending":
         raise HTTPException(409, "only pending items can be claimed")
     c.execute("UPDATE pob_verifications SET verifier_id=%s, started_at=CURRENT_TIMESTAMP WHERE id=%s",
@@ -268,6 +302,7 @@ def approve_verification(vid: int, body: dict = None, request: Request = None,
     if v["status"] != "pending":
         raise HTTPException(409, f"item is already {v['status']}")
 
+    _assert_scope(conn, ctx, vid)
     body = body or {}
     note = body.get("note")
 
@@ -383,6 +418,7 @@ def reject_verification(vid: int, body: dict, request: Request = None,
         raise HTTPException(404, "verification not found")
     if v["status"] != "pending":
         raise HTTPException(409, f"item is already {v['status']}")
+    _assert_scope(conn, ctx, vid)
     c.execute("UPDATE pob_verifications SET status='rejected', verifier_id=%s, "
               "verified_at=CURRENT_TIMESTAMP, reason=%s, pipeline_status='completed' WHERE id=%s",
               (ctx.user["id"], reason, vid))
@@ -411,6 +447,7 @@ def mark_duplicate(vid: int, body: dict,
     v = fetchone_dict(c)
     if not v:
         raise HTTPException(404, "verification not found")
+    _assert_scope(conn, ctx, vid)
     c.execute("UPDATE pob_verifications SET status='duplicate', verifier_id=%s, "
               "verified_at=CURRENT_TIMESTAMP, reason=%s, duplicate_of=%s WHERE id=%s",
               (ctx.user["id"], body.get("reason") or "Marked duplicate",
@@ -436,6 +473,7 @@ def re_open_verification(vid: int, body: dict = None, request: Request = None,
     v = fetchone_dict(c)
     if not v:
         raise HTTPException(404, "verification not found")
+    _assert_scope(conn, ctx, vid)
     if v["status"] not in ("approved",):
         raise HTTPException(409, f"Can only re-open approved verifications (current: {v['status']})")
     body = body or {}
@@ -492,6 +530,7 @@ def verification_pipeline_detail(vid: int,
     c.execute("SELECT id FROM pob_verifications WHERE id=%s", (vid,))
     if not c.fetchone():
         raise HTTPException(404, "verification not found")
+    _assert_scope(conn, ctx, vid)
     c.execute("""
         SELECT id, step_name, step_status, detail, started_at, completed_at
         FROM verification_pipeline_steps
@@ -522,6 +561,7 @@ def correct_verification(vid: int, body: dict, request: Request = None,
     v = fetchone_dict(c)
     if not v:
         raise HTTPException(404, "verification not found")
+    _assert_scope(conn, ctx, vid)
 
     # Get original value
     original_value = None
@@ -589,6 +629,7 @@ def verification_corrections(vid: int,
     """List all agent corrections for a verification."""
     conn = ctx.conn
     c = conn.cursor()
+    _assert_scope(conn, ctx, vid)
     c.execute("""
         SELECT vc.id, vc.field_name, vc.original_value, vc.corrected_value,
                vc.reason, vc.created_at, u.full_name AS agent_name
@@ -626,6 +667,7 @@ def run_verification_pipeline(body: dict, request: Request = None,
     v = fetchone_dict(c)
     if not v:
         raise HTTPException(404, "verification not found")
+    _assert_scope(conn, ctx, vid)
 
     c.execute("SELECT * FROM campaigns WHERE id=%s", (v["campaign_id"],))
     campaign = fetchone_dict(c)

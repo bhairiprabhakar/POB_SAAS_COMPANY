@@ -23,7 +23,7 @@ from .pools import start_idle_sweeper
 from .routers import (
     analytics, apikeys, audit, auth, company, dashboards, gratification, inventory, jobs,
     masters, mfa, notifications, pob, payouts, recovery, reports, settings, storage,
-    superadmin, verification, visits, webhooks, workflows,
+    superadmin, upi, verification, visits, webhooks, workflows,
 )
 
 app = FastAPI(title="POB SaaS Platform", version="1.0.0")
@@ -72,6 +72,7 @@ app.include_router(pob.router)
 app.include_router(verification.router)
 app.include_router(gratification.router)
 app.include_router(visits.router)
+app.include_router(upi.router)
 app.include_router(analytics.router)
 app.include_router(dashboards.router)
 app.include_router(reports.router)

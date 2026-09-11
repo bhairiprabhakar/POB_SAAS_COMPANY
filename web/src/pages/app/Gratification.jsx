@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { api, fmtDateTime, fmtMoney } from '../../api';
+import { api, fmtDateTime, fmtMoney, getSession } from '../../api';
 import {
   Badge, ErrorBox, Field, Modal, PageHeader, ProofPane, Select, Spinner, SplitDetail,
   StatusBadge, Table, TextInput, toast, useAsync, useFileUrl,
@@ -62,6 +62,7 @@ function GratificationDetail({ gid, onClose, onDone }) {
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState(null);
   const photoUrl = useFileUrl(data?.photo_path);
+  const perms = new Set(getSession()?.permissions || []);
 
   const act = async (fn, msg) => {
     setBusy(true);
@@ -100,28 +101,28 @@ function GratificationDetail({ gid, onClose, onDone }) {
             </div>
 
             <div className="card-actions">
-              {g.type_code === 'physical_gift' && g.status === 'eligible' && (
+              {perms.has('gratification.dispatch') && g.type_code === 'physical_gift' && g.status === 'eligible' && (
                 <button className="btn btn-primary" onClick={() => setModal('dispatch')}>Dispatch gift</button>
               )}
-              {g.type_code === 'physical_gift' && ['dispatched', 'delivered'].includes(g.status) && (
+              {perms.has('gratification.dispatch') && g.type_code === 'physical_gift' && ['dispatched', 'delivered'].includes(g.status) && (
                 <button className="btn btn-primary" onClick={() => setModal('deliver')}>Mark delivered (GPS + photo)</button>
               )}
-              {g.type_code === 'physical_gift' && g.status === 'delivered' && (
+              {perms.has('gratification.dispatch') && g.type_code === 'physical_gift' && g.status === 'delivered' && (
                 <button className="btn" onClick={() => setModal('ack')}>Acknowledge &amp; complete</button>
               )}
-              {['cashback', 'upi'].includes(g.type_code) && g.status === 'eligible' && (
+              {perms.has('gratification.approve') && ['cashback', 'upi'].includes(g.type_code) && g.status === 'eligible' && (
                 <button className="btn btn-primary" onClick={() => setModal('approve')}>Approve cashback</button>
               )}
-              {['cashback', 'upi'].includes(g.type_code) && g.status === 'approved' && (
+              {perms.has('gratification.pay') && ['cashback', 'upi'].includes(g.type_code) && g.status === 'approved' && (
                 <button className="btn btn-primary" onClick={() => setModal('pay')}>Mark paid</button>
               )}
-              {g.type_code === 'voucher' && g.status === 'eligible' && (
+              {perms.has('gratification.manage') && g.type_code === 'voucher' && g.status === 'eligible' && (
                 <button className="btn btn-primary" onClick={() => setModal('generate')}>Generate voucher</button>
               )}
-              {g.type_code === 'voucher' && g.status === 'generated' && (
+              {perms.has('gratification.manage') && g.type_code === 'voucher' && g.status === 'generated' && (
                 <button className="btn btn-primary" onClick={() => setModal('send')}>Send voucher</button>
               )}
-              {g.type_code === 'voucher' && g.status === 'sent' && (
+              {perms.has('gratification.manage') && g.type_code === 'voucher' && g.status === 'sent' && (
                 <button className="btn btn-primary" onClick={() => setModal('redeem')}>Redeem voucher</button>
               )}
             </div>

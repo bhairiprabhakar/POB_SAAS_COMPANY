@@ -41,16 +41,17 @@ def get_claims(request: Request) -> dict:
     # Reject anything that isn't a fully-authenticated access token -- in
     # particular the short-lived "mfa_pending" token issued between
     # password verification and TOTP verification (see
-    # saas/routers/auth.py tenant_login/mfa_verify). That token used to be
-    # decodable and accepted here like any other Bearer token, which meant
-    # a user (or anyone holding a leaked mfa_pending token) could skip
-    # POST /mfa/verify entirely and call the rest of the API directly --
-    # a full MFA bypass. token_type defaults to "access" for every other
-    # token this codebase issues, so this only affects mfa_pending tokens.
+    # saas/routers/auth.py tenant_login/mfa_verify) and the "password_change"
+    # token issued to a temporary-password user until they set a real password.
+    # Those tokens used to be decodable and accepted here like any other Bearer
+    # token, which meant a user (or anyone holding a leaked token) could skip
+    # the step and call the rest of the API directly -- a full bypass.
+    # token_type defaults to "access" for every other token this codebase
+    # issues, so this only affects intermediate tokens.
     if claims.get("token_type") not in (None, "access"):
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
-            detail="MFA verification required",
+            detail="MFA or password change required",
             headers={"WWW-Authenticate": "Bearer"},
         )
     return claims
@@ -62,6 +63,68 @@ def require_superadmin(claims: dict = Depends(get_claims)) -> dict:
     if claims.get("scope") != "superadmin":
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Super admin access required")
     return claims
+
+
+# Platform console roles (super_admins.role). `owner` (company main person) and
+# `full` (legacy full-power super admin) can do anything; the specialised roles
+# are limited to one function so the company can delegate work safely:
+#   campaign_admin       -> cross-division campaign approvals
+#   finance_admin        -> cross-division gratification approvals / payments
+#   verification_admin   -> cross-division POB verification approvals
+_FULL_ROLES = {"owner", "full"}
+
+
+def require_sa_roles(*roles: str):
+    """Restrict a super-admin route to the given roles (owner/full always pass)."""
+    allowed = set(roles)
+
+    def _dep(claims: dict = Depends(require_superadmin)) -> dict:
+        role = claims.get("sa_role") or "full"
+        if role in _FULL_ROLES or role in allowed:
+            return claims
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail="Not authorized for this platform function",
+        )
+
+    return _dep
+
+
+def require_owner(claims: dict = Depends(require_superadmin)) -> dict:
+    """Only the company main person (owner) may manage platform admins."""
+    if (claims.get("sa_role") or "full") != "owner":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Owner access required")
+    return claims
+
+
+# Restricted platform roles are confined to their function's area of the
+# console. The path gate below runs at the router level (in addition to
+# require_superadmin) so a campaign_admin cannot, for example, reach the
+# gratification or POB endpoints. owner/full bypass the gate entirely.
+# The shared overview endpoints (analytics/metrics) stay readable for every
+# specialised role so their landing dashboard renders; notifications and the
+# queue badge counters are role-scoped read-only endpoints every role needs.
+_SA_ROLE_VIEW = ("/analytics", "/metrics", "/notifications", "/queue-counts")
+_SA_PATH_ALLOW = {
+    "campaign_admin": ("/campaigns",) + _SA_ROLE_VIEW,
+    "finance_admin": ("/gratification",) + _SA_ROLE_VIEW,
+    "verification_admin": ("/pob", "/verification") + _SA_ROLE_VIEW,
+}
+
+
+def require_sa_path(request: Request, claims: dict = Depends(require_superadmin)) -> dict:
+    """Router-level gate: restrict specialised roles to their own function's paths."""
+    role = claims.get("sa_role") or "full"
+    if role in _FULL_ROLES:
+        return claims
+    path = request.url.path
+    allowed = _SA_PATH_ALLOW.get(role, ())
+    if any(seg in path for seg in allowed):
+        return claims
+    raise HTTPException(
+        status.HTTP_403_FORBIDDEN,
+        detail="Not authorized for this platform area",
+    )
 
 
 # ── Tenant scope ────────────────────────────────────────────────────────────

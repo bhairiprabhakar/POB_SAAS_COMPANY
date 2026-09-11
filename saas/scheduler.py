@@ -158,6 +158,7 @@ def _daily_pass():
                 migrations.ensure_migrated(tenant_db)
                 _send_visit_due_reminders(conn)
                 _send_proof_reminders(conn)
+                _activate_scheduled_campaigns(conn)
             finally:
                 conn.close()
         except Exception:
@@ -175,6 +176,18 @@ def _daily_pass():
     except Exception:
         log.exception("gemini orphaned-file sweep failed")
 
+def _activate_scheduled_campaigns(conn) -> int:
+    """Approved campaigns whose start window has opened move scheduled -> active."""
+    c = conn.cursor()
+    c.execute("""UPDATE campaigns SET status='active'
+                 WHERE status='scheduled' AND start_date IS NOT NULL
+                   AND start_date <= CURRENT_DATE""")
+    n = c.rowcount
+    if n:
+        conn.commit()
+    return int(n)
+
+
 def _create_due_payout_batches(conn) -> int:
     """Create open weekly/monthly batches for campaigns whose payout date is
     today (or overdue). Returns the number of batches created."""
@@ -182,7 +195,7 @@ def _create_due_payout_batches(conn) -> int:
     today = datetime.date.today()
     weekday = today.weekday()  # 0=Mon .. 6=Sun
     c.execute("""SELECT c.* FROM campaigns c
-                 WHERE c.status='active' AND c.payout_cycle IN ('weekly','monthly')
+                 WHERE c.status IN ('active','scheduled') AND c.payout_cycle IN ('weekly','monthly')
                    AND c.payout_weekday IS NOT NULL AND c.payout_month_day IS NOT NULL""")
     rows = c.fetchall()
     cols = [d[0] for d in c.description]

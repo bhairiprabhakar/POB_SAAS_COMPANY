@@ -227,6 +227,19 @@ def analytics_summary(days: int = 0, ctx: TenantContext = Depends(require_permis
         "rejected": _kpi(conn, f"SELECT count(*) FROM pob_activities pa WHERE {own_where}{wf} AND pa.status='rejected'", own_params + wp),
         "visits": _kpi(conn, "SELECT count(*) FROM chemist_visits WHERE user_id=%s", (uid,)),
         "gratifications": _kpi(conn, "SELECT count(*) FROM gratifications WHERE user_id=%s", (uid,)),
+        "gratifications_pending": _kpi(conn,
+            "SELECT count(*) FROM gratifications WHERE user_id=%s AND status<>'completed'", (uid,)),
+        "gratifications_completed": _kpi(conn,
+            "SELECT count(*) FROM gratifications WHERE user_id=%s AND status='completed'", (uid,)),
+    }
+    today_where = "pa.user_id=%s AND pa.created_at::date=CURRENT_DATE"
+    own["today"] = {
+        "pobs": _kpi(conn, f"SELECT count(*) FROM pob_activities pa WHERE {today_where}", (uid,)),
+        "amount": _kpi(conn, f"SELECT coalesce(sum(pa.pob_amount),0) FROM pob_activities pa WHERE {today_where}", (uid,)),
+        "pending": _kpi(conn, f"SELECT count(*) FROM pob_activities pa WHERE {today_where} AND pa.status='pending_verification'", (uid,)),
+        "verified": _kpi(conn, f"SELECT count(*) FROM pob_activities pa WHERE {today_where} AND pa.status='verified'", (uid,)),
+        "rejected": _kpi(conn, f"SELECT count(*) FROM pob_activities pa WHERE {today_where} AND pa.status='rejected'", (uid,)),
+        "visits": _kpi(conn, "SELECT count(*) FROM chemist_visits WHERE user_id=%s AND visit_date=CURRENT_DATE", (uid,)),
     }
     own["approval_rate"] = round(own["verified"] / (own["verified"] + own["rejected"]) * 100, 2) \
         if (own["verified"] + own["rejected"]) else 0.0

@@ -111,12 +111,21 @@ def _find_otp(contact: str, purpose: str) -> dict | None:
         conn.close()
 
 
-def _mark_used(otp_id: int) -> None:
+def _consume_otp(otp_id: int) -> bool:
+    """Atomically consume a one-time code at the database level.
+
+    Only the request whose UPDATE flips used->TRUE gets a row back; a
+    concurrent request racing on the same code gets no row and knows it lost.
+    A python-side read-then-write (SELECT, then UPDATE ... WHERE id=%s) would
+    let two simultaneous verifications both pass."""
     conn = platform_db.get_db()
     try:
         c = conn.cursor()
-        c.execute("UPDATE recovery_otps SET used=TRUE WHERE id=%s", (otp_id,))
+        c.execute("UPDATE recovery_otps SET used=TRUE WHERE id=%s AND used=FALSE "
+                  "RETURNING id", (otp_id,))
+        claimed = c.fetchone() is not None
         conn.commit()
+        return claimed
     finally:
         conn.close()
 
@@ -200,10 +209,12 @@ def recovery_verify(body: dict, request: Request):
         raise HTTPException(400, "contact, purpose and otp are required")
 
     row = _find_otp(contact, purpose)
+    if not row:
+        raise HTTPException(400, "Code expired or not found. Request a new one.")
     expires = row["expires_at"]
     if isinstance(expires, str):
         expires = dt.datetime.fromisoformat(expires)
-    if not row or dt.datetime.utcnow() > expires:
+    if dt.datetime.utcnow() > expires:
         raise HTTPException(400, "Code expired or not found. Request a new one.")
     if row["attempts"] >= RECOVERY_OTP_MAX_ATTEMPTS:
         raise HTTPException(429, "Too many attempts. Request a new code.")
@@ -211,7 +222,10 @@ def recovery_verify(body: dict, request: Request):
         _bump_attempts(row["id"])
         raise HTTPException(400, "Invalid code.")
 
-    _mark_used(row["id"])
+    # Consume the code atomically before doing anything else with it: a code
+    # that was already used (by a request that won the race) must be rejected.
+    if not _consume_otp(row["id"]):
+        raise HTTPException(400, "Code already used. Request a new one.")
     accounts = _accounts_for(contact)
 
     if purpose == "division_code":
@@ -281,7 +295,7 @@ def recovery_reset_password(body: dict):
             raise HTTPException(404, "Account not found")
         if row[1] != "active":
             raise HTTPException(403, "Account is disabled")
-        c.execute("UPDATE users SET password=%s WHERE id=%s",
+        c.execute("UPDATE users SET password=%s, must_change_password=FALSE WHERE id=%s",
                   (hash_pw(new_password), user_id))
         security.revoke_all_for_user(conn, user_id)
         conn.commit()

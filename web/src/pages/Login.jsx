@@ -48,11 +48,13 @@ export default function Login() {
     const s = getSession();
     setSession({
       ...s,
-      user: { ...d.user, ...me.user, role: d.user.role },
+      user: { ...d.user, ...me.user, role: d.user.role,
+              onboarding: d.onboarding || me.user?.onboarding || undefined },
       hierarchy_level: me.hierarchy_level,
       permissions: me.permissions || [],
     });
-    nav('/app', { replace: true });
+    const step = d.onboarding || me.user?.onboarding;
+    nav(step ? `/app/onboarding/${step}` : '/app', { replace: true });
   };
 
   const submit = async (e) => {
@@ -73,6 +75,16 @@ export default function Login() {
         setMfaToken(d.mfa_token);
         return;
       }
+      if (d.password_change_required) {
+        nav('/change-password', {
+          state: {
+            username,
+            division: d.division || division,
+            password_change_token: d.password_change_token,
+          },
+        });
+        return;
+      }
       await finish(d);
     } catch (err) {
       setError(err.message);
@@ -90,6 +102,16 @@ export default function Login() {
         method: 'POST',
         body: { username, mfa_token: mfaToken, code },
       });
+      if (d.password_change_required) {
+        nav('/change-password', {
+          state: {
+            username,
+            division: d.division || division,
+            password_change_token: d.password_change_token,
+          },
+        });
+        return;
+      }
       await finish(d);
     } catch (err) {
       setError(err.message);

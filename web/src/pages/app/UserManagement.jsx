@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Users from './Users';
 import Hierarchy from './Hierarchy';
 import Roles from './Roles';
@@ -10,7 +11,11 @@ const TABS = [
 ];
 
 export default function UserManagement({ base = '/api/v1' }) {
-  const [tab, setTab] = useState('users');
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState(() => {
+    const t = params.get('tab');
+    return TABS.some(([k]) => k === t) ? t : 'users';
+  });
   return (
     <div>
       <div className="tabs">

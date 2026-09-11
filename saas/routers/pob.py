@@ -31,6 +31,35 @@ def _content_hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _check_campaign_executable(campaign: dict) -> None:
+    """Perspective 9+10 gates: only approved campaigns execute.
+
+    draft / pending_approval are not executable; scheduled is (approved, waiting
+    for its window), and the daily sweep flips scheduled -> active once the
+    start date is reached.
+    """
+    if not campaign or campaign["status"] not in ("active", "scheduled"):
+        raise HTTPException(400, "Campaign is not active")
+
+
+def _check_assignment(conn, ctx: TenantContext, campaign_id: int) -> None:
+    """Perspective 9: only employees assigned to the campaign may execute it.
+
+    A campaign with no assignment rows (or an 'all' rule) stays open to every
+    eligible employee (legacy behaviour).
+    """
+    from .. import campaign_service
+    assigned = campaign_service.assigned_user_ids(conn, campaign_id)
+    if assigned is None:
+        return
+    if ctx.user.get("id") not in assigned:
+        raise HTTPException(
+            403,
+            "You are not assigned to this campaign. Contact your division admin "
+            "to be added to its executing audience before submitting POBs.",
+        )
+
+
 def _coerce_int(value):
     """Accept ints, digit-strings or floats from JSON bodies so a select that
     sends campaign_id as '2' still matches the DB int column."""
@@ -532,6 +561,13 @@ def _finalize_pob(conn, ctx, campaign, pob_id: int, invoice_bytes: bytes, filena
                              {"campaign": campaign["name"],
                               "invoice_amount": pob["invoice_amount"] or pob["pob_amount"]},
                              "pob", pob_id)
+        try:
+            from ..platform_notify import notify_event
+            notify_event("pob.pending", "POB awaiting verification",
+                         f"POB #{pob_id} ({campaign['name']}) is pending verification.",
+                         "/superadmin/pob", tenant_db=ctx.claims.get("tenant_db"))
+        except Exception:
+            pass
         dispatch_event(conn, "pob.submitted", {
             "pob_id": pob_id, "verification_id": vid, "campaign_id": campaign["id"],
             "campaign": campaign["name"], "invoice_number": invoice_number,
@@ -569,8 +605,8 @@ async def submit_pob(
 
     c.execute("SELECT * FROM campaigns WHERE id=%s", (campaign_id,))
     campaign = fetchone_dict(c)
-    if not campaign or campaign["status"] not in ("active", "draft"):
-        raise HTTPException(400, "Campaign is not active")
+    _check_campaign_executable(campaign)
+    _check_assignment(conn, ctx, campaign_id)
 
     # Campaign Builder: restrict who may upload for this campaign.
     upload_roles = (campaign.get("upload_roles") or "").strip()
@@ -588,8 +624,17 @@ async def submit_pob(
         raise HTTPException(400, "Product does not belong to this campaign")
 
     c.execute("SELECT * FROM chemists WHERE id=%s", (chemist_id,))
-    if not c.fetchone():
+    chemist = fetchone_dict(c)
+    if not chemist:
         raise HTTPException(400, "Chemist not found")
+
+    # Campaign eligible-chemist segment: when the campaign targets specific
+    # attachment types / potential categories, the chemist must match or the
+    # POB is rejected before it reaches the OCR pipeline.
+    from .. import campaign_service
+    elig = campaign_service.chemist_eligibility(conn, campaign_id, chemist_id)
+    if not elig["eligible"]:
+        raise HTTPException(400, elig["reason"] or "Chemist is not eligible for this campaign")
 
     # POB amount / PTR / MRP are derived from the product master (mirroring the
     # bulk import path) so the caller cannot inflate the authorised POB amount by
@@ -794,6 +839,13 @@ async def submit_pob(
         notify_from_template(conn, ctx.user["id"], "pob.submitted",
                              {"campaign": campaign["name"], "invoice_amount": invoice_amount or pob_amount},
                              "pob", pob_id)
+        try:
+            from ..platform_notify import notify_event
+            notify_event("pob.pending", "POB awaiting verification",
+                         f"POB #{pob_id} ({campaign['name']}) is pending verification.",
+                         "/superadmin/pob", tenant_db=ctx.claims.get("tenant_db"))
+        except Exception:
+            pass
     from ..webhooks import dispatch_event
     dispatch_event(conn, "pob.approved" if auto_ok else "pob.submitted", {
         "pob_id": pob_id, "verification_id": vid, "campaign_id": campaign_id,
@@ -837,8 +889,8 @@ async def submit_invoice_only(
 
     c.execute("SELECT * FROM campaigns WHERE id=%s", (campaign_id,))
     campaign = fetchone_dict(c)
-    if not campaign or campaign["status"] not in ("active", "draft"):
-        raise HTTPException(400, "Campaign is not active")
+    _check_campaign_executable(campaign)
+    _check_assignment(conn, ctx, campaign_id)
     if campaign.get("pob_required", True):
         raise HTTPException(400, "This campaign requires manual POB entry; use /pob/submit instead")
 
@@ -1177,8 +1229,8 @@ def submit_visit(body: dict, request: Request = None,
 
     c.execute("SELECT * FROM campaigns WHERE id=%s", (campaign_id,))
     campaign = fetchone_dict(c)
-    if not campaign or campaign["status"] not in ("active", "draft"):
-        raise HTTPException(400, "Campaign is not active")
+    _check_campaign_executable(campaign)
+    _check_assignment(conn, ctx, campaign_id)
 
     upload_roles = (campaign.get("upload_roles") or "").strip()
     if upload_roles and upload_roles != "*":

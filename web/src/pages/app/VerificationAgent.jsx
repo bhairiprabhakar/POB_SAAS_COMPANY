@@ -58,7 +58,7 @@ export default function VerificationAgent() {
         actions={<SearchBox value={q} onChange={setQ} placeholder="Search chemist / invoice / MR…" />} />
 
       <div className="stats-grid compact">
-        <StatCard label="Pending Review" value={s.pending ?? 0} tone="amber" />
+        <StatCard label="Pending Review" value={s.manual_review ?? s.pending ?? 0} tone="amber" />
         <StatCard label="Auto-Approved" value={s.auto_approved ?? 0} tone="green" />
         <StatCard label="Approved" value={s.approved ?? 0} tone="green" />
         <StatCard label="Rejected" value={s.rejected ?? 0} tone="red" />

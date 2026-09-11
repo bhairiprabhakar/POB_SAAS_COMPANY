@@ -18,6 +18,256 @@ from .audit import log_action
 from .db_utils import fetchall_dict, fetchone_dict
 
 
+# ── Campaign readiness gate (perspective 7) ─────────────────────────────────
+
+def campaign_readiness(conn) -> dict:
+    """Configuration checklist that must be in place before a campaign can be
+    created (masters before campaigns). Shared by the tenant create route and
+    the super admin create route so the sequence holds everywhere."""
+    c = conn.cursor()
+
+    def _count(sql):
+        c.execute(sql)
+        return int((c.fetchone() or [0])[0] or 0)
+
+    items = [
+        {"key": "hierarchy", "label": "Hierarchy levels (designations)",
+         "count": _count("SELECT count(*) FROM hierarchy_levels"), "where": "platform"},
+        {"key": "employees", "label": "Employees / field users",
+         "count": _count("SELECT count(*) FROM users WHERE status='active'"), "where": "platform"},
+        {"key": "brands", "label": "Brands",
+         "count": _count("SELECT count(*) FROM brands"), "where": "platform"},
+        {"key": "chemists", "label": "Chemists (retail network)",
+         "count": _count("SELECT count(*) FROM chemists"), "where": "tenant"},
+        {"key": "regions", "label": "Regions covered (user territories)",
+         "count": _count("SELECT count(DISTINCT region) FROM users WHERE region IS NOT NULL AND region<>''"), "where": "tenant"},
+        {"key": "states", "label": "States covered (chemist network)",
+         "count": _count("SELECT count(DISTINCT state) FROM chemists WHERE state IS NOT NULL AND state<>''"), "where": "tenant"},
+        {"key": "gifts", "label": "Gratification masters (gifts)",
+         "count": _count("SELECT count(*) FROM gifts"), "where": "platform"},
+    ]
+    for i in items:
+        i["ready"] = i["count"] > 0
+    keyed = {i["key"]: i for i in items}
+    ready = all(keyed[k]["ready"] for k in ("brands", "chemists", "gifts"))
+    complete = ready and all(keyed[k]["ready"] for k in ("hierarchy", "employees", "regions", "states"))
+    return {"ready": ready, "complete": complete, "items": items}
+
+
+# ── Campaign -> employee assignment (perspective 9) ───────────────────────────
+
+def list_campaign_assignments(conn, cid: int) -> list[dict]:
+    """The assignment rule rows for a campaign (decorated with names)."""
+    c = conn.cursor()
+    c.execute(
+        """SELECT ca.*, u.full_name AS employee_name, m.full_name AS manager_name
+           FROM campaign_assignments ca
+           LEFT JOIN users u ON u.id=ca.employee_id
+           LEFT JOIN users m ON m.id=ca.manager_id
+           WHERE ca.campaign_id=%s ORDER BY ca.id""",
+        (cid,),
+    )
+    return fetchall_dict(c)
+
+
+def _assignment_bodies(body: dict) -> list[dict]:
+    """Normalize the assignment payload into a list of rule dicts.
+
+    Accepts either a full replacement list ({'rules': [...]}) or the shorthand
+    forms the wizard uses:
+      {'mode': 'all'}
+      {'mode': 'region', 'regions': ['South', ...]}
+      {'mode': 'employee', 'employee_ids': [12, 34]}
+      {'mode': 'hierarchy', 'manager_id': 5}
+    Returns [] when the payload is absent or empty.
+    """
+    raw = body.get("assignment")
+    if raw is None:
+        return []
+    if isinstance(raw, dict) and raw.get("rules"):
+        raw = raw["rules"]
+    if not raw:
+        return []
+    if isinstance(raw, dict):
+        mode = str(raw.get("mode") or "").strip()
+        if not mode:
+            return []
+        if mode == "all":
+            return [{"mode": "all"}]
+        rules = []
+        if mode == "region":
+            for r in raw.get("regions") or []:
+                r = str(r).strip()
+                if r:
+                    rules.append({"mode": "region", "region": r})
+        elif mode == "employee":
+            for uid in raw.get("employee_ids") or []:
+                if str(uid).strip().lstrip("-").isdigit():
+                    rules.append({"mode": "employee", "employee_id": int(uid)})
+        elif mode == "hierarchy":
+            mid = raw.get("manager_id")
+            if mid is not None and str(mid).strip().lstrip("-").isdigit():
+                rules.append({"mode": "hierarchy", "manager_id": int(mid)})
+        return rules
+    rules = []
+    for r in raw:
+        if not isinstance(r, dict):
+            continue
+        m = str(r.get("mode") or "").strip()
+        if m not in ("all", "region", "employee", "hierarchy"):
+            continue
+        row = {"mode": m}
+        if m == "region" and r.get("region"):
+            row["region"] = str(r["region"]).strip()
+        if m == "employee" and r.get("employee_id") is not None:
+            try:
+                row["employee_id"] = int(r["employee_id"])
+            except (TypeError, ValueError):
+                continue
+        if m == "hierarchy" and r.get("manager_id") is not None:
+            try:
+                row["manager_id"] = int(r["manager_id"])
+            except (TypeError, ValueError):
+                continue
+        if m != "all" and "employee_id" not in row and "manager_id" not in row and "region" not in row:
+            continue
+        rules.append(row)
+    return rules
+
+
+def set_campaign_assignments(conn, cid: int, body: dict, actor: dict) -> list[dict]:
+    """Replace a campaign's assignment rules. Returns the new rule rows."""
+    rules = _assignment_bodies(body)
+    c = conn.cursor()
+    c.execute("DELETE FROM campaign_assignments WHERE campaign_id=%s", (cid,))
+    for r in rules:
+        c.execute(
+            """INSERT INTO campaign_assignments (campaign_id, mode, region, employee_id, manager_id, created_by)
+               VALUES (%s,%s,%s,%s,%s,%s)""",
+            (cid, r["mode"], r.get("region"), r.get("employee_id"), r.get("manager_id"), actor.get("id")),
+        )
+    conn.commit()
+    log_action(conn, actor.get("id"), "campaign.assign", "campaign", cid,
+               {"rules": rules}, actor=actor.get("name"))
+    return list_campaign_assignments(conn, cid)
+
+
+def assigned_user_ids(conn, cid: int) -> list[int] | None:
+    """Which tenant user ids may execute this campaign.
+
+    Returns None when the campaign has no assignment rows OR an 'all' rule'
+    (open to every eligible employee - the legacy behaviour). Otherwise the
+    union of the rule matches:
+      region     -> active users with a matching region
+      employee   -> that user
+      hierarchy  -> the manager plus every subordinate in the reporting tree
+    All matches are restricted to the campaign's division when one is set, so a
+    Region/Rule can never leak to employees of another division.
+    """
+    c = conn.cursor()
+    c.execute("SELECT division_id, name FROM campaigns WHERE id=%s", (cid,))
+    row = c.fetchone()
+    if not row:
+        return None
+    division_id = row[0]
+    c.execute("SELECT mode, region, employee_id, manager_id FROM campaign_assignments WHERE campaign_id=%s", (cid,))
+    rules = c.fetchall()
+    if not rules:
+        return None
+    if any(mode == "all" for mode, _, _, _ in rules):
+        return None
+
+    from .scoping import _descendants
+
+    ids: set[int] = set()
+    for mode, region, employee_id, manager_id in rules:
+        if mode == "region":
+            if division_id is not None:
+                c.execute("SELECT id FROM users WHERE status='active' AND region=%s AND division_id=%s",
+                          (region, division_id))
+            else:
+                c.execute("SELECT id FROM users WHERE status='active' AND region=%s", (region,))
+            ids.update(r[0] for r in c.fetchall())
+        elif mode == "employee" and employee_id:
+            if division_id is not None:
+                c.execute("SELECT id FROM users WHERE id=%s AND status='active' AND division_id=%s",
+                          (employee_id, division_id))
+            else:
+                c.execute("SELECT id FROM users WHERE id=%s AND status='active'", (employee_id,))
+            r = c.fetchone()
+            if r:
+                ids.add(r[0])
+        elif mode == "hierarchy" and manager_id:
+            if division_id is not None:
+                c.execute("SELECT id FROM users WHERE id=%s AND status='active' AND division_id=%s",
+                          (manager_id, division_id))
+            else:
+                c.execute("SELECT id FROM users WHERE id=%s AND status='active'", (manager_id,))
+            if c.fetchone():
+                ids.add(manager_id)
+                ids.update(uid for uid in _descendants(conn, manager_id, division_id)
+                           if uid != manager_id)
+    return sorted(ids)
+
+
+def assignment_summary(conn, cid: int) -> dict:
+    """Compact assignment info for list/detail payloads."""
+    rules = list_campaign_assignments(conn, cid)
+    assigned = assigned_user_ids(conn, cid)
+    return {
+        "rules": rules,
+        "mode": (rules[0]["mode"] if rules else "open"),
+        "assigned_count": None if assigned is None else len(assigned),
+        "open": assigned is None,
+    }
+
+
+def chemist_eligibility(conn, cid: int, chemist_id: int) -> dict:
+    """Does a chemist match the campaign's eligible chemist segments?
+
+    Campaigns may restrict execution to chemists of certain attachment types
+    and/or potential categories. Empty segments mean "any chemist". Returns a
+    decision dict with per-rule matches.
+    """
+    c = conn.cursor()
+    c.execute("SELECT id FROM campaigns WHERE id=%s", (cid,))
+    if not c.fetchone():
+        raise HTTPException(404, "campaign not found")
+    c.execute("SELECT * FROM chemists WHERE id=%s", (chemist_id,))
+    chem = fetchone_dict(c)
+    if not chem:
+        raise HTTPException(404, "chemist not found")
+
+    att = chem.get("attachment_type") or ""
+    pot = chem.get("potential_category") or ""
+    c.execute(
+        "SELECT eligible_chemist_attachment_types, eligible_chemist_potential_categories "
+        "FROM campaigns WHERE id=%s", (cid,),
+    )
+    types, cats = c.fetchone()
+    types = [t for t in (types or []) if t]
+    cats = [t for t in (cats or []) if t]
+
+    match_att = (not types) or att in types
+    match_pot = (not cats) or pot in cats
+    eligible = match_att and match_pot
+    missing = []
+    if not match_att:
+        missing.append("attachment_type")
+    if not match_pot:
+        missing.append("potential_category")
+    return {
+        "eligible": eligible,
+        "restricted": bool(types or cats),
+        "matches": {"attachment_type": match_att, "potential_category": match_pot},
+        "chemist": {"attachment_type": att, "potential_category": pot},
+        "campaign": {"eligible_chemist_attachment_types": types,
+                     "eligible_chemist_potential_categories": cats},
+        "reason": ("Chemist does not match the campaign's eligible chemist "
+                   f"types/categories ({', '.join(missing)})") if missing else None,
+    }
+
+
 # ── Brands ──────────────────────────────────────────────────────────────────
 
 def _validate_division(conn, division_id):
@@ -240,6 +490,7 @@ def list_campaigns(conn, q: str = "", status: str = "", active: bool = None,
     for r in rows:
         r["brand_ids"] = _brand_ids_list(r)
         r["brand_names"] = _brand_names(conn, r["brand_ids"])
+        r["assignment"] = assignment_summary(conn, r["id"])
     return rows
 
 
@@ -316,6 +567,7 @@ def get_campaign(conn, cid: int) -> dict | None:
     row["products"] = fetchall_dict(c)
     from .rules import list_rules
     row["rules"] = list_rules(conn, cid)
+    row["assignment"] = assignment_summary(conn, cid)
     return row
 
 
@@ -341,12 +593,13 @@ def create_campaign(conn, actor: dict, body: dict) -> int:
            description, terms_conditions, created_by,
            upload_roles, approval_workflow_id, payout_cycle, payout_weekday, payout_month_day,
            auto_verify, auto_verify_confidence, pob_required, notification_rules,
-           period_type, grace_days, grace_months, pre_grace_days)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+           period_type, grace_days, grace_months, pre_grace_days,
+           eligible_chemist_attachment_types, eligible_chemist_potential_categories)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
         (name, primary, ",".join(map(str, brand_ids)),
          body.get("division_id"),
          body.get("division"), body.get("start_date"), body.get("end_date"), body.get("active", True),
-         body.get("status") or "draft", body.get("scheme_type") or "others",
+         "draft", body.get("scheme_type") or "others",
          body.get("invoice_verification_required", True), body.get("logo_path"),
          body.get("banner_path"), body.get("description"), body.get("terms_conditions"),
          actor.get("id"),
@@ -357,12 +610,16 @@ def create_campaign(conn, actor: dict, body: dict) -> int:
          body.get("pob_required", True),
          json.dumps(body.get("notification_rules") or {}),
          body.get("period_type") or "none", body.get("grace_days") or 15,
-         body.get("grace_months") or 0, body.get("pre_grace_days") or 0),
+         body.get("grace_months") or 0, body.get("pre_grace_days") or 0,
+         body.get("eligible_chemist_attachment_types") or [],
+         body.get("eligible_chemist_potential_categories") or []),
     )
     cid = c.fetchone()[0]
     _sync_campaign_rules(conn, cid, body.get("rules"), actor)
     for p in body.get("products") or []:
         _insert_product(conn, cid, p)
+    if body.get("assignment") is not None:
+        set_campaign_assignments(conn, cid, body, actor)
     conn.commit()
     log_action(conn, actor.get("id"), "campaign.create", "campaign", cid,
                {"name": name, "division_id": body.get("division_id"),
@@ -376,6 +633,16 @@ def update_campaign(conn, actor: dict, cid: int, body: dict, request=None) -> No
     before = fetchone_dict(c)
     if not before:
         raise HTTPException(404, "campaign not found")
+    # Campaign lifecycle (perspective 10): only the platform approver may put a
+    # campaign in an approved/executable state. Tenant edits can still change
+    # draft/completed/paused; active/scheduled/pending_approval/rejected are
+    # driven by the submit/approve/reject endpoints.
+    pending_status = str(body.get("status") or "")
+    if pending_status in ("active", "scheduled", "pending_approval", "rejected") and actor.get("id"):
+        raise HTTPException(
+            403,
+            "Status changes to the approval lifecycle go through Submit/Approve/Reject, not the edit form",
+        )
     if body.get("division_id"):
         c.execute("SELECT id FROM divisions WHERE id=%s", (body["division_id"],))
         if not c.fetchone():
@@ -390,7 +657,8 @@ def update_campaign(conn, actor: dict, cid: int, body: dict, request=None) -> No
               "logo_path", "banner_path", "description", "terms_conditions",
               "upload_roles", "approval_workflow_id", "payout_cycle", "payout_weekday",
               "payout_month_day", "auto_verify", "auto_verify_confidence", "pob_required", "notification_rules",
-              "period_type", "grace_days", "grace_months", "pre_grace_days"]
+              "period_type", "grace_days", "grace_months", "pre_grace_days",
+              "eligible_chemist_attachment_types", "eligible_chemist_potential_categories"]
     sets, params = [], []
     for f in fields:
         if f in body and body[f] is not None:
@@ -399,6 +667,8 @@ def update_campaign(conn, actor: dict, cid: int, body: dict, request=None) -> No
             if f == "notification_rules":
                 import json
                 val = json.dumps(val or {})
+            if f.startswith("eligible_chemist_"):
+                val = val or []
             params.append(val)
     # brand_ids column is stored as a comma-separated string; also keep the
     # primary brand_id in sync so joins/reports keep working.
@@ -416,6 +686,8 @@ def update_campaign(conn, actor: dict, cid: int, body: dict, request=None) -> No
         c.execute(f"UPDATE campaigns SET {', '.join(sets)} WHERE id=%s", params)
     _sync_campaign_rules(conn, cid, body.get("rules"), actor)
     _sync_products(conn, cid, body.get("products"))
+    if body.get("assignment") is not None:
+        set_campaign_assignments(conn, cid, body, actor)
     conn.commit()
     log_action(conn, actor.get("id"), "campaign.update", "campaign", cid,
                request=request, before=before, after=body, actor=actor.get("name"))

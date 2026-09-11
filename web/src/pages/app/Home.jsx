@@ -59,6 +59,7 @@ function PersonalDashboard() {
   const teamPrev = d.team_prev || {};
   const members = d.members || [];
   const me = d.me || {};
+  const today = own.today || {};
   const isManager = d.scope !== 'self' && members.length > 0;
 
   const recent = useMemo(() => {
@@ -186,7 +187,20 @@ function PersonalDashboard() {
         <MetricTile label="Chemist visits" value={fmtNum(own.visits)} icon="📅" tone="blue"
           sub="Logged this period" />
         <MetricTile label="Gratifications" value={fmtNum(own.gratifications)} icon="🎁" tone="red"
-          sub={`Invoice value ${fmtShort(own.invoice_value)}`} />
+          sub={`${fmtNum(own.gratifications_pending)} pending · ${fmtNum(own.gratifications_completed)} completed`} />
+      </div>
+
+      <div className="card" style={{ padding: 16, marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <h4 style={{ margin: 0 }}>Today at a glance</h4>
+          <span className="muted" style={{ fontSize: 12 }}>Your field activity so far today</span>
+        </div>
+        <div className="metric-grid">
+          <MetricTile label="POBs today" value={fmtNum(today.pobs)} icon="≣" tone="primary" sub={`${fmtNum(today.verified)} verified · ${fmtNum(today.pending)} pending`} />
+          <MetricTile label="Value today" value={fmtShort(today.amount)} icon="₹" tone="green" sub="Submitted today" />
+          <MetricTile label="Chemist visits today" value={fmtNum(today.visits)} icon="📅" tone="blue" sub="Visits logged" />
+          <MetricTile label="Rejected today" value={fmtNum(today.rejected)} icon="✕" tone="red" sub={today.rejected ? 'Resubmit with corrected proof' : 'Nothing rejected'} />
+        </div>
       </div>
 
       <div className="bi-grid">

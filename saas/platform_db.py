@@ -30,7 +30,27 @@ CREATE TABLE IF NOT EXISTS super_admins (
     full_name TEXT NOT NULL,
     email TEXT,
     status TEXT DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    owner_flag BOOLEAN NOT NULL DEFAULT FALSE,
+    company_id INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS companies (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    legal_name TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    code TEXT NOT NULL DEFAULT '',
+    logo_path TEXT,
+    address TEXT,
+    city TEXT,
+    state TEXT,
+    pincode TEXT,
+    gstin TEXT,
+    contact_number TEXT,
+    official_email TEXT,
+    website TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS divisions (
@@ -46,7 +66,8 @@ CREATE TABLE IF NOT EXISTS divisions (
     tenant_db_name TEXT UNIQUE,
     provisioned_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_by INTEGER
+    created_by INTEGER,
+    covered_regions TEXT[] NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS provisioning_jobs (
@@ -123,6 +144,30 @@ CREATE TABLE IF NOT EXISTS platform_settings (
     logo_path TEXT,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS platform_notifications (
+    id SERIAL PRIMARY KEY,
+    super_admin_id INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'system',
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    link TEXT NOT NULL DEFAULT '',
+    division_id INTEGER,
+    division_name TEXT,
+    is_read BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_platform_notif_sa
+    ON platform_notifications (super_admin_id, is_read, created_at DESC);
+"""
+
+_PLATFORM_MIGRATIONS = """
+ALTER TABLE super_admins ADD COLUMN IF NOT EXISTS owner_flag BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE super_admins ADD COLUMN IF NOT EXISTS company_id INTEGER;
+ALTER TABLE super_admins ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'full';
+UPDATE super_admins SET role='owner' WHERE owner_flag=TRUE AND role='full';
+ALTER TABLE divisions ADD COLUMN IF NOT EXISTS covered_regions TEXT[] NOT NULL DEFAULT '{}';
 """
 
 
@@ -132,6 +177,7 @@ def init_platform_db() -> None:
     conn = get_db()
     c = conn.cursor()
     c.execute(_PLATFORM_DDL)
+    c.execute(_PLATFORM_MIGRATIONS)
     conn.commit()
 
     _bootstrap_superadmin(conn)

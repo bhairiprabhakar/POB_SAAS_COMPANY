@@ -26,15 +26,21 @@ GLOBAL_ROLES = {"campaignos_admin", "verifier", "auditor", "finance"}
 _HO_RANK = 7
 
 
-def _descendants(conn, root_user_id: int) -> list[int]:
+def _descendants(conn, root_user_id: int, division_id: int | None = None) -> list[int]:
     """All user ids whose reporting chain leads to root_user_id.
 
     Cycle-safe: a parent_id cycle (which the update-user guard now rejects at
     write time) must not hang every hierarchical query, so each node is
     visited at most once.
+
+    When division_id is set, the tree is read from that division's users only,
+    so a manager can never roll up subordinates from another division.
     """
     c = conn.cursor()
-    c.execute("SELECT id, parent_id FROM users")
+    if division_id is not None:
+        c.execute("SELECT id, parent_id FROM users WHERE division_id=%s", (division_id,))
+    else:
+        c.execute("SELECT id, parent_id FROM users")
     rows = c.fetchall()
     children = {}
     for uid, parent in rows:
@@ -103,6 +109,16 @@ def visible_user_ids(conn, ctx) -> list[int] | None:
         c = conn.cursor()
         c.execute("SELECT id FROM users WHERE division_id=%s", (div,))
         return [r[0] for r in c.fetchall()]
+    if role == "verification_agent":
+        # Each division runs its own agent: they see every POB submitted by
+        # their own division's users and nothing else. An unassigned agent
+        # falls back to self-only (conservative) until the admin binds one.
+        div = user_division_id(conn, ctx)
+        if not div:
+            return [uid]
+        c = conn.cursor()
+        c.execute("SELECT id FROM users WHERE division_id=%s", (div,))
+        return [r[0] for r in c.fetchall()]
     c = conn.cursor()
     c.execute(
         """SELECT h.rank, u.region, u.state FROM users u
@@ -118,14 +134,23 @@ def visible_user_ids(conn, ctx) -> list[int] | None:
         return [uid]  # no position assigned -> conservative: self only
     if rank >= _HO_RANK:
         return None  # HO sees all India
-    team = [uid] + _descendants(conn, uid)
+    div = user_division_id(conn, ctx)
+    team = [uid] + _descendants(conn, uid, div)
     if rank >= 3 and region:
-        c.execute("SELECT id FROM users WHERE region=%s AND NOT (id = ANY(%s))",
-                  (region, team))
+        if div is not None:
+            c.execute("SELECT id FROM users WHERE division_id=%s AND region=%s "
+                      "AND NOT (id = ANY(%s))", (div, region, team))
+        else:
+            c.execute("SELECT id FROM users WHERE region=%s AND NOT (id = ANY(%s))",
+                      (region, team))
         team.extend(r[0] for r in c.fetchall())
     if rank >= 4 and state:
-        c.execute("SELECT id FROM users WHERE state=%s AND NOT (id = ANY(%s))",
-                  (state, team))
+        if div is not None:
+            c.execute("SELECT id FROM users WHERE division_id=%s AND state=%s "
+                      "AND NOT (id = ANY(%s))", (div, state, team))
+        else:
+            c.execute("SELECT id FROM users WHERE state=%s AND NOT (id = ANY(%s))",
+                      (state, team))
         team.extend(r[0] for r in c.fetchall())
     return sorted(set(team))
 

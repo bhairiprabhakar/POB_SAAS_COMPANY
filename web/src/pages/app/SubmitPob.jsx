@@ -20,7 +20,15 @@ export default function SubmitPob({ demo }) {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [campaignData, setCampaignData] = useState(null);
+  const [elig, setElig] = useState(null);
   const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (!campaignId || !chemistId) { setElig(null); return; }
+    api(`/api/v1/campaigns/${campaignId}/eligible-chemist?chemist_id=${chemistId}`)
+      .then((r) => setElig(r.eligibility || null))
+      .catch(() => setElig(null));
+  }, [campaignId, chemistId]);
 
   useEffect(() => {
     if (!invoiceFile) { setPreviewUrl(null); return; }
@@ -87,6 +95,10 @@ export default function SubmitPob({ demo }) {
   const submit = async (e) => {
     e.preventDefault();
     if (!campaignId || !chemistId) { toast('Select campaign and chemist', 'error'); return; }
+    if (elig && !elig.eligible) {
+      toast('This chemist is not in the campaign\'s eligible segment — select an eligible chemist.', 'error');
+      return;
+    }
 
     if (!campaignPobRequired) {
       if (!invoiceFile) { toast('Choose an invoice file', 'error'); return; }
@@ -179,9 +191,26 @@ export default function SubmitPob({ demo }) {
                 options={chemistOptions} />
             </Field>
           </div>
-        </div>
+</div>
 
-        {campaignData && campaignId && (
+          {elig && elig.restricted && (
+            elig.eligible ? (
+              <div className="elig-banner" data-tone="green" style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8, backgroundColor: 'rgba(16,185,129,.12)', border: '1px solid rgba(16,185,129,.35)' }}>
+                <strong>✓ This chemist matches the campaign's eligible segment.</strong>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  {elig.matches?.attachment_type ? 'Attachment type: in segment.' : `Attachment type "${elig.chemist.attachment_type || 'n/a'}" is outside the target.`}{' '}
+                  {elig.matches?.potential_category ? 'Potential category: in segment.' : `Potential category "${elig.chemist.potential_category || 'n/a'}" is outside the target.`}
+                </div>
+              </div>
+            ) : (
+              <div className="elig-banner" data-tone="red" style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8, backgroundColor: 'rgba(220,38,38,.12)', border: '1px solid rgba(220,38,38,.4)' }}>
+                <strong>⛔ This chemist is not eligible for the selected campaign.</strong>
+                <div className="muted" style={{ fontSize: 12 }}>{elig.reason}</div>
+              </div>
+            )
+          )}
+
+          {campaignData && campaignId && (
           <div className="campaign-criteria-card">
             <div className="criteria-header">
               <span className="criteria-icon">📋</span>

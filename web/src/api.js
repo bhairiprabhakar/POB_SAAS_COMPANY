@@ -57,6 +57,15 @@ export function isSuperAdmin() {
   return !!(s && s.kind === 'sa');
 }
 
+// Platform console role of the signed-in super admin (owner | full |
+// campaign_admin | finance_admin | verification_admin). `full` is the legacy
+// "can do everything" account; specialised roles only see their own function.
+export function saRole() {
+  const s = getSession();
+  if (s?.kind !== 'sa') return 'none';
+  return s?.user?.role || 'full';
+}
+
 async function tryRefresh() {
   const s = getSession();
   if (!s || !s.refresh) return null;

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api, fmtDate } from '../../api';
 import {
   ErrorBox, Field, Modal, PageHeader, SearchBox, Select, Spinner, StatusBadge,
@@ -12,6 +13,52 @@ function AssetPreview({ rel, className, alt }) {
   const url = useFileUrl(rel);
   if (!rel || !url) return null;
   return <img src={url} className={className} alt={alt} />;
+}
+
+// Perspective 7: the masters must be configured before a campaign can exist.
+// `platform` masters are set up by the company owner from the platform console;
+// `tenant` items are division-owned data (field teams / chemist network).
+const CONFIG_LINKS = {
+  hierarchy: null, employees: '/app/user-management', brands: '/app/brands',
+  chemists: '/app/chemists', regions: '/app/user-management', states: '/app/chemists',
+  gifts: null,
+};
+
+function ConfigChecklist({ data, compact }) {
+  if (!data) return null;
+  const { ready, complete, items } = data;
+  return (
+    <div className={`config-checklist${ready ? ' ok' : ''}`}>
+      <div className="config-checklist-head">
+        <strong>{
+          ready ? 'Configuration complete — campaigns can be created ✓'
+            : 'Set up these masters before creating a campaign'
+        }</strong>
+        {!ready && <span className="muted">The wizard can’t be submitted until the mandatory items (brands, chemists, gifts) are in place.</span>}
+        {ready && !complete && <span className="muted">Add hierarchy, territories and gratitude breadth for a fully configured company.</span>}
+      </div>
+      <div className="config-checklist-items">
+        {items.map((it) => {
+          const uri = CONFIG_LINKS[it.key];
+          return (
+            <div key={it.key} className={`config-item${it.ready ? ' ok' : ''}`}>
+              <span className="config-dot">{it.ready ? '✓' : '·'}</span>
+              <span className="config-label">{it.label}</span>
+              <span className="muted">({it.count})</span>
+              {it.where === 'tenant' && !compact && (
+                <span className="muted config-where">{it.ready ? 'ready' : 'add data'}</span>
+              )}
+              {it.where === 'tenant' && compact && uri && it.ready ? (
+                <Link className="btn-link" to={uri}>view</Link>
+              ) : it.where === 'platform' ? (
+                <span className="muted config-where">platform master</span>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 export default function ManagementWorkspace({ base, title, subtitle, back }) {
@@ -39,17 +86,46 @@ export default function ManagementWorkspace({ base, title, subtitle, back }) {
 
 export function CampaignsTab({ base }) {
   const { data, loading, error, run } = useAsync(() => api(`${base}/campaigns`));
+  const readiness = useAsync(() => api(`${base}/campaigns/readiness`));
   const brands = useAsync(() => api(`${base}/brands`));
   const divisions = useAsync(() => api(`${base}/divisions`));
+  const [params, setParams] = useSearchParams();
+  const statusFilter = params.get('status') || '';
   const [q, setQ] = useState('');
-  const [editing, setEditing] = useState(null);
+  const [manualEdit, setManualEdit] = useState(null);
   const [ext, setExt] = useState(null);
+  const editing = manualEdit !== null ? manualEdit : (params.get('new') === '1' ? {} : null);
+
+  const STATUS_TABS = [
+    ['', 'All'], ['draft', 'Draft'], ['pending_approval', 'Pending Approval'],
+    ['scheduled', 'Scheduled'], ['active', 'Active'], ['completed', 'Completed'], ['rejected', 'Rejected'],
+  ];
+  const setStatusFilter = (s) => {
+    const next = new URLSearchParams(params);
+    if (s) next.set('status', s); else next.delete('status');
+    setParams(next, { replace: true });
+  };
+  const openCreate = () => {
+    const next = new URLSearchParams(params);
+    next.set('new', '1');
+    setParams(next, { replace: true });
+    setManualEdit({});
+  };
+  const closeCreate = () => {
+    const next = new URLSearchParams(params);
+    next.delete('new');
+    setParams(next, { replace: true });
+    setManualEdit(null);
+  };
+  const openEdit = (r) => setManualEdit({ ...r });
 
   if (loading) return <Spinner label="Loading campaigns…" />;
   if (error) return <ErrorBox error={error} onRetry={run} />;
 
-  const rows = (data?.items || []).filter((r) => !q
-    || (r.name || '').toLowerCase().includes(q.toLowerCase()));
+  const rows = (data?.items || []).filter((r) => {
+    if (statusFilter && r.status !== statusFilter) return false;
+    return !q || (r.name || '').toLowerCase().includes(q.toLowerCase());
+  });
 
   const del = async (row) => {
     if (!window.confirm(`Delete campaign ${row.name}?`)) return;
@@ -77,6 +153,22 @@ export function CampaignsTab({ base }) {
     } catch (err) { toast(err.message, 'error'); }
   };
 
+  const submitForApproval = async (row) => {
+    if (!window.confirm(`Submit "${row.name}" for approval? It will be locked until the approver decides.`)) return;
+    try {
+      await api(`${base}/campaigns/${row.id}/submit`, { method: 'POST' });
+      toast('Submitted for approval', 'success'); run();
+    } catch (err) { toast(err.message, 'error'); }
+  };
+
+  const withdraw = async (row) => {
+    if (!window.confirm(`Withdraw "${row.name}" back to draft?`)) return;
+    try {
+      await api(`${base}/campaigns/${row.id}/withdraw`, { method: 'POST' });
+      toast('Withdrawn to draft', 'success'); run();
+    } catch (err) { toast(err.message, 'error'); }
+  };
+
   const divs = divisions.data?.items || [];
   const singleDivision = divisions.data ? divs.length <= 1 : false;
 
@@ -88,8 +180,24 @@ export function CampaignsTab({ base }) {
     { key: 'start_date', label: 'Start', render: (r) => fmtDate(r.start_date) },
     { key: 'end_date', label: 'End', render: (r) => fmtDate(r.end_date) },
     { key: 'product_count', label: 'Products' },
+    {
+      key: 'execute_scope', label: 'Execute scope', render: (r) => {
+        const a = r.assignment || {};
+        const count = a.assigned_count;
+        if (a.open) return <span className="muted">All employees</span>;
+        if (r.status === 'draft' || r.status === 'pending_approval') return <span className="muted">{count || 0} employee(s)</span>;
+        return <span>{count} employee(s)</span>;
+      },
+    },
     { key: 'pob_count', label: 'POBs' },
-    { key: 'status', label: 'Status', render: (r) => <StatusBadge value={r.status} /> },
+    { key: 'status', label: 'Status', render: (r) => (
+      <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2 }}>
+        <StatusBadge value={r.status} />
+        {r.status === 'rejected' && r.rejection_note && (
+          <span className="muted" style={{ fontSize: 11 }} title={r.rejection_note}>Rejected: {r.rejection_note.slice(0, 48)}{r.rejection_note.length > 48 ? '…' : ''}</span>
+        )}
+      </span>
+    ) },
     { key: 'active', label: 'Active', render: (r) => (
       <button className={`btn btn-sm ${r.active ? 'btn-primary' : ''}`}
         style={{ minWidth: 64, fontSize: 12 }}
@@ -99,8 +207,14 @@ export function CampaignsTab({ base }) {
     ) },
     { key: '_a', label: '', thClass: 'actions-th', render: (r) => (
       <span className="row-actions">
+        {r.status === 'draft' || r.status === 'rejected' ? (
+          <button className="btn-link" onClick={() => submitForApproval(r)}>{r.status === 'rejected' ? 'Resubmit' : 'Submit'}</button>
+        ) : null}
+        {r.status === 'pending_approval' && (
+          <button className="btn-link" onClick={() => withdraw(r)}>Withdraw</button>
+        )}
         <button className="btn-link" onClick={() => setExt({ id: r.id, mode: 'days', days: 30 })}>Extend</button>
-        <button className="btn-link" onClick={() => setEditing({ ...r })}>Edit</button>
+        <button className="btn-link" onClick={() => openEdit(r)}>Edit</button>
         <button className="btn-link danger" onClick={() => del(r)}>Delete</button>
       </span>
     ) },
@@ -108,16 +222,26 @@ export function CampaignsTab({ base }) {
 
   return (
     <div>
+      {readiness.data && !readiness.data.ready && (
+        <ConfigChecklist data={readiness.data} />
+      )}
       <PageHeader title="Campaigns" subtitle="Create and manage the division's POB schemes"
         actions={<>
           <SearchBox value={q} onChange={setQ} />
-          <button className="btn btn-primary" onClick={() => setEditing({})}>+ New campaign</button>
+          <button className="btn btn-primary" onClick={openCreate}>+ New campaign</button>
         </>} />
+      <div className="tabs">
+        {STATUS_TABS.map(([id, label]) => (
+          <button key={id} className={`tab${statusFilter === id ? ' active' : ''}`} onClick={() => setStatusFilter(id)}>
+            {label}
+          </button>
+        ))}
+      </div>
       <Table cols={cols} rows={rows} keyOf={(r) => r.id} empty="No campaigns yet" />
       {editing && (
         <CampaignModal editing={editing} base={base}
           brands={brands.data?.items || []} divisions={divisions.data?.items || []}
-          onClose={() => setEditing(null)} onDone={() => { setEditing(null); run(); }} />
+          onClose={closeCreate} onDone={() => { closeCreate(); run(); }} />
       )}
       {ext && (
         <Modal open title={`Extend campaign #${ext.id}`} onClose={() => setExt(null)}
@@ -157,15 +281,18 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
     () => (isEdit ? api(`${base}/campaigns/${editing.id}`) : Promise.resolve({ products: [] })),
     [isEdit, editing.id, base]);
   const roles = useAsync(() => api(`${base}/roles`), [base]);
+  const users = useAsync(() => api(`${base}/users`), [base]);
+  const readiness = useAsync(() => api(`${base}/campaigns/readiness`), [isEdit, base]);
   const [f, setF] = useState({
-    active: true, invoice_verification_required: true, status: 'draft', scheme_type: 'others', ...editing,
+    active: true, invoice_verification_required: true, status: 'draft', scheme_type: 'others',
+    assignment: { mode: 'all', regions: [], employee_ids: [], manager_id: '' }, ...editing,
   });
   const [products, setProducts] = useState(isEdit ? [] : [{}]);
   const [busy, setBusy] = useState(false);
   const [files, setFiles] = useState({ logo: null, banner: null });
   const loaded = useRef(false);
   const [step, setStep] = useState(0);
-  const STEPS = ['Details', 'Brand & Products', 'Timeline & Rules', 'Branding & Submissions', 'Review'];
+  const STEPS = ['Details', 'Brand & Products', 'Timeline & Rules', 'Assignment', 'Branding & Submissions', 'Review'];
   const lastStep = STEPS.length - 1;
 
   const nextStep = () => {
@@ -182,8 +309,21 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
       const brandIds = Array.isArray(detail.data.brand_ids)
         ? detail.data.brand_ids.map(Number).filter(Boolean)
         : (detail.data.brand_id ? [Number(detail.data.brand_id)] : []);
+      const asg = detail.data.assignment || {};
+      const rules = asg.rules || [];
+      const modes = [...new Set(rules.map((r) => r.mode))];
+      const assignment = (modes.length !== 1 || rules.some((r) => r.mode === 'all'))
+        ? { mode: 'all', regions: [], employee_ids: [], manager_id: '' }
+        : {
+            mode: modes[0],
+            regions: rules.filter((r) => r.region).map((r) => r.region),
+            employee_ids: rules.filter((r) => r.employee_id).map((r) => Number(r.employee_id)),
+            manager_id: (rules.find((r) => r.manager_id)?.manager_id
+              ? String(rules.find((r) => r.manager_id).manager_id) : ''),
+          };
       setF((prev) => ({
         ...prev,
+        assignment,
         division_id: prev.division_id ?? detail.data.division_id ?? '',
         brand_id: prev.brand_id ?? detail.data.brand_id ?? '',
         brand_mode: brandIds.length > 1 ? 'multiple' : 'single',
@@ -270,6 +410,7 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
       const brandIds = (f.brand_ids || []).map(Number).filter(Boolean);
       const payload = {
         ...f,
+        assignment: f.assignment && f.assignment.mode ? f.assignment : { mode: 'all' },
         brand_id: brandIds.length ? brandIds[0] : (f.brand_id || null),
         brand_ids: brandIds,
         products: products.filter((p) => (p.name || '').trim() || p.brand_id),
@@ -304,19 +445,51 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
   const reviewDivision = divisions.find((d) => String(d.id) === String(f.division_id))?.name || '—';
   const reviewProducts = products.filter((p) => (p.name || '').trim() || p.brand_id);
   const reviewRoles = f.upload_roles === '*' || !f.upload_roles ? 'All roles' : f.upload_roles;
+  const reviewAssignment = (() => {
+    const a = (isEdit && detail.data?.assignment) || f.assignment || {};
+    if (a.mode === 'all' || !a.mode) return 'All eligible employees';
+    if (a.mode === 'region') return `Region(s): ${(a.regions || []).join(', ') || '—'}`;
+    if (a.mode === 'employee') {
+      const byId = new Map((users.data?.items || []).map((u) => [Number(u.id), u.full_name]));
+      const names = (a.employee_ids || []).map((id) => byId.get(Number(id)) || `#${id}`);
+      return `Selected employees(${names.length}): ${names.join(', ') || '—'}`;
+    }
+    if (a.mode === 'hierarchy') {
+      const mgr = (users.data?.items || []).find((u) => String(u.id) === String(a.manager_id));
+      return `Hierarchy: ${mgr ? mgr.full_name + (mgr.hierarchy_level_name ? ` (${mgr.hierarchy_level_name})` : '') : '—'} + subordinates`;
+    }
+    return '—';
+  })();
+  const employeeOpts = (users.data?.items || []).filter((u) => u.status !== 'inactive');
+  const regionOpts = [...new Set(employeeOpts.map((u) => u.region).filter(Boolean))].sort();
+  const withSubordinates = new Set(employeeOpts.map((u) => u.parent_id).filter(Boolean));
+  const descendantsOf = (id) => {
+    const children = {};
+    employeeOpts.forEach((u) => { children[u.parent_id] = children[u.parent_id] || []; children[u.parent_id].push(u.id); });
+    const seen = new Set();
+    const walk = (pid) => { (children[pid] || []).forEach((uid) => { if (!seen.has(uid)) { seen.add(uid); walk(uid); } }); };
+    walk(id);
+    return seen.size;
+  };
   const isCreate = !isEdit;
+  const blocked = isCreate && readiness.data && !readiness.data.ready;
 
   return (
     <Modal open wide title={isEdit ? `Edit ${editing.name}` : 'New campaign'} onClose={onClose}
       footer={<>
         <button className="btn" onClick={onClose}>Cancel</button>
-        {step > 0 && <button className="btn" type="button" onClick={() => setStep((s) => s - 1)}>← Back</button>}
-        {step < lastStep ? (
+        {!blocked && step > 0 && <button className="btn" type="button" onClick={() => setStep((s) => s - 1)}>← Back</button>}
+        {blocked ? (
+          <button className="btn btn-primary" disabled={busy}>Configure masters first</button>
+        ) : step < lastStep ? (
           <button className="btn btn-primary" type="button" onClick={nextStep}>Next →</button>
         ) : (
           <button className="btn btn-primary" form="camp-form" disabled={busy}>{busy ? 'Saving…' : (isCreate ? 'Create campaign' : 'Save changes')}</button>
         )}
       </>}>
+      {blocked ? (
+        <ConfigChecklist data={readiness.data} compact />
+      ) : (<>
       <div className="stepper">
         {STEPS.map((label, i) => (
           <div key={label} className={`step${i === step ? ' active' : ''}${i < step ? ' done' : ''}`}>
@@ -334,11 +507,23 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
             )}
             <Field label="Scheme type"><Select value={f.scheme_type || 'others'} onChange={set('scheme_type')}
               options={['cashback', 'upi', 'voucher', 'gift', 'coupon', 'points', 'physical_gift', 'others'].map((o) => ({ value: o, label: o }))} /></Field>
-            <Field label="Status"><Select value={f.status || 'draft'} onChange={set('status')}
-              options={['draft', 'active', 'completed', 'paused'].map((o) => ({ value: o, label: o }))} /></Field>
-            <div className="span-2">
-              <label className="check"><input type="checkbox" checked={f.active} onChange={set('active')} /> Active</label>
-            </div>
+            {isCreate ? (
+              <div className="span-2">
+                <p className="ai-note">
+                  New campaigns start as <strong>Draft</strong>. After saving, submit the campaign for approval — it
+                  becomes executable only once the platform approver approves it. This guards the PTR / POB value /
+                  reward configuration on this screen.
+                </p>
+              </div>
+            ) : (
+              <>
+                <Field label="Status"><Select value={f.status || 'draft'} onChange={set('status')}
+                  options={['draft', 'completed', 'paused'].map((o) => ({ value: o, label: o }))} /><span className="muted" style={{ fontSize: 11 }}>Go-live happens through the approval flow.</span></Field>
+                <div className="span-2">
+                  <label className="check"><input type="checkbox" checked={f.active} onChange={set('active')} /> Active</label>
+                </div>
+              </>
+            )}
             <Field label="Description" className="span-2"><TextArea rows={2} value={f.description || ''} onChange={set('description')} /></Field>
             <Field label="Terms & conditions" className="span-2"><TextArea rows={2} value={f.terms_conditions || ''} onChange={set('terms_conditions')} /></Field>
           </div>
@@ -408,6 +593,104 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
         )}
         {step === 3 && (
           <div className="grid-2">
+            <Field label="Who can execute this campaign?" className="span-2"
+              hint="The audience allowed to submit POBs for this campaign. Choose to keep it open, restrict by region, pick specific employees, or give a manager and their whole team.">
+              <div className="segmented">
+                <button type="button" className={`seg${f.assignment?.mode === 'all' ? ' active' : ''}`}
+                  onClick={() => setF((p) => ({ ...p, assignment: { mode: 'all', regions: [], employee_ids: [], manager_id: '' } }))}>
+                  A · All eligible</button>
+                <button type="button" className={`seg${f.assignment?.mode === 'region' ? ' active' : ''}`}
+                  onClick={() => setF((p) => ({ ...p, assignment: { mode: 'region', regions: [], employee_ids: [], manager_id: '' } }))}>
+                  B · Region</button>
+                <button type="button" className={`seg${f.assignment?.mode === 'employee' ? ' active' : ''}`}
+                  onClick={() => setF((p) => ({ ...p, assignment: { mode: 'employee', regions: [], employee_ids: [], manager_id: '' } }))}>
+                  C · Employees</button>
+                <button type="button" className={`seg${f.assignment?.mode === 'hierarchy' ? ' active' : ''}`}
+                  onClick={() => setF((p) => ({ ...p, assignment: { mode: 'hierarchy', regions: [], employee_ids: [], manager_id: '' } }))}>
+                  D · Hierarchy</button>
+              </div>
+            </Field>
+            {f.assignment?.mode === 'all' && (
+              <div className="span-2">
+                <p className="ai-note">Open to every eligible employee in the division (division-wide). Upload-role rules still apply on top of this audience.</p>
+              </div>
+            )}
+            {f.assignment?.mode === 'region' && (
+              <Field label="Region(s)" className="span-2"
+                hint={regionOpts.length ? 'Active regions across the tenant employees' : 'No regions found on active users yet'}>
+                {regionOpts.length ? (
+                  <div className="role-picker">
+                    {regionOpts.map((r) => {
+                      const sel = (f.assignment?.regions || []).includes(r);
+                      return (
+                        <label key={r} className="check">
+                          <input type="checkbox" checked={sel}
+                            onChange={() => setF((p) => ({
+                              ...p, assignment: {
+                                ...p.assignment,
+                                regions: sel ? (p.assignment.regions || []).filter((x) => x !== r) : [...(p.assignment.regions || []), r],
+                              },
+                            }))} />
+                          {r}
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : <span className="muted">No regions found on active users yet</span>}
+              </Field>
+            )}
+            {f.assignment?.mode === 'employee' && (
+              <Field label="Select employees" className="span-2"
+                hint={(f.assignment?.employee_ids || []).length
+                  ? `${f.assignment.employee_ids.length} employee(s) selected`
+                  : 'Pick one or more employees allowed to execute this campaign'}>
+                <div className="role-picker">
+                  {employeeOpts.map((u) => {
+                    const sel = (f.assignment?.employee_ids || []).includes(Number(u.id));
+                    return (
+                      <label key={u.id} className="check">
+                        <input type="checkbox" checked={sel}
+                          onChange={() => setF((p) => ({
+                            ...p, assignment: {
+                              ...p.assignment,
+                              employee_ids: sel
+                                ? (p.assignment.employee_ids || []).filter((x) => Number(x) !== Number(u.id))
+                                : [...(p.assignment.employee_ids || []), Number(u.id)],
+                            },
+                          }))} />
+                        {u.full_name}
+                        {u.hierarchy_level_name && <span className="muted"> · {u.hierarchy_level_name}</span>}
+                        {u.region && <span className="muted"> · {u.region}</span>}
+                      </label>
+                    );
+                  })}
+                  {employeeOpts.length === 0 && <span className="muted">No active employees yet — add users in the Users tab first</span>}
+                </div>
+              </Field>
+            )}
+            {f.assignment?.mode === 'hierarchy' && (
+              <Field label="Manager" className="span-2"
+                hint="Anyone reporting to this manager (directly or indirectly) in the division is included" required>
+                <select className="input" value={f.assignment?.manager_id || ''}
+                  onChange={(e) => setF((p) => ({ ...p, assignment: { ...p.assignment, manager_id: e.target.value } }))}
+                  required>
+                  <option value="">— select a manager —</option>
+                  {employeeOpts.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.full_name}{u.hierarchy_level_name ? ` (${u.hierarchy_level_name})` : ''}
+                      {withSubordinates.has(u.id) ? ` · ${descendantsOf(u.id)} subordinate(s)` : ''}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" className="btn btn-ghost btn-sm"
+                  onClick={() => setF((p) => ({ ...p, assignment: { ...p.assignment, manager_id: '' } }))}>
+                  Clear selection</button>
+              </Field>
+            )}
+          </div>
+        )}
+        {step === 4 && (
+          <div className="grid-2">
             <Field label="Campaign page logo" className="span-2"
               hint={files.logo ? 'Uploaded when you Save' : (f.logo_path ? 'Current logo' : 'No logo yet')}>
               {files.logo
@@ -435,7 +718,7 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
             </Field>
           </div>
         )}
-        {step === 4 && (
+        {step === 5 && (
           <div>
             <h3 className="sub-head">Review campaign</h3>
             <div className="kv-grid">
@@ -444,8 +727,8 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
               <span>Brand(s)<strong>{reviewBrands}</strong></span>
               <span>Position (PTR/PTS rows)<strong>{reviewProducts.length}</strong></span>
               <span>Scheme type<strong>{f.scheme_type || 'others'}</strong></span>
-              <span>Status<strong>{f.status || 'draft'}</strong></span>
-              <span>Active<strong>{f.active ? 'Yes' : 'No'}</strong></span>
+              <span>Status<strong>{isCreate ? 'Draft (awaiting approval)' : (f.status || 'draft')}</strong></span>
+              <span>Execute scope<strong>{reviewAssignment}</strong></span>
               <span>Run dates<strong>{f.start_date || '—'} → {f.end_date || '—'}</strong></span>
               <span>Invoice window<strong>{windowPreview || '—'}</strong></span>
               <span>Period type<strong>{f.period_type || 'none'}</strong></span>
@@ -457,10 +740,11 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
               <span>Banner<strong>{files.banner ? 'Uploaded' : (f.banner_path ? 'Uploaded' : 'None')}</strong></span>
               <span>Terms & conditions<strong>{f.terms_conditions ? 'Included' : 'None'}</strong></span>
             </div>
-            <p className="ai-note">Review the details above — you can go back anytime to make changes before saving.</p>
+            <p className="ai-note">Review the details above — you can go back anytime to make changes before saving. After saving, submit the campaign for approval from the Campaigns page.</p>
           </div>
         )}
       </form>
+      </>)}
     </Modal>
   );
 }

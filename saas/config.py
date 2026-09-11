@@ -90,6 +90,11 @@ SMS_API_KEY = os.environ.get("SMS_API_KEY", "")
 SMS_SENDER = os.environ.get("SMS_SENDER", "")
 SMS_API_URL = os.environ.get("SMS_API_URL", "")
 
+# ── Platform (super admin) notification fan-out ─────────────────────────────
+# When disabled, cross-division events (campaign submitted, POB pending,
+# gratification eligible) do not create platform_notifications rows.
+PLATFORM_NOTIFY_ENABLED = os.environ.get("PLATFORM_NOTIFY_ENABLED", "true").lower() not in ("false", "0", "no")
+
 # ── OCR / AI invoice verification ───────────────────────────────────────────
 # provider: "gemini" requires a Google API key. Accept both GOOGLE_API_KEY
 # (legacy name) and GEMINI_API_KEY. Without a key, binary images extract

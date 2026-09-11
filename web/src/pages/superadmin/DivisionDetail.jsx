@@ -10,8 +10,6 @@ const TABS = [
   { value: 'overview', label: 'Overview' },
   { value: 'users', label: 'Users' },
   { value: 'roles', label: 'Roles & hierarchy' },
-  { value: 'brands', label: 'Brands' },
-  { value: 'campaigns', label: 'Campaigns' },
 ];
 
 const loginUrl = (code) => (code ? `${window.location.origin}/login/${encodeURIComponent(code)}` : null);
@@ -53,6 +51,15 @@ export default function DivisionDetail() {
   const act = async (fn, msg) => {
     try { await fn(); toast(msg, 'success'); run(); } catch (e) { toast(e.message, 'error'); }
   };
+  const post = (path, msg) => act(() => api(`/api/v1/superadmin/divisions/${c.id}${path}`, { method: 'POST' }), msg);
+  const provisionDb = async () => {
+    if (!window.confirm('Provision the tenant database for this division?')) return;
+    act(async () => {
+      const d = await api(`/api/v1/superadmin/divisions/${c.id}/provision`,
+        { method: 'POST', body: { admin_username: 'division_admin' } });
+      if (d.temp_password) window.alert(`Temporary admin password for first login:\n\n${d.temp_password}`);
+    }, 'Division provisioned');
+  };
 
   return (
     <div>
@@ -63,20 +70,32 @@ export default function DivisionDetail() {
         actions={
           <>
             <button className="btn" onClick={() => setEditOpen(true)}>✎ Edit division</button>
-            {!c.tenant_db_name && (
-              <button className="btn btn-primary"
-                onClick={() => act(run, 'Division provisioned')}>Provision tenant DB</button>
+            {!c.tenant_db_name && c.status === 'draft' && (
+              <button className="btn btn-primary" onClick={provisionDb}>Provision tenant DB</button>
             )}
-            {c.status !== 'active' ? (
-              <button className="btn"
-                onClick={() => act(() => api(`/api/v1/superadmin/divisions/${c.id}/activate`, { method: 'POST' }), 'Division activated')}>
-                Activate
-              </button>
-            ) : (
-              <button className="btn btn-danger"
-                onClick={() => act(() => api(`/api/v1/superadmin/divisions/${c.id}/deactivate`, { method: 'POST' }), 'Division deactivated')}>
-                Deactivate
-              </button>
+            {c.status === 'draft' && (
+              <button className="btn" onClick={() => post('/activate', 'Division activated')}>Activate</button>
+            )}
+            {c.status === 'active' && (
+              <>
+                <button className="btn" onClick={() => post('/suspend', 'Division suspended')}>Suspend</button>
+                <button className="btn btn-danger" onClick={() => post('/deactivate', 'Division deactivated')}>Deactivate</button>
+              </>
+            )}
+            {c.status === 'suspended' && (
+              <>
+                <button className="btn" onClick={() => post('/resume', 'Division resumed')}>Resume</button>
+                <button className="btn btn-danger" onClick={() => post('/deactivate', 'Division deactivated')}>Deactivate</button>
+              </>
+            )}
+            {c.status === 'inactive' && (
+              <>
+                <button className="btn" onClick={() => post('/activate', 'Division activated')}>Activate</button>
+                <button className="btn btn-danger" onClick={() => post('/archive', 'Division archived')}>Archive</button>
+              </>
+            )}
+            {c.status === 'archived' && (
+              <span className="muted">Archived — no further actions</span>
             )}
             <Link className="btn" to="/superadmin/divisions">← Back to divisions</Link>
           </>
@@ -162,8 +181,6 @@ export default function DivisionDetail() {
 
       {tab === 'users' && <UsersTab did={c.id} />}
       {tab === 'roles' && <RolesTab did={c.id} />}
-      {tab === 'brands' && <BrandsTab did={c.id} />}
-      {tab === 'campaigns' && <CampaignsTab did={c.id} />}
 
       {editOpen && (
         <DivisionEditModal division={c}
@@ -603,49 +620,3 @@ function ReadOnlyNode({ node, depth = 0 }) {
   );
 }
 
-function BrandsTab({ did }) {
-  const { data, loading, error, run } = useAsync(() => api(`/api/v1/superadmin/divisions/${did}/brands`));
-  if (loading) return <TableSkeleton cols={5} rows={4} />;
-  if (error) return <ErrorBox error={error} onRetry={run} />;
-  const cols = [
-    { key: 'name', label: 'Brand', render: (r) => <strong>{r.name}</strong> },
-    { key: 'code', label: 'Code', render: (r) => r.code ? <code>{r.code}</code> : '—' },
-    { key: 'status', label: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
-    { key: 'description', label: 'Description' },
-    { key: 'created_at', label: 'Created', render: (r) => fmtDateTime(r.created_at) },
-  ];
-  return (
-    <div className="card">
-      <h4 className="section-title">Brands</h4>
-      <Table cols={cols} rows={data || []} keyOf={(r) => r.id} empty="No brands yet" />
-    </div>
-  );
-}
-
-function CampaignsTab({ did }) {
-  const [q, setQ] = useState('');
-  const { data, loading, error, run } = useAsync(
-    () => api(`/api/v1/superadmin/divisions/${did}/campaigns?q=${encodeURIComponent(q)}`),
-    [did, q]);
-  if (loading) return <TableSkeleton cols={7} rows={5} />;
-  if (error) return <ErrorBox error={error} onRetry={run} />;
-  const campaigns = data?.items || [];
-  const cols = [
-    { key: 'name', label: 'Campaign', render: (r) => <strong>{r.name}</strong> },
-    { key: 'status', label: 'Status', render: (r) => <Badge tone={r.status || 'active'}>{r.status || 'active'}</Badge> },
-    { key: 'active', label: 'Active', render: (r) => r.active ? <Badge tone="green">yes</Badge> : <Badge tone="gray">no</Badge> },
-    { key: 'brand_names', label: 'Brands', render: (r) => (r.brand_names || []).join(', ') || '—' },
-    { key: 'product_count', label: 'Products' },
-    { key: 'pob_count', label: 'POBs' },
-    { key: 'created_at', label: 'Created', render: (r) => fmtDateTime(r.created_at) },
-  ];
-  return (
-    <div className="card">
-      <div className="toolbar">
-        <SearchBox value={q} onChange={setQ} placeholder="Search campaigns…" />
-        <span className="muted">{campaigns.length} campaign{campaigns.length === 1 ? '' : 's'}</span>
-      </div>
-      <Table cols={cols} rows={campaigns} keyOf={(r) => r.id} empty="No campaigns yet" />
-    </div>
-  );
-}

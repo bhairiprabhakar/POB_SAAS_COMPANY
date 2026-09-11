@@ -12,6 +12,9 @@ export default function SuperAdminLogin() {
 
   useEffect(() => {
     api('/api/v1/auth/platform-branding').then(setBrand).catch(() => {});
+    api('/api/v1/auth/register-status')
+      .then((d) => { if (d.registration_open) nav('/register', { replace: true }); })
+      .catch(() => {});
   }, []);
 
   const submit = async (e) => {
@@ -29,7 +32,9 @@ export default function SuperAdminLogin() {
         refresh: d.refresh_token,
         user: d.user,
       });
-      nav('/superadmin', { replace: true });
+      const role = d.user?.role || 'full';
+      const home = { campaign_admin: '/superadmin/campaigns', finance_admin: '/superadmin/gratification', verification_admin: '/superadmin/pob' };
+      nav(home[role] || '/superadmin', { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -60,6 +65,9 @@ export default function SuperAdminLogin() {
         <button className="btn btn-primary btn-block" disabled={busy}>
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
+        <div className="auth-links">
+          <Link to="/register">Set up a new company</Link>
+        </div>
         <div className="auth-links">
           <Link to="/login">Company sign in</Link>
         </div>

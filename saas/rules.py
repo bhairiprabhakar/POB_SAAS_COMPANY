@@ -367,6 +367,19 @@ def create_gratification(conn, pob_id: int, user_id: int, campaign_id: int,
 
     conn.commit()
 
+    try:
+        from . import platform_notify
+        cc = conn.cursor()
+        cc.execute("SELECT current_database()")
+        tenant_db = cc.fetchone()[0]
+        for _uid, _gid, _decision in created:
+            platform_notify.notify_event(
+                "gratification.eligible", "Gratification eligible for payout",
+                f"Gratification #{_gid} (type: {_decision.get('action')}) is eligible.",
+                "/superadmin/gratification", tenant_db=tenant_db)
+    except Exception:
+        pass
+
     for uid, gid, decision in created:
         if uid == pob_id:
             return gid, decision

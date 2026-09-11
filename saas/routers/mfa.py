@@ -53,7 +53,7 @@ def mfa_enable(body: dict, ctx: TenantContext = Depends(require_permission("mfa.
     if not totp.verify(secret, body.get("code") or ""):
         raise HTTPException(400, "Invalid code")
     c = conn.cursor()
-    c.execute("UPDATE users SET mfa_enabled=TRUE WHERE id=%s", (ctx.user["id"],))
+    c.execute("UPDATE users SET mfa_enabled=TRUE, mfa_setup_required=FALSE WHERE id=%s", (ctx.user["id"],))
     conn.commit()
     log_action(conn, ctx.user["id"], "mfa.enable", "user", ctx.user["id"])
     return {"ok": True, "enabled": True}

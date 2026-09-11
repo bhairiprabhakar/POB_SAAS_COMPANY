@@ -12,7 +12,7 @@ from ..audit import log_action
 from ..db_utils import fetchall_dict, fetchone_dict
 from ..deps import TenantContext, get_tenant_context, require_permission
 from ..rbac import list_all_permissions, load_role_permissions
-from ..scoping import division_scope
+from ..scoping import GLOBAL_ROLES, division_scope
 from ..upload_validation import SPREADSHEET_KINDS, UploadValidationError, validate_upload
 from ..pagination import PageLimit, PageOffset
 from .. import config
@@ -37,6 +37,7 @@ def roles(ctx: TenantContext = Depends(require_permission("user.view"))):
     items = fetchall_dict(c)
     for it in items:
         it["permissions"] = load_role_permissions(conn, it["id"])
+        it["global"] = it["name"] in GLOBAL_ROLES
     return {"items": items}
 
 
@@ -322,7 +323,17 @@ def create_user(body: dict, ctx: TenantContext = Depends(require_permission("use
     division = body.get("division")
     div = division_scope(conn, ctx)
     if div:
+        # explicit conflicting division -> reject rather than silently move
+        req_div = body.get("division_id")
+        try:
+            req_div = int(req_div) if req_div is not None else None
+        except (TypeError, ValueError):
+            req_div = None
+        if req_div is not None and req_div != div:
+            raise HTTPException(403, "You are not authorized to create users for this division")
         division_id = div  # division admins create users inside their division
+    if body.get("role_id") and div and _is_global_role(conn, body.get("role_id")):
+        raise HTTPException(403, "You are not authorized to assign that role")
     if division_id:
         c.execute("SELECT name FROM divisions WHERE id=%s", (division_id,))
         row = c.fetchone()
@@ -386,8 +397,10 @@ def update_user(uid: int, body: dict, ctx: TenantContext = Depends(require_permi
     conn = ctx.conn
     c = conn.cursor()
     c.execute("SELECT * FROM users WHERE id=%s", (uid,))
-    if not c.fetchone():
+    row = fetchone_dict(c)
+    if not row:
         raise HTTPException(404, "user not found")
+    current_role_id = row.get("role_id")
     if body.get("division_id"):
         c.execute("SELECT name FROM divisions WHERE id=%s", (body["division_id"],))
         row = c.fetchone()
@@ -427,6 +440,13 @@ def update_user(uid: int, body: dict, ctx: TenantContext = Depends(require_permi
         c.execute("SELECT id FROM roles WHERE id=%s", (body["role_id"],))
         if not c.fetchone():
             raise HTTPException(400, "invalid role_id")
+        if div and _is_global_role(conn, body["role_id"]) and body["role_id"] != current_role_id:
+            raise HTTPException(403, "You are not authorized to assign that role")
+    if div and body.get("parent_id") is not None:
+        c.execute("SELECT division_id FROM users WHERE id=%s", (body["parent_id"],))
+        prow = c.fetchone()
+        if prow and prow[0] != div:
+            raise HTTPException(403, "parent user must be in your division")
     if not sets:
         raise HTTPException(400, "Nothing to update")
     params.append(uid)
@@ -439,6 +459,37 @@ def update_user(uid: int, body: dict, ctx: TenantContext = Depends(require_permi
         sync_user(ctx.claims.get("tenant_db") or "", u[0], uid, email=u[1], mobile=u[2])
     log_action(conn, ctx.user["id"], "user.update", "user", uid)
     return get_user(uid, ctx)
+
+
+@router.post("/users/{uid}/reset-password")
+def reset_user_password(uid: int, ctx: TenantContext = Depends(require_permission("user.manage"))):
+    """Reset an employee's password to a random temporary one.
+
+    The affected account is flagged must_change_password so the user is forced to
+    choose their own password at next sign-in, and all existing sessions are
+    revoked. The temporary password is returned exactly once.
+    """
+    conn = ctx.conn
+    c = conn.cursor()
+    c.execute("SELECT * FROM users WHERE id=%s", (uid,))
+    user = fetchone_dict(c)
+    if not user:
+        raise HTTPException(404, "user not found")
+    div = division_scope(conn, ctx)
+    if div and user.get("division_id") != div:
+        raise HTTPException(403, "user does not belong to your division")
+    if uid == ctx.user.get("id"):
+        raise HTTPException(400, "you cannot reset your own password")
+    from ..provision import generate_temp_password
+    from ..security import revoke_all_for_user
+    temp = generate_temp_password()
+    c.execute("UPDATE users SET password=%s, must_change_password=TRUE WHERE id=%s",
+              (hash_pw(temp), uid))
+    revoke_all_for_user(conn, uid)
+    conn.commit()
+    log_action(conn, ctx.user["id"], "user.reset_password", "user", uid,
+               {"username": user.get("username")})
+    return {"ok": True, "temp_password": temp, "must_change_password": True}
 
 
 @router.delete("/users/{uid}")
@@ -488,6 +539,7 @@ async def bulk_upload_users(file: UploadFile = File(...),
     generated = []
     user_ids = {}
     user_contacts = {}
+    user_divisions = {}  # username -> division_id (used to block cross-division parents)
 
     def col(d, name):
         v = d.get(name)
@@ -500,7 +552,6 @@ async def bulk_upload_users(file: UploadFile = File(...),
         d = {headers[j]: (row[j] if j < len(row) else None) for j in range(len(headers))}
         username = col(d, "username")
         full_name = col(d, "full_name")
-        password = col(d, "password") or secrets.token_hex(6)
         if not username or not full_name:
             errors.append(f"row {i}: username and full_name required")
             continue
@@ -515,22 +566,43 @@ async def bulk_upload_users(file: UploadFile = File(...),
                 errors.append(f"row {i}: unknown hierarchy_level '{col(d, 'hierarchy_level')}' (use MR/ASM/RSM/SM/ZSM/NSM/HO)")
             if d.get("role") and not role_id:
                 errors.append(f"row {i}: unknown role '{col(d, 'role')}'")
-            division = _resolve_division(conn, d.get("division"))
-            division_id = _resolve_division_id(conn, d.get("division")) or division_scope(conn, ctx)
+            act_div = division_scope(conn, ctx)
+            uploaded_div_id = _resolve_division_id(conn, d.get("division")) if col(d, "division") else None
+            if col(d, "division") and not uploaded_div_id:
+                errors.append(f"row {i}: unknown division '{col(d, 'division')}'")
+                continue
+            if act_div:
+                # a division-scoped actor is bound to their own division: the
+                # Excel `division` column must not move users across divisions
+                if uploaded_div_id and uploaded_div_id != act_div:
+                    errors.append(f"row {i}: You are not authorized to create users for this division")
+                    continue
+                division_id = act_div
+                division = _division_name(conn, act_div)
+            else:
+                division_id = uploaded_div_id
+                division = _resolve_division(conn, d.get("division"))
+            if act_div and role_id and _is_global_role(conn, role_id):
+                errors.append(f"row {i}: You are not authorized to assign the '{col(d, 'role')}' role")
+                continue
+            must_change = not bool(col(d, "password"))
+            password = col(d, "password") or secrets.token_hex(6)
             c.execute(
                 """INSERT INTO users (username, password, full_name, email, mobile, employee_id,
-                   division, division_id, hierarchy_level_id, role_id, region, area, territory)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                   division, division_id, hierarchy_level_id, role_id, region, area, territory,
+                   must_change_password)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                 (username, hash_pw(password), full_name, d.get("email"), col(d, "mobile"),
                  col(d, "employee_id"), division, division_id, level_id, role_id,
-                 d.get("region"), d.get("area"), d.get("territory")),
+                 d.get("region"), d.get("area"), d.get("territory"), must_change),
             )
             user_ids[username] = c.fetchone()[0]
+            user_divisions[username] = division_id
             user_contacts[username] = (d.get("email"), col(d, "mobile"))
             created += 1
             if not col(d, "password"):
                 generated.append({"username": username, "full_name": full_name,
-                                  "temp_password": password})
+                                  "temp_password": password, "must_change_password": True})
         except Exception as exc:
             errors.append(f"row {i}: {exc}")
 
@@ -547,6 +619,13 @@ async def bulk_upload_users(file: UploadFile = File(...),
         if pid is None:
             errors.append(f"row {i}: parent_username '{parent}' not found in file or system")
             continue
+        child_div = user_divisions.get(username)
+        if child_div is not None:
+            c.execute("SELECT division_id FROM users WHERE id=%s", (pid,))
+            prow = c.fetchone()
+            if prow and prow[0] != child_div:
+                errors.append(f"row {i}: parent_username '{parent}' is in a different division")
+                continue
         c.execute("UPDATE users SET parent_id=%s WHERE id=%s", (pid, user_ids[username]))
 
     conn.commit()
@@ -575,6 +654,30 @@ def _resolve_role(conn, value):
     value = str(value).strip()
     c = conn.cursor()
     c.execute("SELECT id FROM roles WHERE lower(name)=lower(%s)", (value,))
+    row = c.fetchone()
+    return row[0] if row else None
+
+
+def _is_global_role(conn, role_id) -> bool:
+    """True when role_id names a platform-wide role.
+
+    The roles table has no scope column, so the known platform role names are
+    the source of truth: a division-scoped actor must never be able to hand
+    out a role that sees every division's data (campaignos_admin, verifier,
+    auditor, finance)."""
+    if not role_id:
+        return False
+    c = conn.cursor()
+    c.execute("SELECT lower(name) FROM roles WHERE id=%s", (role_id,))
+    row = c.fetchone()
+    return bool(row and row[0] in GLOBAL_ROLES)
+
+
+def _division_name(conn, division_id):
+    if not division_id:
+        return None
+    c = conn.cursor()
+    c.execute("SELECT name FROM divisions WHERE id=%s", (division_id,))
     row = c.fetchone()
     return row[0] if row else None
 
@@ -622,3 +725,78 @@ def bulk_template(ctx: TenantContext = Depends(require_permission("user.manage")
     from fastapi.responses import StreamingResponse
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                              headers={"Content-Disposition": "attachment; filename=users_template.xlsx"})
+
+
+@router.get("/my-division")
+def my_division(ctx: TenantContext = Depends(require_permission("dashboard.view"))):
+    """The tenant's own division profile plus headline counts — the data behind
+    the layout's 'My Division' page."""
+    c = ctx.conn.cursor()
+    c.execute("SELECT * FROM divisions ORDER BY id LIMIT 1")
+    div = fetchone_dict(c)
+    if not div:
+        raise HTTPException(404, "Division not set up")
+
+    def _count(sql):
+        c.execute(sql)
+        return int((c.fetchone() or [0])[0] or 0)
+
+    div["user_count"] = _count("SELECT count(*) FROM users")
+    div["active_user_count"] = _count("SELECT count(*) FROM users WHERE status='active'")
+    div["campaign_count"] = _count("SELECT count(*) FROM campaigns")
+    div["active_campaign_count"] = _count("SELECT count(*) FROM campaigns WHERE status='active'")
+    div["chemist_count"] = _count("SELECT count(*) FROM chemists")
+    div["pob_count"] = _count("SELECT count(*) FROM pob_activities")
+    div["verified_pob_count"] = _count(
+        "SELECT count(*) FROM pob_activities WHERE status IN ('verified','approved')")
+    div["gratification_count"] = _count("SELECT count(*) FROM gratifications")
+    return {"division": div}
+
+
+@router.get("/teams")
+def teams(ctx: TenantContext = Depends(require_permission("user.view"))):
+    """Manager-centric team view: every user with reports, plus the size and
+    the direct-report list of each team. Field users without reports are
+    included as their own one-person team."""
+    c = ctx.conn.cursor()
+    c.execute(
+        """SELECT u.id, u.username, u.full_name, COALESCE(r.name, '—') AS role,
+                  COALESCE(u.region, ''), COALESCE(u.area, ''), u.status, u.parent_id
+           FROM users u LEFT JOIN roles r ON r.id=u.role_id
+           ORDER BY COALESCE(u.parent_id, 0), u.id""")
+    rows = fetchall_dict(c)
+    by_id = {r["id"]: r for r in rows}
+    reports_by: dict = {}
+    for r in rows:
+        if r["parent_id"]:
+            reports_by.setdefault(r["parent_id"], []).append(r)
+
+    teams_out, seen = [], set()
+    for pid, members in sorted(reports_by.items()):
+        if pid not in by_id:
+            continue
+        mgr = by_id[pid]
+        seen.add(pid)
+        for m in members:
+            seen.add(m["id"])
+        teams_out.append({
+            "manager_id": pid, "manager_name": mgr["full_name"],
+            "manager_username": mgr["username"], "manager_role": mgr["role"],
+            "size": len(members), "members": members,
+        })
+    for r in rows:
+        if r["id"] in seen:
+            continue
+        seen.add(r["id"])
+        teams_out.append({
+            "manager_id": r["id"], "manager_name": r["full_name"],
+            "manager_username": r["username"], "manager_role": r["role"],
+            "size": 1, "members": [r],
+        })
+    teams_out.sort(key=lambda t: t["manager_name"] or "")
+    counts = {
+        "teams": len(teams_out),
+        "managed": len([t for t in teams_out if t["size"] > 1]),
+        "members": len(rows),
+    }
+    return {"teams": teams_out, "counts": counts}

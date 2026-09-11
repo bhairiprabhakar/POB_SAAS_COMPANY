@@ -19,8 +19,21 @@ from ..notify import notify_from_template
 from ..scoping import visible_user_ids
 from ..upload_validation import IMAGE_KINDS, UploadValidationError, validate_upload
 from ..pagination import PageLimit, PageOffset
+from ..upi import mask_upi_id
 
 router = APIRouter(prefix="/api/v1", tags=["gratification"])
+
+
+def _mask_payment_fields(ctx: TenantContext, rows: list[dict]) -> list[dict]:
+    """Obscure payment-sensitive UPI addresses unless the caller is allowed to
+    manage or pay gratifications (field staff can see their eligibility but not
+    another party's full payment address)."""
+    if ctx.perms & {"gratification.pay", "gratification.manage"}:
+        return rows
+    for r in rows:
+        if r.get("upi_id"):
+            r["upi_id"] = mask_upi_id(r["upi_id"])
+    return rows
 
 
 # ── Gratification types (dropdown master) ──────────────────────────────────
@@ -40,12 +53,37 @@ def create_gratification_type(body: dict, ctx: TenantContext = Depends(require_p
         raise HTTPException(400, "code and name required")
     conn = ctx.conn
     c = conn.cursor()
-    c.execute("INSERT INTO gratification_types (code, name, description) VALUES (%s,%s,%s) "
-              "ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name RETURNING id",
-              (code, body["name"], body.get("description")))
+    c.execute("""INSERT INTO gratification_types
+                 (code, name, description, min_value, max_value, requires_approval, fulfilment_method, active)
+                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                 ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name RETURNING id""",
+              (code, body["name"], body.get("description"),
+               body.get("min_value") or 0, body.get("max_value"),
+               body.get("requires_approval", False), body.get("fulfilment_method"),
+               body.get("active", True)))
     tid = c.fetchone()[0]
     conn.commit()
     return {"ok": True, "id": tid}
+
+
+@router.put("/gratification/types/{tid}")
+def update_gratification_type(tid: int, body: dict,
+                              ctx: TenantContext = Depends(require_permission("gratification.manage"))):
+    conn = ctx.conn
+    c = conn.cursor()
+    fields = ["name", "description", "min_value", "max_value", "requires_approval",
+              "fulfilment_method", "active"]
+    sets, params = [], []
+    for f in fields:
+        if f in body and body[f] is not None:
+            sets.append(f"{f}=%s")
+            params.append(body[f])
+    if not sets:
+        raise HTTPException(400, "Nothing to update")
+    params.append(tid)
+    c.execute(f"UPDATE gratification_types SET {', '.join(sets)} WHERE id=%s", params)
+    conn.commit()
+    return {"ok": True}
 
 
 # ── Gifts master ────────────────────────────────────────────────────────────
@@ -153,7 +191,7 @@ def list_gratifications(status: str = "", campaign_id: int = None, type_code: st
     params = list(params) + [limit, offset]
     c = conn.cursor()
     c.execute(sql, params)
-    return {"items": fetchall_dict(c)}
+    return {"items": _mask_payment_fields(ctx, fetchall_dict(c))}
 
 
 @router.get("/gratification/{gid}")
@@ -170,7 +208,7 @@ def get_gratification(gid: int, ctx: TenantContext = Depends(require_permission(
         raise HTTPException(403, "not allowed to view this gratification")
     c.execute("SELECT * FROM gratification_events WHERE gratification_id=%s ORDER BY id", (gid,))
     row["events"] = fetchall_dict(c)
-    return row
+    return _mask_payment_fields(ctx, [row])[0]
 
 
 def _transition(conn, gid, event, detail, actor_id, new_status=None, updates=None):

@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api';
-import { Field, PageHeader, Select, TextInput, toast } from '../../ui';
+import { Field, Modal, PageHeader, Select, TextInput, toast } from '../../ui';
 
 const BLANK = {
   name: '', shop_name: '', owner_name: '', mobile: '', alternate_mobile: '', email: '',
   gst: '', dl_number: '', upi_id: '', ocid: '', doctor_name: '', category: '', area: '',
   address: '', city: '', district: '', state: '', pin: '', latitude: '', longitude: '',
+  attachment_type: '', potential_category: '', institution_name: '', institution_type: '',
+  institution_department: '', institution_contact_person: '', institution_address: '',
+  monthly_business_potential: '', estimated_monthly_sales: '', brand_potential: '',
+  strategic_importance: '', last_visit_date: '', visit_frequency: '',
   status: 'active',
 };
 
@@ -33,7 +37,13 @@ export default function RegisterChemist({ demo }) {
   const [posts, setPosts] = useState(null);
   const [lookup, setLookup] = useState('idle');
   const [looking, setLooking] = useState(null);
+  const [dups, setDups] = useState(null);
+  const [masters, setMasters] = useState({ attachment_types: [], potential_categories: [] });
   const set = (k) => (e) => setF((p) => ({ ...p, [k]: e.target.value }));
+
+  useEffect(() => {
+    api('/api/v1/chemist-masters').then(setMasters).catch(() => {});
+  }, []);
 
   const applyPostOffice = (po) => {
     setF((p) => ({ ...p, city: po.city, district: po.district, state: po.state }));
@@ -86,21 +96,34 @@ export default function RegisterChemist({ demo }) {
       if (demo) {
         await new Promise((r) => setTimeout(r, 400));
         toast('Test mode: chemist details are valid and would be saved. Nothing was written to the database.', 'success');
-        setF({ ...BLANK });
-        setPosts(null);
-        setLookup('idle');
-        setLooking(null);
+        reset();
         return;
       }
+      const body = { ...f, latitude: f.latitude === '' ? null : f.latitude, longitude: f.longitude === '' ? null : f.longitude };
+      const r = await api('/api/v1/chemists', { method: 'POST', body });
+      if (r?.ok === false) { setDups(r.duplicates || []); return; }
+      toast('Chemist registered', 'success');
+      reset();
+    } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
+  };
+
+  const reset = () => {
+    setF({ ...BLANK });
+    setPosts(null);
+    setLookup('idle');
+    setLooking(null);
+    setDups(null);
+  };
+
+  const forceRegister = async () => {
+    setBusy(true);
+    try {
       await api('/api/v1/chemists', {
         method: 'POST',
-        body: { ...f, latitude: f.latitude === '' ? null : f.latitude, longitude: f.longitude === '' ? null : f.longitude },
+        body: { ...f, duplicate_checks: [], latitude: f.latitude === '' ? null : f.latitude, longitude: f.longitude === '' ? null : f.longitude },
       });
       toast('Chemist registered', 'success');
-      setF({ ...BLANK });
-      setPosts(null);
-      setLookup('idle');
-      setLooking(null);
+      reset();
     } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
   };
 
@@ -179,6 +202,52 @@ export default function RegisterChemist({ demo }) {
           )}
           <p className="field-hint" style={{ marginTop: 8 }}>New chemists are registered with status <strong>active</strong> by default.</p>
 
+          <h4 className="section-title" style={{ marginTop: 18 }}>Classification &amp; potential</h4>
+          <div className="grid-2">
+            <Field label="Attachment type" hint="Hospital, retail, chain, online pharmacy…">
+              <Select value={f.attachment_type || ''} onChange={set('attachment_type')}
+                options={(masters.attachment_types || []).map((m) => ({ value: m.code, label: `${m.name} (${m.code})` }))} />
+            </Field>
+            <Field label="Potential category">
+              <Select value={f.potential_category || ''} onChange={set('potential_category')}
+                options={(masters.potential_categories || []).map((m) => ({ value: m.code, label: `${m.name} (${m.code})` }))} />
+            </Field>
+            <Field label="Institution name" hint="For hospital / nursing home chemists">
+              <TextInput value={f.institution_name || ''} onChange={set('institution_name')} />
+            </Field>
+            <Field label="Institution type">
+              <TextInput value={f.institution_type || ''} onChange={set('institution_type')} />
+            </Field>
+            <Field label="Department">
+              <TextInput value={f.institution_department || ''} onChange={set('institution_department')} />
+            </Field>
+            <Field label="Contact person">
+              <TextInput value={f.institution_contact_person || ''} onChange={set('institution_contact_person')} />
+            </Field>
+            <Field label="Institution address" className="span-2">
+              <TextInput value={f.institution_address || ''} onChange={set('institution_address')} />
+            </Field>
+            <Field label="Monthly business potential (INR)">
+              <TextInput type="number" min="0" value={f.monthly_business_potential || ''} onChange={set('monthly_business_potential')} />
+            </Field>
+            <Field label="Estimated monthly sales (INR)">
+              <TextInput type="number" min="0" value={f.estimated_monthly_sales || ''} onChange={set('estimated_monthly_sales')} />
+            </Field>
+            <Field label="Brand potential">
+              <TextInput value={f.brand_potential || ''} onChange={set('brand_potential')} />
+            </Field>
+            <Field label="Strategic importance">
+              <TextInput value={f.strategic_importance || ''} onChange={set('strategic_importance')} />
+            </Field>
+            <Field label="Visit frequency">
+              <Select value={f.visit_frequency || ''} onChange={set('visit_frequency')} placeholder="— select —"
+                options={['daily', 'weekly', 'monthly', 'quarterly'].map((o) => ({ value: o, label: o }))} />
+            </Field>
+            <Field label="Last visit date">
+              <TextInput type="date" value={f.last_visit_date || ''} onChange={set('last_visit_date')} />
+            </Field>
+          </div>
+
           <div className="page-actions" style={{ marginTop: 18 }}>
             <button type="button" className="btn" onClick={() => !demo && navigate('/app/chemists')}>Cancel</button>
             <button type="submit" className="btn btn-primary" disabled={busy}>
@@ -187,6 +256,31 @@ export default function RegisterChemist({ demo }) {
           </div>
         </form>
       </div>
+
+      {dups && (
+        <Modal open title="A chemist like this already exists" onClose={() => setDups(null)}
+          footer={
+            <>
+              <button className="btn" onClick={() => !demo && navigate('/app/chemists')}>View existing</button>
+              <button className="btn btn-primary" onClick={forceRegister} disabled={busy}>
+                {busy ? 'Registering…' : 'Register anyway (new shop)'}
+              </button>
+            </>
+          }>
+          <p className="muted">We found existing chemist(s) matching the details you entered. Re-check to avoid registering the same shop twice.</p>
+          <div className="card" style={{ marginTop: 12 }}>
+            {dups.map((d, i) => (
+              <div key={i} className="dup-item" style={{ padding: '8px 0', borderBottom: i < dups.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                <strong>{d.chemist.name}</strong>{d.chemist.shop_name ? ` — ${d.chemist.shop_name}` : ''}
+                {d.chemist.city ? `, ${d.chemist.city}` : ''}
+                <div className="muted" style={{ fontSize: 12 }}>
+                  Matched on {d.rule.replace('_', ' ')}{d.chemist.mobile ? ` · ☎ ${d.chemist.mobile}` : ''} · #{d.chemist.id}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import PobDetailUser from './PobDetailUser';
 import { api, downloadFile, fmtDateTime, fmtMoney, getSession, uploadFile } from '../../api';
 import {
@@ -7,8 +8,14 @@ import {
 } from '../../ui';
 import { InvoiceProofReport, InvoiceSummaryReport, VerificationStatusBadge } from '../../InvoiceProofReport';
 
+const POB_TABS = ['all', 'pending_verification', 'verified', 'rejected', 'duplicate', 'needs_review'];
+
 export default function Pobs({ mine }) {
-  const [status, setStatus] = useState('all');
+  const [params] = useSearchParams();
+  const [status, setStatus] = useState(() => {
+    const t = params.get('status');
+    return POB_TABS.includes(t) ? t : 'all';
+  });
   const [q, setQ] = useState('');
   const [selected, setSelected] = useState(null);
   const [exportOpen, setExportOpen] = useState(false);

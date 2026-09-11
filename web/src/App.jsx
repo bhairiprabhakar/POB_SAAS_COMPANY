@@ -4,7 +4,9 @@ import { api, clearSession, getSession, tenantLoginPath } from './api';
 import { AppShell, Toaster, toast } from './ui';
 import Login from './pages/Login';
 import SuperAdminLogin from './pages/SuperAdminLogin';
+import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
+import ChangePassword from './pages/ChangePassword';
 import SuperDashboard from './pages/superadmin/Dashboard';
 import Divisions from './pages/superadmin/Divisions';
 import DivisionDetail from './pages/superadmin/DivisionDetail';
@@ -27,12 +29,24 @@ import Masters from './pages/app/Masters';
 import Chemists from './pages/app/Chemists';
 import RegisterChemist from './pages/app/RegisterChemist';
 import Profile from './pages/app/Profile';
+import Onboarding from './pages/app/Onboarding';
 import Audit from './pages/app/Audit';
 import Security from './pages/app/Security';
 import Jobs from './pages/app/Jobs';
 import SuperAnalytics from './pages/superadmin/Analytics';
 import Costing from './pages/superadmin/Costing';
 import PlatformSettings from './pages/superadmin/PlatformSettings';
+import CompanyProfile from './pages/superadmin/CompanyProfile';
+import SuperCampaigns from './pages/superadmin/Campaigns';
+import PobOperations from './pages/superadmin/PobOperations';
+import SuperGratification from './pages/superadmin/Gratification';
+import SuperUsers from './pages/superadmin/Users';
+import PlatformAdmins from './pages/superadmin/PlatformAdmins';
+import MyDivision from './pages/app/MyDivision';
+import Teams from './pages/app/Teams';
+import Regions from './pages/app/Regions';
+import Products from './pages/app/Products';
+import Gifts from './pages/app/Gifts';
 import ErrorBoundary from './ErrorBoundary';
 import ManageCampaigns from './pages/app/ManageCampaigns';
 import ManageBrands from './pages/app/ManageBrands';
@@ -42,6 +56,15 @@ function ProtectedTenant({ children }) {
   const s = getSession();
   const loc = useLocation();
   if (!s || s.kind !== 'tenant') return <Navigate to={tenantLoginPath()} replace />;
+  // First-login onboarding gates a freshly invited division admin behind
+  // TOTP enrollment + profile completion before the dashboard is reachable.
+  const onboarding = s.user?.onboarding;
+  if (onboarding && !loc.pathname.startsWith('/app/onboarding')) {
+    return <Navigate to={`/app/onboarding/${onboarding}`} replace />;
+  }
+  if (!onboarding && loc.pathname.startsWith('/app/onboarding')) {
+    return <Navigate to="/app" replace />;
+  }
   // Masters (divisions/brands/campaigns/products/gifts/gratification types)
   // are super-admin-managed; division admins don't get them. The Chemists page
   // is a first-class nav item (scoped per division), so it stays accessible.
@@ -63,6 +86,14 @@ function ProtectedTenant({ children }) {
 function ProtectedSuper({ children }) {
   const s = getSession();
   if (!s || s.kind !== 'sa') return <Navigate to="/superadmin-login" replace />;
+  const role = s.user?.role || 'full';
+  const home = { campaign_admin: '/superadmin/campaigns', finance_admin: '/superadmin/gratification', verification_admin: '/superadmin/pob' }[role];
+  if (home) {
+    const path = window.location.pathname;
+    const allowed = [home, '/superadmin'];
+    if (role === 'campaign_admin') allowed.push('/superadmin/analytics');
+    if (!allowed.includes(path)) return <Navigate to={home} replace />;
+  }
   return children;
 }
 
@@ -94,7 +125,20 @@ function LoginOrApp() {
   const s = getSession();
   if (s?.kind === 'sa') return <Navigate to="/superadmin" replace />;
   if (s?.kind === 'tenant') return <Navigate to="/app" replace />;
-  return <Navigate to={tenantLoginPath()} replace />;
+  return <StartGate />;
+}
+
+// Unsigned visitors on "/" land on registration when the platform has no
+// company yet (first run), otherwise on the company sign-in page.
+function StartGate() {
+  const [regOpen, setRegOpen] = useState(null);
+  useEffect(() => {
+    api('/api/v1/auth/register-status')
+      .then((d) => setRegOpen(Boolean(d.registration_open)))
+      .catch(() => setRegOpen(false));
+  }, []);
+  if (regOpen === null) return null;
+  return regOpen ? <Navigate to="/register" replace /> : <Navigate to={tenantLoginPath()} replace />;
 }
 
 export default function App() {
@@ -107,7 +151,9 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/login/:divisionSlug" element={<Login />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/change-password" element={<ChangePassword />} />
           <Route path="/superadmin-login" element={<SuperAdminLogin />} />
+          <Route path="/register" element={<Register />} />
           <Route path="/" element={<LoginOrApp />} />
 
         <Route path="/superadmin" element={
@@ -122,21 +168,57 @@ export default function App() {
         <Route path="/superadmin/analytics" element={
           <ProtectedSuper><AppShell kind="sa"><SuperAnalytics /></AppShell></ProtectedSuper>
         } />
+        <Route path="/superadmin/campaigns" element={
+          <ProtectedSuper><AppShell kind="sa"><SuperCampaigns /></AppShell></ProtectedSuper>
+        } />
+        <Route path="/superadmin/pob" element={
+          <ProtectedSuper><AppShell kind="sa"><PobOperations /></AppShell></ProtectedSuper>
+        } />
+        <Route path="/superadmin/gratification" element={
+          <ProtectedSuper><AppShell kind="sa"><SuperGratification /></AppShell></ProtectedSuper>
+        } />
+        <Route path="/superadmin/users" element={
+          <ProtectedSuper><AppShell kind="sa"><SuperUsers /></AppShell></ProtectedSuper>
+        } />
+        <Route path="/superadmin/admins" element={
+          <ProtectedSuper><AppShell kind="sa"><PlatformAdmins /></AppShell></ProtectedSuper>
+        } />
         <Route path="/superadmin/costing" element={
           <ProtectedSuper><AppShell kind="sa"><Costing /></AppShell></ProtectedSuper>
         } />
         <Route path="/superadmin/audit" element={
           <ProtectedSuper><AppShell kind="sa"><AuditLog /></AppShell></ProtectedSuper>
         } />
-        <Route path="/superadmin/settings" element={
+        <Route path="/superadmin/company" element={
+          <ProtectedSuper><AppShell kind="sa"><CompanyProfile /></AppShell></ProtectedSuper>
+        } />
+        <Route path="/superadmin/platform-settings" element={
           <ProtectedSuper><AppShell kind="sa"><PlatformSettings /></AppShell></ProtectedSuper>
         } />
 
+        <Route path="/app/onboarding/:step" element={
+          <ProtectedTenant><AppShell kind="tenant"><Onboarding /></AppShell></ProtectedTenant>
+        } />
         <Route path="/app" element={
           <ProtectedTenant><AppShell kind="tenant"><Home /></AppShell></ProtectedTenant>
         } />
         <Route path="/app/admin" element={
           <ProtectedTenant><AppShell kind="tenant"><AdminDashboard /></AppShell></ProtectedTenant>
+        } />
+        <Route path="/app/my-division" element={
+          <ProtectedTenant><AppShell kind="tenant"><MyDivision /></AppShell></ProtectedTenant>
+        } />
+        <Route path="/app/teams" element={
+          <ProtectedTenant><AppShell kind="tenant"><Teams /></AppShell></ProtectedTenant>
+        } />
+        <Route path="/app/regions" element={
+          <ProtectedTenant><AppShell kind="tenant"><Regions /></AppShell></ProtectedTenant>
+        } />
+        <Route path="/app/products" element={
+          <ProtectedTenant><AppShell kind="tenant"><Products /></AppShell></ProtectedTenant>
+        } />
+        <Route path="/app/gifts" element={
+          <ProtectedTenant><AppShell kind="tenant"><Gifts /></AppShell></ProtectedTenant>
         } />
         <Route path="/app/pob/submit" element={
           <ProtectedTenant><AppShell kind="tenant"><SubmitPob /></AppShell></ProtectedTenant>

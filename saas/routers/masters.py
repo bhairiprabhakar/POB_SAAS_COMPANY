@@ -23,6 +23,7 @@ from ..db_utils import fetchall_dict, fetchone_dict
 from ..deps import TenantContext, require_permission
 from ..notify import notify_admins
 from ..scoping import division_scope, user_division_id, visible_user_ids
+from ..upi import mask_upi_id
 from ..upload_validation import IMAGE_KINDS, SPREADSHEET_KINDS, UploadValidationError, validate_upload
 from ..pagination import PageLimit, PageOffset
 
@@ -142,6 +143,11 @@ def delete_division(did: int, ctx: TenantContext = Depends(require_permission("b
 
 # ── Campaigns ───────────────────────────────────────────────────────────────
 
+@router.get("/campaigns/readiness")
+def campaign_readiness(ctx: TenantContext = Depends(require_permission("campaign.view"))):
+    return campaign_service.campaign_readiness(ctx.conn)
+
+
 @router.get("/campaigns")
 def list_campaigns(q: str = "", status: str = "", active: bool = None, brand_id: int = None,
                    division_id: int = None,
@@ -251,6 +257,14 @@ def get_campaign(cid: int, ctx: TenantContext = Depends(require_permission("camp
 @router.post("/campaigns")
 def create_campaign(body: dict, request: Request = None,
                     ctx: TenantContext = Depends(require_permission("campaign.manage"))):
+    readiness = campaign_service.campaign_readiness(ctx.conn)
+    if not readiness["ready"]:
+        missing = ", ".join(i["label"] for i in readiness["items"]
+                            if i["key"] in ("brands", "chemists", "gifts") and not i["ready"])
+        raise HTTPException(
+            409,
+            "Set up configuration before creating a campaign. Still missing: " + (missing or "—"),
+        )
     div = division_scope(ctx.conn, ctx)
     if div:
         body = {**body, "division_id": div}
@@ -270,6 +284,95 @@ def update_campaign(cid: int, body: dict, request: Request = None,
     notify_admins(ctx.conn, "campaign.updated", "Campaign updated",
                   f"Campaign #{cid} was updated.", "campaign", cid)
     return {"ok": True}
+
+
+@router.get("/campaigns/{cid}/assignment")
+def get_campaign_assignment(cid: int, ctx: TenantContext = Depends(require_permission("campaign.view"))):
+    div = division_scope(ctx.conn, ctx)
+    if div:
+        _assert_campaign_in_div(ctx.conn, cid, div)
+    return campaign_service.assignment_summary(ctx.conn, cid)
+
+
+@router.put("/campaigns/{cid}/assignment")
+def put_campaign_assignment(cid: int, body: dict,
+                            ctx: TenantContext = Depends(require_permission("campaign.manage"))):
+    div = division_scope(ctx.conn, ctx)
+    if div:
+        _assert_campaign_in_div(ctx.conn, cid, div)
+    rules = campaign_service.set_campaign_assignments(ctx.conn, cid, {"assignment": body}, _actor(ctx))
+    notify_admins(ctx.conn, "campaign.assigned", "Campaign assignments updated",
+                  f"Executing audience updated for campaign #{cid}.")
+    return {"ok": True, "rules": rules}
+
+
+@router.get("/campaigns/{cid}/eligible-chemist")
+def campaign_chemist_eligibility(cid: int, chemist_id: int,
+                                 ctx: TenantContext = Depends(require_permission("campaign.view"))):
+    """Is a chemist within this campaign's eligible chemist segment? Used by the
+    field team before submitting a POB; the same check is enforced server-side
+    on POST /pob/submit."""
+    div = division_scope(ctx.conn, ctx)
+    if div:
+        _assert_campaign_in_div(ctx.conn, cid, div)
+    return {"ok": True,
+            "eligibility": campaign_service.chemist_eligibility(ctx.conn, cid, chemist_id)}
+
+
+@router.post("/campaigns/{cid}/submit")
+def submit_campaign_for_approval(cid: int, request: Request = None,
+                                 ctx: TenantContext = Depends(require_permission("campaign.manage"))):
+    """Draft -> pending_approval. The campaign is not executable until approved."""
+    conn = ctx.conn
+    c = conn.cursor()
+    div = division_scope(conn, ctx)
+    if div:
+        _assert_campaign_in_div(conn, cid, div)
+    c.execute("SELECT id, status, name FROM campaigns WHERE id=%s", (cid,))
+    row = c.fetchone()
+    if not row:
+        raise HTTPException(404, "campaign not found")
+    if row[1] not in ("draft", "rejected"):
+        raise HTTPException(409, f"Only draft campaigns can be submitted for approval (current: {row[1]})")
+    c.execute("UPDATE campaigns SET status='pending_approval', submitted_at=CURRENT_TIMESTAMP, "
+              "submitted_by=%s, rejected_at=NULL, rejected_by=NULL, rejection_note=NULL WHERE id=%s",
+              (ctx.user.get("id"), cid))
+    conn.commit()
+    log_action(conn, ctx.user.get("id"), "campaign.submit", "campaign", cid,
+               request=request, actor=ctx.user.get("full_name") or f"#{cid}")
+    notify_admins(conn, "campaign.submitted", "Campaign submitted for approval",
+                  f"'{row[2]}' was submitted for approval.", "campaign", cid)
+    try:
+        from ..platform_notify import notify_event
+        notify_event("campaign.pending", "Campaign submitted for approval",
+                     f"'{row[2]}' is pending your approval.", "/superadmin/campaigns",
+                     tenant_db=ctx.claims.get("tenant_db"))
+    except Exception:
+        pass
+    return {"ok": True, "status": "pending_approval"}
+
+
+@router.post("/campaigns/{cid}/withdraw")
+def withdraw_campaign(cid: int, request: Request = None,
+                      ctx: TenantContext = Depends(require_permission("campaign.manage"))):
+    """Withdraw a pending campaign back to draft before a decision is made."""
+    conn = ctx.conn
+    c = conn.cursor()
+    div = division_scope(conn, ctx)
+    if div:
+        _assert_campaign_in_div(conn, cid, div)
+    c.execute("SELECT id, status, name FROM campaigns WHERE id=%s", (cid,))
+    row = c.fetchone()
+    if not row:
+        raise HTTPException(404, "campaign not found")
+    if row[1] != "pending_approval":
+        raise HTTPException(409, f"Only campaigns awaiting approval can be withdrawn (current: {row[1]})")
+    c.execute("UPDATE campaigns SET status='draft', submitted_at=NULL, submitted_by=NULL "
+              "WHERE id=%s", (cid,))
+    conn.commit()
+    log_action(conn, ctx.user.get("id"), "campaign.withdraw", "campaign", cid,
+               request=request, actor=ctx.user.get("full_name") or f"#{cid}")
+    return {"ok": True, "status": "draft"}
 
 
 @router.post("/campaigns/{cid}/extend")
@@ -450,11 +553,18 @@ def list_chemists(q: str = "", city: str = "", state: str = "", status: str = ""
     c.execute(sql, params + [limit, offset])
     items = fetchall_dict(c)
 
-    # Batch-fetch hierarchy chains for all chemists with a registered_by user
+# Batch-fetch hierarchy chains for all chemists with a registered_by user
     chemist_ids = [it["id"] for it in items if it.get("registered_by_name")]
     chains = _batch_hierarchy_chains(c, chemist_ids)
     for it in items:
         it["registered_by_hierarchy"] = chains.get(it["id"])
+    # Payment-sensitive field: end users who do not manage or pay gratifications
+    # only ever see a masked UPI address.
+    if not (ctx.perms & {"gratification.pay", "gratification.manage"}):
+        for it in items:
+            if it.get("upi_id"):
+                it["upi_id"] = mask_upi_id(it["upi_id"])
+
     return {"items": items}
 
 
@@ -510,9 +620,56 @@ def create_chemist(body: dict, ctx: TenantContext = Depends(require_permission("
         raise HTTPException(400, "chemist name required")
     conn = ctx.conn
     c = conn.cursor()
+    # Configurable duplicate detection: each enabled check looks for an existing
+    # chemist that already covers this chemist's identity, so the field team
+    # does not re-register the same shop. The frontend renders a picker.
+    checks = body.get("duplicate_checks")
+    if isinstance(checks, list) and checks:
+        enabled = {x for x in checks if x in ("mobile", "shop_pincode", "dl", "gst")}
+    else:
+        enabled = {"mobile", "shop_pincode", "dl", "gst"}
+    scoped_div = division_scope(conn, ctx)
+    dup_rules = []
+    mobile = (body.get("mobile") or "").strip()
+    if mobile and "mobile" in enabled:
+        dup_rules.append(("mobile", "mobile=%s", (mobile,)))
+    shop_name = (body.get("shop_name") or "").strip()
+    pin = (body.get("pin") or "").strip()
+    if shop_name and pin and "shop_pincode" in enabled:
+        dup_rules.append(("shop_pincode", "upper(shop_name)=%s AND pin=%s",
+                          (shop_name.upper(), pin)))
+    dl_number = (body.get("dl_number") or "").strip()
+    if dl_number and "dl" in enabled:
+        dup_rules.append(("dl", "upper(dl_number)=%s", (dl_number.upper(),)))
+    gst = (body.get("gst") or "").strip()
+    if gst and "gst" in enabled:
+        dup_rules.append(("gst", "upper(gst)=%s", (gst.upper(),)))
+    if dup_rules:
+        matches, seen = [], set()
+        for rule, cond, vals in dup_rules:
+            extra = " AND (division_id=%s OR division_id IS NULL)" if scoped_div else ""
+            params = list(vals) + ([scoped_div] if scoped_div else [])
+            sql = (f"SELECT id, name, shop_name, city, mobile FROM chemists "
+                   f"WHERE {cond}{extra} ORDER BY id")
+            c.execute(sql, params)
+            for row in c.fetchall():
+                if row[0] in seen:
+                    continue
+                seen.add(row[0])
+                matches.append({"rule": rule, "chemist": {
+                    "id": row[0], "name": row[1], "shop_name": row[2],
+                    "city": row[3], "mobile": row[4],
+                }})
+        if matches:
+            return {"ok": False, "duplicates": matches,
+                    "message": "A chemist matching this data already exists"}
     cols = ["name", "shop_name", "gst", "dl_number", "owner_name", "mobile", "alternate_mobile",
             "email", "address", "city", "district", "state", "pin", "latitude", "longitude",
-            "ocid", "doctor_name", "category", "area", "upi_id", "status"]
+            "ocid", "doctor_name", "category", "area", "upi_id", "status",
+            "attachment_type", "potential_category", "institution_name", "institution_type",
+            "institution_department", "institution_contact_person", "institution_address",
+            "monthly_business_potential", "estimated_monthly_sales", "brand_potential",
+            "strategic_importance", "last_visit_date", "visit_frequency"]
     vals = [body.get(col) for col in cols]
     vals[0] = name
     if not vals[20]:
@@ -528,9 +685,10 @@ def create_chemist(body: dict, ctx: TenantContext = Depends(require_permission("
         vals,
     )
     cid = c.fetchone()[0]
+    c.execute("UPDATE chemists SET chemist_code=%s WHERE id=%s", (f"CH-{cid:05d}", cid))
     conn.commit()
     log_action(conn, ctx.user["id"], "chemist.create", "chemist", cid, {"name": name})
-    return {"ok": True, "id": cid}
+    return {"ok": True, "id": cid, "chemist_code": f"CH-{cid:05d}"}
 
 
 @router.put("/chemists/{cid}")
@@ -539,7 +697,11 @@ def update_chemist(cid: int, body: dict, ctx: TenantContext = Depends(require_pe
     c = conn.cursor()
     fields = ["name", "shop_name", "gst", "dl_number", "owner_name", "mobile", "alternate_mobile",
               "email", "address", "city", "district", "state", "pin", "latitude", "longitude",
-              "ocid", "doctor_name", "category", "area", "upi_id", "status"]
+              "ocid", "doctor_name", "category", "area", "upi_id", "status",
+              "attachment_type", "potential_category", "institution_name", "institution_type",
+              "institution_department", "institution_contact_person", "institution_address",
+              "monthly_business_potential", "estimated_monthly_sales", "brand_potential",
+              "strategic_importance", "last_visit_date", "visit_frequency"]
     sets, params = [], []
     for f in fields:
         if f in body and body[f] is not None:
@@ -567,6 +729,93 @@ def delete_chemist(cid: int, ctx: TenantContext = Depends(require_permission("ch
     return {"ok": True}
 
 
+# ── Chemist classification masters ───────────────────────────────────────────
+# Attachment (institution) types + potential categories are company config,
+# seeded with sensible defaults. View is open to the field team so the
+# dropdowns on the chemist forms work; only managers edit them.
+
+_MASTER_TABLES = {
+    "attachment-types": "chemist_attachment_types",
+    "potential-categories": "chemist_potential_categories",
+}
+_MASTER_FIELDS = ["code", "name", "description", "active", "sort_order"]
+
+
+def _master_rows(conn, table: str, active: bool = None) -> list[dict]:
+    c = conn.cursor()
+    sql = f"SELECT * FROM {table}"
+    params = []
+    if active is not None:
+        sql += " WHERE active=%s"
+        params.append(active)
+    sql += " ORDER BY sort_order, name"
+    c.execute(sql, params)
+    return fetchall_dict(c)
+
+
+@router.get("/chemist-masters")
+def list_chemist_masters(active: bool = None,
+                         ctx: TenantContext = Depends(require_permission("chemist.classification.view"))):
+    conn = ctx.conn
+    return {
+        "attachment_types": _master_rows(conn, _MASTER_TABLES["attachment-types"], active),
+        "potential_categories": _master_rows(conn, _MASTER_TABLES["potential-categories"], active),
+    }
+
+
+@router.post("/chemist-masters/{kind}")
+def create_chemist_master(kind: str, body: dict,
+                          ctx: TenantContext = Depends(require_permission("chemist.classification.manage"))):
+    table = _MASTER_TABLES.get(kind)
+    if not table:
+        raise HTTPException(404, "unknown master kind")
+    code = (body.get("code") or "").strip().lower()
+    name = (body.get("name") or "").strip()
+    if not code or not name:
+        raise HTTPException(400, "code and name required")
+    if code in ("others", "not_defined"):
+        raise HTTPException(400, "reserved code")
+    conn = ctx.conn
+    c = conn.cursor()
+    c.execute(f"SELECT id FROM {table} WHERE code=%s", (code,))
+    if c.fetchone():
+        raise HTTPException(409, "code already exists")
+    c.execute(
+        f"INSERT INTO {table} (code, name, description, active, sort_order) VALUES (%s,%s,%s,%s,%s) RETURNING id",
+        (code, name, body.get("description"), body.get("active", True), body.get("sort_order") or 0))
+    mid = c.fetchone()[0]
+    conn.commit()
+    log_action(conn, ctx.user["id"], f"chemist_master.{kind}.create", "chemist",
+               mid, {"code": code, "name": name})
+    return {"ok": True, "id": mid}
+
+
+@router.put("/chemist-masters/{kind}/{mid}")
+def update_chemist_master(kind: str, mid: int, body: dict,
+                          ctx: TenantContext = Depends(require_permission("chemist.classification.manage"))):
+    table = _MASTER_TABLES.get(kind)
+    if not table:
+        raise HTTPException(404, "unknown master kind")
+    sets, params = [], []
+    for f in _MASTER_FIELDS:
+        if f in body and body[f] is not None:
+            if f == "code":
+                body[f] = str(body[f]).strip().lower()
+                if body[f] in ("others", "not_defined"):
+                    raise HTTPException(400, "reserved code")
+            sets.append(f"{f}=%s")
+            params.append(body[f])
+    if not sets:
+        raise HTTPException(400, "Nothing to update")
+    params.append(mid)
+    conn = ctx.conn
+    c = conn.cursor()
+    c.execute(f"UPDATE {table} SET {', '.join(sets)} WHERE id=%s", params)
+    conn.commit()
+    log_action(conn, ctx.user["id"], f"chemist_master.{kind}.update", "chemist", mid)
+    return {"ok": True}
+
+
 @router.post("/chemists/bulk-upload")
 async def bulk_upload_chemists(file: UploadFile = File(...),
                                ctx: TenantContext = Depends(require_permission("chemist.manage"))):
@@ -588,7 +837,11 @@ async def bulk_upload_chemists(file: UploadFile = File(...),
     created, errors = 0, []
     fields = ["name", "shop_name", "gst", "dl_number", "owner_name", "mobile", "alternate_mobile",
               "email", "address", "city", "district", "state", "pin", "latitude", "longitude",
-              "ocid", "doctor_name", "category", "area", "upi_id", "status"]
+              "ocid", "doctor_name", "category", "area", "upi_id", "status",
+              "attachment_type", "potential_category", "institution_name", "institution_type",
+              "institution_department", "institution_contact_person", "institution_address",
+              "monthly_business_potential", "estimated_monthly_sales", "brand_potential",
+              "strategic_importance", "last_visit_date", "visit_frequency"]
     division_id = division_scope(conn, ctx)
     for i, row in enumerate(rows, start=2):
         if not row or all(v is None or str(v).strip() == "" for v in row):
@@ -624,7 +877,11 @@ def chemist_template(ctx: TenantContext = Depends(require_permission("chemist.ma
     ws.title = "Chemists"
     ws.append(["name", "shop_name", "gst", "dl_number", "owner_name", "mobile", "alternate_mobile",
                "email", "address", "city", "district", "state", "pin", "latitude", "longitude",
-               "ocid", "doctor_name", "category", "area", "upi_id", "status"])
+               "ocid", "doctor_name", "category", "area", "upi_id", "status",
+               "attachment_type", "potential_category", "institution_name", "institution_type",
+               "institution_department", "institution_contact_person", "institution_address",
+               "monthly_business_potential", "estimated_monthly_sales", "brand_potential",
+               "strategic_importance", "last_visit_date", "visit_frequency"])
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)

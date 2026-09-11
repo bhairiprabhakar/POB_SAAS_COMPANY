@@ -3,7 +3,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
-import { api, fmtDateTime, fmtMoney, getSession, tenantLoginPath } from './api';
+import { api, fmtDateTime, fmtMoney, getSession, saRole, tenantLoginPath } from './api';
 
 // ── Toasts ─────────────────────────────────────────────────────────────────
 
@@ -123,6 +123,7 @@ const TONES = {
   rejected: 'red', duplicate: 'red', inactive: 'gray', disabled: 'gray',
   draft: 'gray', paused: 'gray', provisioning: 'amber', trial: 'amber',
   submitted: 'amber', default: 'gray', green: 'green',
+  pending_approval: 'amber', scheduled: 'blue',
 };
 
 export function Badge({ children, tone }) {
@@ -159,6 +160,18 @@ const PERM_GATE = {
 function hasPerm(perms, perm) {
   if (!perm) return true;
   return Array.isArray(perms) && perms.includes(perm);
+}
+
+const SA_ROLE_LABELS = {
+  owner: 'Owner',
+  full: 'Super Admin',
+  campaign_admin: 'Campaign Admin',
+  finance_admin: 'Finance Admin',
+  verification_admin: 'Verification Admin',
+};
+
+function saRoleLabel(role) {
+  return SA_ROLE_LABELS[role] || 'Admin';
 }
 
 // ── Verification status badge (nav bar) ─────────────────────────────────────
@@ -203,18 +216,43 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
     { to: '/app/notifications', label: 'Notifications', icon: '🔔', perm: 'notification.view', group: 'Quick access', tone: 'amber' },
     { to: '/app/profile', label: 'My Profile', icon: '👤', group: 'Quick access', tone: 'gray' },
   ] : isAdmin ? [
-    // ── Admin / HO ──
-    { to: '/app/admin', label: 'Campaign Dashboard', icon: '▦', perm: 'dashboard.view', end: true, group: 'Core modules', tone: 'primary' },
-    { to: '/app/pob', label: 'POB Management', icon: '≣', perm: 'pob.view', group: 'Core modules', tone: 'blue' },
-    { to: '/app/verification', label: 'Verification Queue', icon: '✓', perm: 'verification.view', group: 'Core modules', tone: 'green' },
-    { to: '/app/campaigns', label: 'Campaigns', icon: '◎', perm: 'campaign.view', group: 'Core modules', tone: 'teal' },
-    { to: '/app/brands', label: 'Brands', icon: '◉', perm: 'brand.view', group: 'Core modules', tone: 'amber' },
-    { to: '/app/user-management', label: 'User Management', icon: '👥', perm: 'user.view', group: 'Core modules', tone: 'blue' },
-    { to: '/app/chemists', label: 'Chemists', icon: '◉', perm: 'chemist.view', group: 'Core modules', tone: 'amber' },
-    { to: '/app/analytics', label: 'Analytics', icon: '📈', perm: 'dashboard.view', group: 'Core modules', tone: 'red' },
-    { to: '/app/gratification', label: 'Gratification', icon: '🎁', perm: 'gratification.view', group: 'Core modules', tone: 'gray' },
-    { to: '/app/notifications', label: 'Notifications', icon: '🔔', perm: 'notification.view', group: 'Quick access', tone: 'blue' },
-    { to: '/app/audit', label: 'Audit Logs', icon: '✎', perm: 'audit.view', group: 'Quick access', tone: 'gray' },
+    // ── Division Admin / HO ──
+    { to: '/app/admin', label: 'Dashboard', icon: '▦', perm: 'dashboard.view', end: true, group: 'Core modules', tone: 'primary' },
+    { to: '/app/my-division', label: 'My Division', icon: '▣', perm: 'dashboard.view', group: 'Core modules', tone: 'teal' },
+
+    { to: '/app/user-management', label: 'Employee List', icon: '👥', perm: 'user.view', group: 'Employees', tone: 'blue' },
+    { to: '/app/user-management?tab=hierarchy', label: 'Hierarchy', icon: '☰', perm: 'user.view', group: 'Employees', tone: 'green' },
+    { to: '/app/teams', label: 'Teams', icon: '◪', perm: 'user.view', group: 'Employees', tone: 'amber' },
+    { to: '/app/user-management', label: 'Employee Import', icon: '⇪', perm: 'user.manage', group: 'Employees', tone: 'gray' },
+
+    { to: '/app/brands', label: 'Brands', icon: '◉', perm: 'brand.view', group: 'Masters', tone: 'amber' },
+    { to: '/app/products', label: 'Products', icon: '📦', perm: 'product.view', group: 'Masters', tone: 'teal' },
+    { to: '/app/chemists', label: 'Chemists', icon: '◨', perm: 'chemist.view', group: 'Masters', tone: 'blue' },
+    { to: '/app/regions', label: 'Regions', icon: '⌗', perm: 'user.view', group: 'Masters', tone: 'green' },
+    { to: '/app/regions?view=territory', label: 'Territories', icon: '⌘', perm: 'user.view', group: 'Masters', tone: 'gray' },
+    { to: '/app/gifts', label: 'Gratification', icon: '🎁', perm: 'gratification.manage', group: 'Masters', tone: 'purple' },
+
+    { to: '/app/campaigns', label: 'All Campaigns', icon: '◎', perm: 'campaign.view', group: 'Campaigns', tone: 'teal' },
+    { to: '/app/campaigns?new=1', label: 'Create Campaign', icon: '＋', perm: 'campaign.view', group: 'Campaigns', tone: 'green' },
+    { to: '/app/campaigns?status=draft', label: 'Draft', icon: '◌', perm: 'campaign.view', group: 'Campaigns', tone: 'gray' },
+    { to: '/app/campaigns?status=pending_approval', label: 'Pending Approval', icon: '◔', perm: 'campaign.view', group: 'Campaigns', tone: 'amber' },
+    { to: '/app/campaigns?status=scheduled', label: 'Scheduled', icon: '◑', perm: 'campaign.view', group: 'Campaigns', tone: 'blue' },
+    { to: '/app/campaigns?status=active', label: 'Active', icon: '●', perm: 'campaign.view', group: 'Campaigns', tone: 'green' },
+    { to: '/app/campaigns?status=completed', label: 'Completed', icon: '◉', perm: 'campaign.view', group: 'Campaigns', tone: 'gray' },
+    { to: '/app/campaigns?status=rejected', label: 'Rejected', icon: '○', perm: 'campaign.view', group: 'Campaigns', tone: 'red' },
+
+    { to: '/app/pob', label: 'All POB', icon: '≣', perm: 'pob.view', group: 'POB', tone: 'blue' },
+    { to: '/app/pob?status=pending_verification', label: 'Pending', icon: '⏳', perm: 'pob.view', group: 'POB', tone: 'amber' },
+    { to: '/app/pob?status=verified', label: 'Approved', icon: '✓', perm: 'pob.view', group: 'POB', tone: 'green' },
+    { to: '/app/pob?status=rejected', label: 'Rejected', icon: '✕', perm: 'pob.view', group: 'POB', tone: 'red' },
+
+    { to: '/app/verification', label: 'Verification', icon: '✔', perm: 'verification.view', group: 'Operations', tone: 'green' },
+    { to: '/app/gratification', label: 'Gratification', icon: '🎁', perm: 'gratification.view', group: 'Operations', tone: 'purple' },
+    { to: '/app/analytics', label: 'Analytics', icon: '📈', perm: 'dashboard.view', group: 'Operations', tone: 'red' },
+    { to: '/app/reports', label: 'Reports', icon: '🗎', perm: 'report.view', group: 'Operations', tone: 'teal' },
+
+    { to: '/app/notifications', label: 'Notifications', icon: '🔔', perm: 'notification.view', group: 'Quick access', tone: 'amber' },
+    { to: '/app/audit', label: 'Audit', icon: '✎', perm: 'audit.view', group: 'Quick access', tone: 'gray' },
     { to: '/app/security', label: 'Security', icon: '🔐', perm: 'apikey.view', group: 'Quick access', tone: 'green' },
     { to: '/app/jobs', label: 'Background Jobs', icon: '⚙', perm: 'job.view', group: 'Quick access', tone: 'amber' },
   ] : [
@@ -291,17 +329,58 @@ function SideCollapse({ collapsed, onToggle }) {
 
 function SuperSidebar({ onNavigate, open, collapsed, onToggleCollapse }) {
   const items = [
-    { to: '/superadmin', label: 'Dashboard', icon: '▦', end: true, group: 'Core modules', tone: 'primary' },
-    { to: '/superadmin/divisions', label: 'Divisions', icon: '▣', group: 'Core modules', tone: 'blue' },
-    { to: '/superadmin/analytics', label: 'Analytics', icon: '📈', group: 'Core modules', tone: 'amber' },
-    { to: '/superadmin/costing', label: 'Usage & cost', icon: '₹', group: 'Core modules', tone: 'teal' },
-    { to: '/superadmin/settings', label: 'Settings', icon: '⚙', group: 'Quick access', tone: 'gray' },
-    { to: '/superadmin/audit', label: 'Audit Log', icon: '✎', group: 'Quick access', tone: 'gray' },
+    { to: '/superadmin', label: 'Dashboard', icon: '▦', end: true, group: 'Overview', tone: 'primary', roles: ['owner', 'full', 'campaign_admin', 'finance_admin', 'verification_admin'] },
+
+    { to: '/superadmin/company', label: 'Company Profile', icon: '◈', group: 'Company', tone: 'blue', roles: ['owner', 'full'] },
+
+    { to: '/superadmin/divisions', label: 'All Divisions', icon: '▣', group: 'Divisions', tone: 'blue', roles: ['owner', 'full'] },
+
+    { to: '/superadmin/users', label: 'All Employees', icon: '👥', group: 'Users & Hierarchy', tone: 'blue', roles: ['owner', 'full'] },
+
+    { to: '/superadmin/campaigns', label: 'Campaigns', icon: '◎', group: 'Campaigns', tone: 'teal', roles: ['owner', 'full', 'campaign_admin'] },
+
+    { to: '/superadmin/pob', label: 'POB Operations', icon: '≣', group: 'POB Operations', tone: 'blue', roles: ['owner', 'full', 'verification_admin'] },
+
+    { to: '/superadmin/gratification', label: 'Gratification', icon: '🎯', group: 'Gratification', tone: 'amber', roles: ['owner', 'full', 'finance_admin'] },
+
+    { to: '/superadmin/analytics', label: 'Analytics', icon: '📈', group: 'Analytics', tone: 'primary', roles: ['owner', 'full', 'campaign_admin'] },
+    { to: '/superadmin/costing', label: 'ROI', icon: '₹', group: 'Analytics', tone: 'green', roles: ['owner', 'full'] },
+
+    { to: '/superadmin/admins', label: 'Platform Admins', icon: '🔐', group: 'Access', tone: 'primary', roles: ['owner'] },
+    { to: '/superadmin/audit', label: 'Audit Logs', icon: '✎', group: 'Platform', tone: 'gray', roles: ['owner', 'full'] },
+    { to: '/superadmin/platform-settings', label: 'Platform Settings', icon: '⚙', group: 'Platform', tone: 'gray', roles: ['owner', 'full'] },
   ];
+  const role = saRole();
+  const visible = items.filter((i) => !i.roles || i.roles.includes(role));
   const [brand, setBrand] = useState({ platform_name: 'CampaignOS', has_logo: false });
+  const [queue, setQueue] = useState(null);
   useEffect(() => {
     api('/api/v1/auth/platform-branding').then(setBrand).catch(() => {});
   }, []);
+  useEffect(() => {
+    let alive = true;
+    const load = () => api('/api/v1/superadmin/queue-counts')
+      .then((d) => alive && setQueue(d)).catch(() => {});
+    load();
+    const iv = setInterval(load, 60000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
+  const badgeFor = (to) => {
+    if (!queue) return null;
+    const m = {
+      '/superadmin/campaigns': queue.campaigns?.['pending_approval'] || 0,
+      '/superadmin/pob': queue.pob?.['pending_verification'] || 0,
+      '/superadmin/gratification': queue.gratification?.eligible || 0,
+    }[to];
+    const titles = {
+      '/superadmin/campaigns': 'campaigns awaiting approval',
+      '/superadmin/pob': 'POBs pending verification',
+      '/superadmin/gratification': 'gratifications eligible for payout',
+    }[to];
+    return m > 0 ? { n: m, tone: 'red', title: titles } : null;
+  };
+  const badges = {};
+  for (const i of items) { const b = badgeFor(i.to); if (b) badges[i.to] = b; }
   return (
     <aside className={`sidebar${open ? ' open' : ''}${collapsed ? ' collapsed' : ''}`}>
       <div className="brand">
@@ -310,9 +389,71 @@ function SuperSidebar({ onNavigate, open, collapsed, onToggleCollapse }) {
           : <span className="brand-mark">C</span>}
         <div><strong>{brand.platform_name}</strong><small>Platform Console</small></div>
       </div>
-      <SideNav items={items} onNavigate={onNavigate} />
+      <SideNav items={visible} badges={badges} onNavigate={onNavigate} />
       <SideCollapse collapsed={collapsed} onToggle={onToggleCollapse} />
     </aside>
+  );
+}
+
+function SaBell({ unread, onDrained }) {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState(null);
+  const ref = useRef(null);
+  useEffect(() => {
+    const onClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, []);
+  const openAsync = async () => {
+    const next = !open;
+    setOpen(next);
+    if (next) {
+      try {
+        const d = await api('/api/v1/superadmin/notifications');
+        setItems(d.items || []);
+      } catch { setItems([]); }
+    }
+  };
+  const markAll = async () => {
+    try { await api('/api/v1/superadmin/notifications/read-all', { method: 'POST' }); } catch {}
+    if (items) setItems(items.map((n) => ({ ...n, is_read: true })));
+    onDrained();
+  };
+  return (
+    <div className="sa-bell" ref={ref}>
+      <button className="bell" onClick={openAsync} title="Notifications" aria-label="Notifications">
+        🔔{unread > 0 && <span className="bell-dot">{unread > 99 ? '99+' : unread}</span>}
+      </button>
+      {open && (
+        <div className="sa-bell-panel">
+          <div className="sa-bell-head">
+            <strong>Platform notifications</strong>
+            <button className="btn-link" onClick={markAll} disabled={unread === 0}>Mark all read</button>
+          </div>
+          <div className="sa-bell-list">
+            {items === null && <p className="muted">Loading…</p>}
+            {items && items.length === 0 && <p className="muted">No notifications yet.</p>}
+            {items && items.map((n) => (
+              <Link key={n.id} to={n.link || '/superadmin'} className={`sa-notif ${n.is_read ? '' : 'unread'}`}
+                onClick={async () => {
+                  if (!n.is_read) {
+                    try { await api(`/api/v1/superadmin/notifications/${n.id}/read`, { method: 'POST' }); } catch {}
+                    onDrained();
+                  }
+                  setOpen(false);
+                }}>
+                <div className="sa-notif-head">
+                  <strong>{n.title}</strong>
+                  {!n.is_read && <span className="badge badge-blue">new</span>}
+                </div>
+                <div>{n.message}</div>
+                <div className="muted sa-notif-time">{fmtDateTime(n.created_at)}</div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -332,9 +473,10 @@ export function AppShell({ children, kind }) {
   }, []);
 
   const loadUnread = useCallback(() => {
-    if (kind === 'tenant') {
-      api('/api/v1/notifications/unread-count').then((d) => setUnread(d.unread)).catch(() => {});
-    }
+    const ep = kind === 'sa'
+      ? '/api/v1/superadmin/notifications/unread-count'
+      : '/api/v1/notifications/unread-count';
+    api(ep).then((d) => setUnread(d.unread)).catch(() => {});
   }, [kind]);
   useEffect(() => {
     loadUnread();
@@ -368,7 +510,7 @@ export function AppShell({ children, kind }) {
           <div className="topbar-left">
             <button className="menu-btn" onClick={() => setMenu((v) => !v)} aria-label="Toggle navigation">☰</button>
             <div className="topbar-title">
-              {kind === 'sa' ? 'Platform Console' : `${session?.division?.code || ''} · ${session?.user?.role || ''}`}
+              {kind === 'sa' ? `Platform Console · ${saRoleLabel(session?.user?.role)}` : `${session?.division?.code || ''} · ${session?.user?.role || ''}`}
             </div>
           </div>
           <div className="topbar-right">
@@ -383,6 +525,9 @@ export function AppShell({ children, kind }) {
                   🔔{unread > 0 && <span className="bell-dot">{unread > 99 ? '99+' : unread}</span>}
                 </Link>
               </>
+            )}
+            {kind === 'sa' && (
+              <SaBell unread={unread} onDrained={loadUnread} />
             )}
             <Link to={kind === 'sa' ? '/superadmin' : '/app/profile'} className="user-chip" title="View profile">
               {session?.user?.full_name || session?.user?.username}
