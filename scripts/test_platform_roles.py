@@ -224,6 +224,16 @@ def main():
     # campaign_admin can access /campaigns but not /gratification, /pob, /platform-admins
     r = client.get(f"{BASE}/campaigns", headers=ROLE_TOKENS["campaign_admin"])
     check("campaign_admin -> /campaigns OK", ok(r), f"{r.status_code}")
+    r = client.get(f"{BASE}/campaigns/roi", headers=ROLE_TOKENS["campaign_admin"])
+    check("campaign_admin -> /campaigns/roi OK", ok(r), f"{r.status_code}")
+    if ok(r):
+        roi = j(r)
+        check("roi shape has summary + campaigns",
+              "summary" in roi and "campaigns" in roi and "top_winning" in roi,
+              list(roi.keys()))
+        check("roi summary counters present",
+              all(k in roi["summary"] for k in ("campaigns", "profitable", "loss_making")),
+              roi["summary"])
     r = client.get(f"{BASE}/gratification", headers=ROLE_TOKENS["campaign_admin"])
     check("campaign_admin -> /gratification BLOCKED", r.status_code == 403, f"{r.status_code}")
     r = client.get(f"{BASE}/pob", headers=ROLE_TOKENS["campaign_admin"])
@@ -236,8 +246,14 @@ def main():
     check("finance_admin -> /gratification OK", ok(r), f"{r.status_code}")
     r = client.get(f"{BASE}/analytics", headers=ROLE_TOKENS["finance_admin"])
     check("finance_admin -> /analytics OK", ok(r), f"{r.status_code}")
+    r = client.get(f"{BASE}/finance", headers=ROLE_TOKENS["finance_admin"])
+    check("finance_admin -> /finance OK", ok(r), f"{r.status_code}")
     r = client.get(f"{BASE}/campaigns", headers=ROLE_TOKENS["finance_admin"])
     check("finance_admin -> /campaigns BLOCKED", r.status_code == 403, f"{r.status_code}")
+    r = client.get(f"{BASE}/campaigns/roi", headers=ROLE_TOKENS["finance_admin"])
+    check("finance_admin -> /campaigns/roi BLOCKED", r.status_code == 403, f"{r.status_code}")
+    r = client.get(f"{BASE}/campaigns/roi", headers=ROLE_TOKENS["verification_admin"])
+    check("verification_admin -> /campaigns/roi BLOCKED", r.status_code == 403, f"{r.status_code}")
     r = client.get(f"{BASE}/pob", headers=ROLE_TOKENS["finance_admin"])
     check("finance_admin -> /pob BLOCKED", r.status_code == 403, f"{r.status_code}")
 
@@ -251,8 +267,18 @@ def main():
     r = client.get(f"{BASE}/campaigns", headers=ROLE_TOKENS["verification_admin"])
     check("verification_admin -> /campaigns BLOCKED", r.status_code == 403, f"{r.status_code}")
 
+    # campaign_admin cannot read the finance overview
+    r = client.get(f"{BASE}/finance", headers=ROLE_TOKENS["campaign_admin"])
+    check("campaign_admin -> /finance BLOCKED", r.status_code == 403, f"{r.status_code}")
+    r = client.get(f"{BASE}/finance", headers=ROLE_TOKENS["verification_admin"])
+    check("verification_admin -> /finance BLOCKED", r.status_code == 403, f"{r.status_code}")
+
     # Owner and full can access everything
     for rname, hdr in [("owner", OA), ("full", ROLE_TOKENS["full"])]:
+        r = client.get(f"{BASE}/finance", headers=hdr)
+        check(f"{rname} -> /finance OK", ok(r), f"{r.status_code}")
+        r = client.get(f"{BASE}/campaigns/roi", headers=hdr)
+        check(f"{rname} -> /campaigns/roi OK", ok(r), f"{r.status_code}")
         r = client.get(f"{BASE}/campaigns", headers=hdr)
         check(f"{rname} -> /campaigns OK", ok(r), f"{r.status_code}")
         r = client.get(f"{BASE}/gratification", headers=hdr)

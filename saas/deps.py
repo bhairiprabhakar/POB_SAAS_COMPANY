@@ -107,7 +107,7 @@ def require_owner(claims: dict = Depends(require_superadmin)) -> dict:
 _SA_ROLE_VIEW = ("/analytics", "/metrics", "/notifications", "/queue-counts")
 _SA_PATH_ALLOW = {
     "campaign_admin": ("/campaigns",) + _SA_ROLE_VIEW,
-    "finance_admin": ("/gratification",) + _SA_ROLE_VIEW,
+    "finance_admin": ("/gratification", "/finance") + _SA_ROLE_VIEW,
     "verification_admin": ("/pob", "/verification") + _SA_ROLE_VIEW,
 }
 

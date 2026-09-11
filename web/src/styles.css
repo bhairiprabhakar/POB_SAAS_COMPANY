@@ -352,6 +352,10 @@ a.user-chip:hover { border-color: var(--primary); text-decoration: none; }
 .data-table tfoot td { padding: 10px 12px; font-size: 13px; border-top: 1px solid var(--border); background: var(--bg-3); }
 .detail-table th { width: 200px; text-align: left; padding: 8px 12px; font-size: 12px; font-weight: 500; color: var(--text-2); background: var(--bg-3); border-bottom: 1px solid var(--border); vertical-align: top; }
 .detail-table td { font-size: 13px; }
+.detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 2px 18px; margin: 6px 0 14px; }
+.detail-item { display: flex; flex-direction: column; gap: 1px; padding: 5px 0; border-bottom: 1px dashed var(--border); }
+.detail-label { font-size: 11px; font-weight: 500; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.4px; }
+.detail-value { font-size: 13px; color: var(--text); word-break: break-word; }
 .actions-th { width: 120px; }
 .row-actions { display: flex; gap: 2px; white-space: nowrap; }
 

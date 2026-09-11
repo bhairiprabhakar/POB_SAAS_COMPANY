@@ -1493,6 +1493,383 @@ def sa_all_gratification(status: str = "", limit: int = 200,
     return {"counts": counts, "types": types, "recent": recent, "unreachable": unreachable}
 
 
+# -- Owner finance view (money out / liability / cleared value) --
+
+_FINANCE_TTL = 60
+_finance_cache: dict = {"at": 0.0, "key": None, "data": None}
+
+_PAYOUT_STAGES = ("eligible", "approved", "paid", "dispatched", "delivered", "completed")
+
+
+@router.get("/finance")
+def platform_finance(days: int = 0, claims=Depends(require_superadmin)):
+    """Owner-finance aggregation across every division tenant.
+
+    Money owed and money actually out come from the gratification pipeline
+    (scheme_value in ₹); cleared claim value is the verified/approved POB
+    amount (the value that has actually cleared verification); AI spend is
+    the Gemini extraction cost. `days=0` means all time.
+    """
+    import time as _time
+    from .. import config
+    now = _time.time()
+    if (_finance_cache["data"] is not None and _finance_cache["key"] == days
+            and now - _finance_cache["at"] < _FINANCE_TTL):
+        return _finance_cache["data"]
+
+    conn = platform_db.get_db()
+    try:
+        divisions = _provisioned_divisions(conn)
+    finally:
+        conn.close()
+
+    since_expr, since_params = "", []
+    if days:
+        since_expr = "created_at >= now() - make_interval(days => %s)"
+        since_params = [int(days)]
+
+    def _fwhere(extra: str = ""):
+        conds = [c for c in (extra, since_expr) if c]
+        return (("WHERE " + " AND ".join(conds)) if conds else ""), since_params
+
+    payout_counts = {s: 0 for s in _PAYOUT_STAGES}
+    payout_values = {s: 0.0 for s in _PAYOUT_STAGES}
+    types: dict = {}
+    verified_count, verified_value = 0, 0.0
+    ai_calls, ai_cost = 0, 0.0
+    monthly: dict = {}
+    by_division: list = []
+    unreachable: list = []
+    currency = config.OCR_COST_CURRENCY or "USD"
+
+    for div in divisions:
+        tdb = div["tenant_db_name"]
+        tconn = None
+        try:
+            from .. import migrations
+            migrations.ensure_migrated(tdb)
+            tconn = _direct_tenant_conn(tdb)
+            tc = tconn.cursor()
+
+            # Gratification pipeline: ₹ per status and per grant type.
+            w, p = _fwhere()
+            tc.execute(
+                f"""SELECT COALESCE(status,'unknown'), count(*), coalesce(sum(scheme_value),0)
+                    FROM gratifications {w} GROUP BY 1""", p)
+            div_payout = {s: 0.0 for s in _PAYOUT_STAGES}
+            for st, cnt, val in tc.fetchall():
+                if st in div_payout:
+                    payout_counts[st] += int(cnt or 0)
+                    payout_values[st] += float(val or 0)
+                    div_payout[st] += float(val or 0)
+            tc.execute(
+                f"""SELECT COALESCE(type_code,'other'), count(*), coalesce(sum(scheme_value),0)
+                    FROM gratifications {w} GROUP BY 1""", p)
+            for tcode, cnt, val in tc.fetchall():
+                slot = types.setdefault(tcode, {"count": 0, "value": 0.0})
+                slot["count"] += int(cnt or 0)
+                slot["value"] = round(slot["value"] + float(val or 0), 2)
+
+            # Cleared claim value: verified/approved POB amount.
+            wv, pv = _fwhere("status IN ('verified','approved')")
+            tc.execute(
+                f"""SELECT count(*), coalesce(sum(pob_amount),0)
+                    FROM pob_activities {wv}""", pv)
+            vrow = tc.fetchone() or (0, 0)
+            vcnt, vval = int(vrow[0] or 0), float(vrow[1] or 0)
+            verified_count += vcnt
+            verified_value += vval
+
+            # AI extraction spend.
+            tc.execute(
+                f"""SELECT count(*), coalesce(sum(cost),0) FROM ocr_usage {w}""", p)
+            arow = tc.fetchone() or (0, 0)
+            acnt, acost = int(arow[0] or 0), float(arow[1] or 0)
+            ai_calls += acnt
+            ai_cost += acost
+
+            # Monthly money-out trend (by pay/dispatch time where set).
+            tc.execute(
+                f"""SELECT to_char(COALESCE(paid_at, created_at),'YYYY-MM'), count(*),
+                           coalesce(sum(scheme_value),0)
+                    FROM gratifications {w} GROUP BY 1""", p)
+            for mth, cnt, val in tc.fetchall():
+                ms = monthly.setdefault(mth, {"month": mth, "paid_out": 0.0,
+                                              "cleared": 0.0, "ai_cost": 0.0})
+                ms["paid_out"] = round(ms["paid_out"] + float(val or 0), 2)
+
+            # Monthly cleared value.
+            tc.execute(
+                f"""SELECT to_char(created_at,'YYYY-MM'), count(*), coalesce(sum(pob_amount),0)
+                    FROM pob_activities {wv} GROUP BY 1""", pv)
+            for mth, cnt, val in tc.fetchall():
+                ms = monthly.setdefault(mth, {"month": mth, "paid_out": 0.0,
+                                              "cleared": 0.0, "ai_cost": 0.0})
+                ms["cleared"] = round(ms["cleared"] + float(val or 0), 2)
+
+            # Monthly AI spend.
+            tc.execute(
+                f"""SELECT to_char(created_at,'YYYY-MM'), count(*), coalesce(sum(cost),0)
+                    FROM ocr_usage {w} GROUP BY 1""", p)
+            for mth, cnt, val in tc.fetchall():
+                ms = monthly.setdefault(mth, {"month": mth, "paid_out": 0.0,
+                                              "cleared": 0.0, "ai_cost": 0.0})
+                ms["ai_cost"] = round(ms["ai_cost"] + float(val or 0), 2)
+
+            by_division.append({
+                "division_id": div["id"], "name": div["name"], "code": div["code"],
+                "verified_count": vcnt, "verified_value": round(vval, 2),
+                "liability": round(div_payout["eligible"] + div_payout["approved"], 2),
+                "paid_out": round(sum(div_payout[s] for s in ("paid", "dispatched",
+                                                              "delivered", "completed")), 2),
+                "ai_cost": round(acost, 6),
+            })
+        except Exception as exc:
+            unreachable.append({"division_id": div["id"], "name": div["name"],
+                                "code": div["code"],
+                                "error": str(exc).strip().split("\n")[0][:200]})
+        finally:
+            if tconn:
+                try:
+                    tconn.close()
+                except Exception:
+                    pass
+
+    committed = round(payout_values["eligible"] + payout_values["approved"], 2)
+    data = {
+        "days": days,
+        "currency": currency,
+        "payout_counts": payout_counts,
+        "payout_values": {s: round(v, 2) for s, v in payout_values.items()},
+        "committed": committed,
+        "paid_out": round(sum(payout_values[s] for s in ("paid", "dispatched",
+                                                         "delivered", "completed")), 2),
+        "types": types,
+        "verified": {"count": verified_count, "value": round(verified_value, 2)},
+        "ai": {"calls": ai_calls, "cost": round(ai_cost, 6)},
+        "monthly": sorted(monthly.values(), key=lambda m: m["month"]),
+        "by_division": sorted(by_division, key=lambda r: r["liability"], reverse=True),
+        "unreachable": unreachable,
+    }
+    _finance_cache.update({"at": now, "key": days, "data": data})
+    return data
+
+
+# -- Campaign ROI (profit / loss per campaign, with driver reasons) --
+
+_ROI_TTL = 120
+_roi_cache: dict = {"at": 0.0, "key": None, "data": None}
+
+_CLEARED_STATUSES = ("verified", "approved")
+_PENDING_STATUSES = ("pending", "pending_verification", "submitted")
+_LOST_STATUSES = ("rejected", "duplicate")
+_PAID_STAGES = ("paid", "dispatched", "delivered", "completed")
+
+
+def _campaign_roi_reason(c) -> dict:
+    """Explain *why* a campaign looks profitable or loss-making, computed from
+    its own numbers so the owner gets a driver, not just a number."""
+    cleared = c["cleared_value"]
+    cost = c["cost"]
+    net = c["net"]
+    if cleared <= 0:
+        if cost <= 0:
+            return {"code": "no_activity", "tone": "gray",
+                    "reason": "No verified sales and no payouts yet — campaign hasn't produced value."}
+        return {"code": "cost_no_value", "tone": "red",
+                "reason": "Payouts were generated but no sales value cleared — rewards given with nothing sold yet."}
+    if net <= 0:
+        ratio = (cost / cleared) * 100 if cleared else 0
+        if ratio >= 100:
+            return {"code": "over_spend", "tone": "red",
+                    "reason": f"Reward cost ({_inr(cost)}) exceeds cleared value ({_inr(cleared)}) — payouts outrun sales."}
+        if ratio >= 60:
+            return {"code": "heavy_rewards", "tone": "red",
+                    "reason": f"Rewards consume {round(ratio)}% of cleared value — scheme is too generous for the sales it drives."}
+        if c["pending_value"] > cleared:
+            return {"code": "blocked_value", "tone": "amber",
+                    "reason": f"More value ({_inr(c['pending_value'])}) is stuck pending verification than has cleared — unblock it first."}
+        if c["rejected_value"] > cleared:
+            return {"code": "rejected_sales", "tone": "red",
+                    "reason": f"Rejected/duplicate submissions ({_inr(c['rejected_value'])}) outweigh cleared sales — invoice quality is the problem."}
+        return {"code": "thin_margin", "tone": "amber",
+                "reason": "Cleared value is close to reward cost — margin is too thin to cover the scheme."}
+    # Profitable below.
+    ratio = (cost / cleared) * 100 if cleared else 0
+    if ratio <= 15:
+        return {"code": "low_reward_cost", "tone": "green",
+                "reason": f"Rewards are only {round(ratio)}% of cleared value — cheap incentives driving real sales."}
+    if c["verified_ratio"] and c["verified_ratio"] >= 85:
+        return {"code": "clean_verification", "tone": "green",
+                "reason": f"{c['verified_ratio']}% of submissions cleared verification — healthy, well-documented sales."}
+    if c["pob_value"] >= 100000:
+        return {"code": "high_volume", "tone": "green",
+                "reason": "High sales volume carries the campaign into profit despite modest per-unit margins."}
+    return {"code": "solid", "tone": "green",
+            "reason": "Revenue comfortably exceeds reward cost — a fundamentally sound campaign."}
+
+
+def _inr(v):
+    return "₹{:,.0f}".format(round(float(v or 0)))
+
+
+@router.get("/campaigns/roi")
+def sa_campaign_roi(days: int = 0, limit: int = 400,
+                    claims=Depends(require_sa_roles("campaign_admin"))):
+    """Cross-division campaign ROI.
+
+    For every campaign across all provisioned tenants this computes the sales
+    value that actually cleared (?) and the reward cost that was generated
+    against it, then labels each campaign profit/loss/flat with the reason
+    behind that outcome. `days` restricts to campaigns with activity in the
+    window (their submissions/payouts filtered by created_at).
+    """
+    import time as _time
+    now = _time.time()
+    key = (days, limit)
+    if (_roi_cache["data"] is not None and _roi_cache["key"] == key
+            and now - _roi_cache["at"] < _ROI_TTL):
+        return _roi_cache["data"]
+
+    conn = platform_db.get_db()
+    try:
+        divisions = _provisioned_divisions(conn)
+    finally:
+        conn.close()
+
+    params_days = [int(days)] if days else []
+    params_days_x2 = params_days + params_days if days else []
+
+    campaigns, unreachable = [], []
+    summary = {"campaigns": 0, "profitable": 0, "loss_making": 0, "flat": 0,
+               "total_cleared": 0.0, "total_cost": 0.0, "total_net": 0.0}
+
+    for div in divisions:
+        tdb = div["tenant_db_name"]
+        tconn = None
+        try:
+            from .. import migrations
+            migrations.ensure_migrated(tdb)
+            tconn = _direct_tenant_conn(tdb)
+            tc = tconn.cursor()
+            tc.execute(
+                f"""SELECT c.id, c.name, c.status, c.start_date, c.end_date,
+                           COALESCE(b.name, '') AS brand_name,
+                           count(pa.id) AS submissions,
+                           count(pa.id) FILTER (WHERE pa.status IN
+                               ('verified','approved')) AS verified,
+                           count(pa.id) FILTER (WHERE pa.status IN
+                               ('rejected','duplicate')) AS rejected,
+                           coalesce(sum(pa.pob_amount),0) AS pob_value,
+                           coalesce(sum(pa.pob_amount) FILTER (WHERE pa.status IN
+                               ('verified','approved')),0) AS cleared_value,
+                           coalesce(sum(pa.pob_amount) FILTER (WHERE pa.status IN
+                               ('pending_verification','pending','submitted')),0) AS pending_value,
+                           coalesce(sum(pa.pob_amount) FILTER (WHERE pa.status IN
+                               ('rejected','duplicate')),0) AS rejected_value,
+                           coalesce(sum(pa.pob_amount) FILTER (WHERE pa.status IN
+                               ('paid','completed')),0) AS paid_value
+                    FROM campaigns c
+                    LEFT JOIN brands b ON b.id = c.brand_id
+                    LEFT JOIN pob_activities pa ON pa.campaign_id = c.id
+                    WHERE EXISTS (SELECT 1 FROM pob_activities pa2
+                                  WHERE pa2.campaign_id = c.id
+                                  {('AND pa2.created_at >= now() - make_interval(days => %s)' if days else '')})
+                       OR EXISTS (SELECT 1 FROM gratifications g
+                                  WHERE g.campaign_id = c.id
+                                  {('AND g.created_at >= now() - make_interval(days => %s)' if days else '')})
+                    GROUP BY c.id, b.name, c.name, c.status, c.start_date, c.end_date
+                    ORDER BY cleared_value DESC, c.id""",
+                params_days_x2,
+            )
+            rows = fetchall_dict(tc)
+
+            # Reward cost per campaign: scheme value booked against it.
+            tc.execute(
+                f"""SELECT g.campaign_id, count(*) AS payouts,
+                           coalesce(sum(g.scheme_value),0) AS cost,
+                           coalesce(sum(g.scheme_value) FILTER (WHERE g.status IN
+                               ('paid','dispatched','delivered','completed')),0) AS cost_paid
+                    FROM gratifications g
+                    WHERE EXISTS (SELECT 1 FROM campaigns c WHERE c.id = g.campaign_id)
+                    {('AND g.created_at >= now() - make_interval(days => %s)' if days else '')}
+                    GROUP BY g.campaign_id""",
+                params_days if days else [],
+            )
+            costs = {r["campaign_id"]: r for r in fetchall_dict(tc)}
+
+            for r in rows:
+                cid = r["id"]
+                cost_row = costs.get(cid, {})
+                cost = float(cost_row.get("cost") or 0)
+                cleared = float(r["cleared_value"] or 0)
+                net = cleared - cost
+                r.update({
+                    "division_id": div["id"], "division_name": div["name"],
+                    "division_code": div["code"],
+                    "verified_ratio": round(float(r["verified"] or 0) / float(r["submissions"] or 1) * 100, 0)
+                        if float(r["submissions"] or 0) else 0,
+                    "cost": round(cost, 2), "cost_paid": round(float(cost_row.get("cost_paid") or 0), 2),
+                    "payouts": int(cost_row.get("payouts") or 0),
+                    "net": round(net, 2),
+                    "roi_pct": round(net / cost * 100, 1) if cost else None,
+                    "margin_pct": round(net / cleared * 100, 1) if cleared else None,
+                })
+                verdict = "flat"
+                if net > 0:
+                    verdict = "profit"
+                elif net < 0:
+                    verdict = "loss"
+                r["verdict"] = verdict
+                r.update(_campaign_roi_reason(r))
+                campaigns.append(r)
+
+                summary["campaigns"] += 1
+                summary["total_cleared"] += cleared
+                summary["total_cost"] += cost
+                summary["total_net"] += net
+                if verdict == "profit":
+                    summary["profitable"] += 1
+                elif verdict == "loss":
+                    summary["loss_making"] += 1
+                else:
+                    summary["flat"] += 1
+        except Exception as exc:
+            unreachable.append({"division_id": div["id"], "name": div["name"],
+                                "code": div["code"],
+                                "error": str(exc).strip().split("\n")[0][:200]})
+        finally:
+            if tconn:
+                try:
+                    tconn.close()
+                except Exception:
+                    pass
+
+    campaigns = campaigns[:limit]
+    total_cleared = summary["total_cleared"]
+    summary.update({
+        "total_cleared": round(total_cleared, 2),
+        "total_cost": round(summary["total_cost"], 2),
+        "total_net": round(summary["total_net"], 2),
+        "roi_pct": round(summary["total_net"] / summary["total_cost"] * 100, 1)
+                   if summary["total_cost"] else None,
+    })
+
+    # Leaderboards for the owner: biggest winners, biggest losers.
+    data = {
+        "days": days,
+        "summary": summary,
+        "campaigns": campaigns,
+        "top_winning": sorted([c for c in campaigns if c["net"] > 0],
+                              key=lambda c: c["net"], reverse=True)[:8],
+        "top_losing": sorted([c for c in campaigns if c["net"] < 0],
+                             key=lambda c: c["net"])[:8],
+        "unreachable": unreachable,
+    }
+    _roi_cache.update({"at": now, "key": key, "data": data})
+    return data
+
+
 @router.get("/users")
 def sa_all_users(q: str = "", limit: int = 2000, claims=Depends(require_superadmin)):
     """Cross-division employee directory: every tenant user with its division,

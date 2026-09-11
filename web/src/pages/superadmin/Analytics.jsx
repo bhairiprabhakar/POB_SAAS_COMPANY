@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../../api';
+import { api, saRole } from '../../api';
 import {
   BarChart, DashHero, DonutChart, DonutLegend, ErrorBox, InsightList, MetricTile,
   PanelCard, PeriodSelect, ProgressBar, RankList, Spinner, Table, Tabs, useAsync,
@@ -28,11 +28,17 @@ const monthLabel = (m) => {
 };
 const rate = (num, den) => (den ? Math.round((num / den) * 100) : 0);
 
+const roiRole = ['owner', 'full', 'campaign_admin'].includes(saRole());
+
 export default function SuperAnalytics() {
   const [days, setDays] = useState(0);
   const [tab, setTab] = useState('value');
   const { data, loading, error, run } = useAsync(
     () => api('/api/v1/superadmin/analytics?days=' + days), [days]);
+
+  const [roiTab, setRoiTab] = useState('all');
+  const { data: roiData, loading: roiLoading, error: roiError, run: roiRun } = useAsync(
+    () => roiRole ? api('/api/v1/superadmin/campaigns/roi?days=' + days) : null, [days, roiRole]);
 
   const d = data || {};
   const totals = d.totals || {};
@@ -208,6 +214,135 @@ export default function SuperAnalytics() {
           <InsightList items={insights} empty="Everything looks healthy" />
         </PanelCard>
       </div>
+
+      {roiRole && (
+        <>
+          {roiLoading && <Spinner label="Loading campaign ROI…" />}
+          {!roiLoading && roiError && <ErrorBox error={roiError} onRetry={roiRun} />}
+          {!roiLoading && !roiError && (() => {
+            const r = roiData || {};
+            const summary = r.summary || {};
+            const campaigns = r.campaigns || [];
+            const topW = r.top_winning || [];
+            const topL = r.top_losing || [];
+            const filtered = roiTab === 'profit' ? campaigns.filter((c) => c.verdict === 'profit')
+              : roiTab === 'loss' ? campaigns.filter((c) => c.verdict === 'loss')
+              : campaigns;
+
+            return (
+              <div className="bi-grid" style={{ marginTop: 40 }}>
+                <div className="dash-hero" style={{ padding: '24px 28px', marginBottom: 0 }}>
+                  <div className="dash-hero-copy">
+                    <h2>Campaign ROI — profit vs loss</h2>
+                    <p>Cleared value minus reward cost across every division.</p>
+                  </div>
+                  <div className="dash-hero-actions">
+                    <PeriodSelect value={days} onChange={setDays} options={PERIODS} />
+                  </div>
+                </div>
+
+                <div className="metric-grid">
+                  <MetricTile label="Profitable campaigns" value={summary.profitable || 0}
+                    icon="▲" tone="green"
+                    sub={`${fmtShort(summary.total_net)} net margin platform-wide`} />
+                  <MetricTile label="Loss-making" value={summary.loss_making || 0}
+                    icon="▼" tone="red"
+                    sub={summary.total_cost > 0
+                      ? `Overall ROI ${summary.roi_pct != null ? summary.roi_pct + '%' : '—'}`
+                      : 'No cost recorded'} />
+                  <MetricTile label="Total cleared value" value={fmtShort(summary.total_cleared)}
+                    icon="₹" tone="primary"
+                    sub={`${summary.campaigns || 0} campaigns analysed`} />
+                  <MetricTile label="Total reward cost" value={fmtShort(summary.total_cost)}
+                    icon="💸" tone="amber"
+                    sub={summary.total_cleared > 0
+                      ? `${Math.round(summary.total_cost / summary.total_cleared * 100)}% of cleared value`
+                      : 'No cost recorded'} />
+                </div>
+
+                <div className="bi-grid">
+                  {topW.length > 0 && (
+                    <PanelCard title="Top profitable campaigns" sub="Cleared value beats reward cost"
+                      span={topL.length === 0 ? 2 : 1}>
+                      <RankList rows={topW.slice(0, 5)} color="green"
+                        getLabel={(c) => `${c.campaign_name} (${c.division_code})`}
+                        getValue={(c) => c.net}
+                        getSub={(c) => `${fmtShort(c.cleared_value)} cleared · ${fmtShort(c.cost)} cost`}
+                        fmt={fmtShort} limit={5} />
+                    </PanelCard>
+                  )}
+                  {topL.length > 0 && (
+                    <PanelCard title="Worst-performing campaigns" sub="Reward cost exceeds cleared value"
+                      span={topW.length === 0 ? 2 : 1}>
+                      <RankList rows={topL.slice(0, 5)} color="red"
+                        getLabel={(c) => `${c.campaign_name} (${c.division_code})`}
+                        getValue={(c) => Math.abs(c.net)}
+                        getSub={(c) => `${fmtShort(c.cleared_value)} cleared · ${fmtShort(c.cost)} cost`}
+                        fmt={fmtShort} limit={5} />
+                    </PanelCard>
+                  )}
+
+                  <PanelCard title="Division campaign ROI" span="2"
+                    sub={`${campaigns.length} campaigns analysed · Filtered: ${filtered.length} shown`}
+                    action={
+                      <Tabs items={[
+                        { id: 'all', label: 'All', badge: campaigns.length },
+                        { id: 'profit', label: 'Profit', badge: summary.profitable },
+                        { id: 'loss', label: 'Loss', badge: summary.loss_making },
+                      ]} active={roiTab} onChange={setRoiTab} />
+                    }>
+                    {filtered.length > 0 ? (
+                      <Table
+                        cols={[
+                          { key: 'campaign', label: 'Campaign', render: (r) => (
+                            <Link to={`/superadmin/divisions/${r.division_id}?tab=campaigns`}
+                              className="cell-link">
+                              <strong>{r.campaign_name}</strong>
+                              <span className="muted cell-sub">{r.division_code}</span>
+                            </Link>
+                          ) },
+                          { key: 'verdict', label: '', render: (r) => (
+                            <span className={`badge badge-${r.verdict === 'profit' ? 'green' : r.verdict === 'loss' ? 'red' : 'gray'}`}
+                              style={{ fontWeight: 600, textTransform: 'uppercase' }}>
+                              {r.verdict}
+                            </span>
+                          ) },
+                          { key: 'cleared', label: 'Cleared value', render: (r) => <strong>{fmtShort(r.cleared_value)}</strong>, thClass: 'num' },
+                          { key: 'cost', label: 'Reward cost', render: (r) => fmtShort(r.cost), thClass: 'num' },
+                          { key: 'net', label: 'Net', render: (r) => (
+                            <span style={{ color: r.net > 0 ? 'var(--green)' : r.net < 0 ? 'var(--red)' : undefined, fontWeight: 600 }}>
+                              {r.net >= 0 ? '+' : ''}{fmtShort(r.net)}
+                            </span>
+                          ), thClass: 'num' },
+                          { key: 'margin', label: 'Margin', render: (r) => r.margin_pct != null
+                            ? <ProgressBar value={Math.max(0, r.margin_pct)}
+                                tone={r.margin_pct >= 20 ? 'green' : r.margin_pct >= 0 ? 'amber' : 'red'} />
+                            : <span className="muted">—</span>
+                          },
+                          { key: 'reason', label: 'Why', render: (r) => (
+                            <div style={{ maxWidth: 340 }}>
+                              <span style={{ color: `var(--${r.tone === 'red' ? 'red' : r.tone === 'green' ? 'green' : r.tone === 'amber' ? 'amber' : 'muted'})` }}>
+                                {r.reason}
+                              </span>
+                            </div>
+                          ) },
+                        ]}
+                        rows={filtered}
+                        keyOf={(r) => `${r.division_id}-${r.campaign_id}`}
+                        empty={roiTab === 'profit' ? 'No profitable campaigns yet'
+                          : roiTab === 'loss' ? 'No loss-making campaigns'
+                          : 'No campaign ROI data yet — submit POBs and payouts first'}
+                      />
+                    ) : (
+                      <div className="chart-empty">No campaigns match this filter</div>
+                    )}
+                  </PanelCard>
+                </div>
+              </div>
+            );
+          })()}
+        </>
+      )}
     </div>
   );
 }

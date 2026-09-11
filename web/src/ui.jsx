@@ -220,17 +220,12 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
     { to: '/app/admin', label: 'Dashboard', icon: '▦', perm: 'dashboard.view', end: true, group: 'Core modules', tone: 'primary' },
     { to: '/app/my-division', label: 'My Division', icon: '▣', perm: 'dashboard.view', group: 'Core modules', tone: 'teal' },
 
-    { to: '/app/user-management', label: 'Employee List', icon: '👥', perm: 'user.view', group: 'Employees', tone: 'blue' },
-    { to: '/app/user-management?tab=hierarchy', label: 'Hierarchy', icon: '☰', perm: 'user.view', group: 'Employees', tone: 'green' },
-    { to: '/app/teams', label: 'Teams', icon: '◪', perm: 'user.view', group: 'Employees', tone: 'amber' },
-    { to: '/app/user-management', label: 'Employee Import', icon: '⇪', perm: 'user.manage', group: 'Employees', tone: 'gray' },
+    { to: '/app/user-management', label: 'Employees', icon: '👥', perm: 'user.view', group: 'Employees', tone: 'blue' },
 
-    { to: '/app/brands', label: 'Brands', icon: '◉', perm: 'brand.view', group: 'Masters', tone: 'amber' },
-    { to: '/app/products', label: 'Products', icon: '📦', perm: 'product.view', group: 'Masters', tone: 'teal' },
+    { to: '/app/catalog', label: 'Catalog', icon: '◉', perm: 'brand.view', group: 'Masters', tone: 'amber' },
     { to: '/app/chemists', label: 'Chemists', icon: '◨', perm: 'chemist.view', group: 'Masters', tone: 'blue' },
-    { to: '/app/regions', label: 'Regions', icon: '⌗', perm: 'user.view', group: 'Masters', tone: 'green' },
-    { to: '/app/regions?view=territory', label: 'Territories', icon: '⌘', perm: 'user.view', group: 'Masters', tone: 'gray' },
-    { to: '/app/gifts', label: 'Gratification', icon: '🎁', perm: 'gratification.manage', group: 'Masters', tone: 'purple' },
+    { to: '/app/regions', label: 'Coverage', icon: '⌗', perm: 'user.view', group: 'Masters', tone: 'green' },
+    { to: '/app/gifts', label: 'Gifts', icon: '🎁', perm: 'gratification.manage', group: 'Masters', tone: 'purple' },
 
     { to: '/app/campaigns', label: 'All Campaigns', icon: '◎', perm: 'campaign.view', group: 'Campaigns', tone: 'teal' },
     { to: '/app/campaigns?new=1', label: 'Create Campaign', icon: '＋', perm: 'campaign.view', group: 'Campaigns', tone: 'green' },
@@ -337,11 +332,13 @@ function SuperSidebar({ onNavigate, open, collapsed, onToggleCollapse }) {
 
     { to: '/superadmin/users', label: 'All Employees', icon: '👥', group: 'Users & Hierarchy', tone: 'blue', roles: ['owner', 'full'] },
 
-    { to: '/superadmin/campaigns', label: 'Campaigns', icon: '◎', group: 'Campaigns', tone: 'teal', roles: ['owner', 'full', 'campaign_admin'] },
+    { to: '/superadmin/campaigns', label: 'Campaigns', icon: '◎', group: 'Campaigns', tone: 'teal', roles: ['campaign_admin'] },
 
-    { to: '/superadmin/pob', label: 'POB Operations', icon: '≣', group: 'POB Operations', tone: 'blue', roles: ['owner', 'full', 'verification_admin'] },
+    { to: '/superadmin/pob', label: 'POB Operations', icon: '≣', group: 'POB Operations', tone: 'blue', roles: ['verification_admin'] },
 
     { to: '/superadmin/gratification', label: 'Gratification', icon: '🎯', group: 'Gratification', tone: 'amber', roles: ['owner', 'full', 'finance_admin'] },
+
+    { to: '/superadmin/finance', label: 'Finance & Payouts', icon: '💰', group: 'Gratification', tone: 'green', roles: ['owner', 'full', 'finance_admin'] },
 
     { to: '/superadmin/analytics', label: 'Analytics', icon: '📈', group: 'Analytics', tone: 'primary', roles: ['owner', 'full', 'campaign_admin'] },
     { to: '/superadmin/costing', label: 'ROI', icon: '₹', group: 'Analytics', tone: 'green', roles: ['owner', 'full'] },

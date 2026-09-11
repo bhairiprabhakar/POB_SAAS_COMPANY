@@ -35,6 +35,7 @@ import Security from './pages/app/Security';
 import Jobs from './pages/app/Jobs';
 import SuperAnalytics from './pages/superadmin/Analytics';
 import Costing from './pages/superadmin/Costing';
+import SuperFinance from './pages/superadmin/Finance';
 import PlatformSettings from './pages/superadmin/PlatformSettings';
 import CompanyProfile from './pages/superadmin/CompanyProfile';
 import SuperCampaigns from './pages/superadmin/Campaigns';
@@ -50,6 +51,7 @@ import Gifts from './pages/app/Gifts';
 import ErrorBoundary from './ErrorBoundary';
 import ManageCampaigns from './pages/app/ManageCampaigns';
 import ManageBrands from './pages/app/ManageBrands';
+import Catalog from './pages/app/Catalog';
 import UserManagement from './pages/app/UserManagement';
 
 function ProtectedTenant({ children }) {
@@ -92,6 +94,7 @@ function ProtectedSuper({ children }) {
     const path = window.location.pathname;
     const allowed = [home, '/superadmin'];
     if (role === 'campaign_admin') allowed.push('/superadmin/analytics');
+    if (role === 'finance_admin') allowed.push('/superadmin/finance');
     if (!allowed.includes(path)) return <Navigate to={home} replace />;
   }
   return children;
@@ -186,6 +189,9 @@ export default function App() {
         <Route path="/superadmin/costing" element={
           <ProtectedSuper><AppShell kind="sa"><Costing /></AppShell></ProtectedSuper>
         } />
+        <Route path="/superadmin/finance" element={
+          <ProtectedSuper><AppShell kind="sa"><SuperFinance /></AppShell></ProtectedSuper>
+        } />
         <Route path="/superadmin/audit" element={
           <ProtectedSuper><AppShell kind="sa"><AuditLog /></AppShell></ProtectedSuper>
         } />
@@ -210,6 +216,9 @@ export default function App() {
         } />
         <Route path="/app/teams" element={
           <ProtectedTenant><AppShell kind="tenant"><Teams /></AppShell></ProtectedTenant>
+        } />
+        <Route path="/app/catalog" element={
+          <ProtectedTenant><AppShell kind="tenant"><Catalog /></AppShell></ProtectedTenant>
         } />
         <Route path="/app/regions" element={
           <ProtectedTenant><AppShell kind="tenant"><Regions /></AppShell></ProtectedTenant>

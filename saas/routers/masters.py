@@ -613,6 +613,78 @@ def _batch_hierarchy_chains(c, chemist_ids):
     return {cid: user_chains.get(uid) for cid, uid in chem_user.items()}
 
 
+@router.get("/chemists/{cid}")
+def chemist_detail(cid: int,
+                   ctx: TenantContext = Depends(require_permission("chemist.view"))):
+    """Full chemist profile for the detail view: identity, address, classification,
+    potential, registrant lineage and activity summary (POB / gratification / visits).
+    Scoped to the caller's division the same way the list endpoint is."""
+    conn = ctx.conn
+    c = conn.cursor()
+    c.execute("""SELECT c.*,
+            u.full_name AS registered_by_name, r.name AS registered_by_role,
+            hl.label AS registered_by_level
+        FROM chemists c
+        LEFT JOIN users u ON u.id = c.created_by
+        LEFT JOIN roles r ON r.id = u.role_id
+        LEFT JOIN hierarchy_levels hl ON hl.id = u.hierarchy_level_id
+        WHERE c.id=%s""", (cid,))
+    row = fetchone_dict(c)
+    if not row:
+        raise HTTPException(404, "chemist not found")
+    div = division_scope(conn, ctx)
+    if div and row.get("division_id") not in (None, div):
+        raise HTTPException(404, "chemist not found")
+
+    c.execute("""
+        SELECT
+            COUNT(*) AS pobs,
+            COUNT(*) FILTER (WHERE status IN ('verified', 'approved')) AS verified_pobs,
+            COALESCE(SUM(pob_amount) FILTER (WHERE status IN ('verified', 'approved')), 0) AS verified_value,
+            COUNT(*) FILTER (WHERE status IN ('pending_verification', 'pending', 'submitted')) AS pending_pobs,
+            COUNT(*) FILTER (WHERE status IN ('rejected', 'duplicate')) AS rejected_pobs,
+            COUNT(*) FILTER (WHERE invoice_path IS NOT NULL) AS invoiced_pobs
+        FROM pob_activities WHERE chemist_id=%s""", (cid,))
+    activity = fetchone_dict(c) or {}
+    c.execute("""
+        SELECT COUNT(*) AS grants_count,
+               COALESCE(SUM(g.scheme_value), 0) AS grants_value,
+               COALESCE(SUM(g.scheme_value) FILTER (WHERE g.status IN
+                   ('paid', 'dispatched', 'delivered', 'completed')), 0) AS paid_value
+        FROM gratifications g
+        JOIN pob_activities pa ON pa.id = g.pob_id
+        WHERE pa.chemist_id=%s""", (cid,))
+    grats = fetchone_dict(c) or {}
+    c.execute("""
+        SELECT COUNT(*) AS visits, MAX(visit_date) AS last_visit
+        FROM chemist_visits WHERE chemist_id=%s""", (cid,))
+    visits = fetchone_dict(c) or {}
+
+    chains = _batch_hierarchy_chains(c, [cid])
+    row["registered_by_hierarchy"] = chains.get(cid)
+    row["activity"] = {
+        "pobs": activity.get("pobs", 0),
+        "verified_pobs": activity.get("verified_pobs", 0),
+        "verified_value": round(activity.get("verified_value", 0), 2),
+        "pending_pobs": activity.get("pending_pobs", 0),
+        "rejected_pobs": activity.get("rejected_pobs", 0),
+        "invoiced_pobs": activity.get("invoiced_pobs", 0),
+    }
+    row["gratification"] = {
+        "count": grats.get("grants_count", 0),
+        "value": round(grats.get("grants_value", 0), 2),
+        "paid_value": round(grats.get("paid_value", 0), 2),
+    }
+    row["visits"] = {
+        "count": visits.get("visits", 0),
+        "last_visit": visits.get("last_visit"),
+    }
+    if not (ctx.perms & {"gratification.pay", "gratification.manage"}):
+        if row.get("upi_id"):
+            row["upi_id"] = mask_upi_id(row["upi_id"])
+    return row
+
+
 @router.post("/chemists")
 def create_chemist(body: dict, ctx: TenantContext = Depends(require_permission("chemist.manage"))):
     name = (body.get("name") or "").strip()

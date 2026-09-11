@@ -2,11 +2,13 @@ import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Users from './Users';
 import Hierarchy from './Hierarchy';
+import Teams from './Teams';
 import Roles from './Roles';
 
 const TABS = [
   ['users', '👥', 'Users'],
   ['hierarchy', '☰', 'Hierarchy'],
+  ['teams', '◪', 'Teams'],
   ['roles', '⚖', 'Roles & Permissions'],
 ];
 
@@ -27,6 +29,7 @@ export default function UserManagement({ base = '/api/v1' }) {
       </div>
       {tab === 'users' && <Users base={base} />}
       {tab === 'hierarchy' && <Hierarchy base={base} />}
+      {tab === 'teams' && <Teams />}
       {tab === 'roles' && <Roles base={base} />}
     </div>
   );

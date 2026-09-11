@@ -41,6 +41,7 @@ export default function Chemists() {
   const [status, setStatus] = useState('');
   const [campaignId, setCampaignId] = useState('');
   const [editing, setEditing] = useState(null);
+  const [viewing, setViewing] = useState(null);
   const [bulk, setBulk] = useState(false);
   const [actionFor, setActionFor] = useState(null);
 
@@ -115,6 +116,7 @@ export default function Chemists() {
               {rows.map((r) => (
                 <ChemistRow key={r.id} row={r} campaignId={campaignId} campaigns={campaigns.data?.items || []}
                   canManage={canManage}
+                  onView={() => setViewing(r.id)}
                   onAction={(action) => setActionFor({ chemist: r, action })}
                   onEdit={() => setEditing({ ...r })} />
               ))}
@@ -139,6 +141,8 @@ export default function Chemists() {
           onSaved={() => { setEditing(null); run(); }} />
       )}
 
+      {viewing && <DetailModal chemistId={viewing} onClose={() => setViewing(null)} />}
+
       {bulk && <BulkModal onClose={() => setBulk(false)} onDone={() => { setBulk(false); run(); }} />}
     </div>
   );
@@ -146,7 +150,7 @@ export default function Chemists() {
 
 /* ── Table row ─────────────────────────────────────────────────────────── */
 
-function ChemistRow({ row, campaignId, campaigns, canManage, onAction, onEdit }) {
+function ChemistRow({ row, campaignId, campaigns, canManage, onView, onAction, onEdit }) {
   const r = row;
   const pobStatus = r.pob_status;
   const invStatus = r.invoice_status;
@@ -237,6 +241,9 @@ function ChemistRow({ row, campaignId, campaigns, canManage, onAction, onEdit })
       </td>
       <td><StatusBadge value={r.status} /></td>
       <td className="nowrap" style={{ whiteSpace: 'nowrap' }}>
+        <button className="btn btn-sm" onClick={onView} title={`Full profile for ${r.name}`}>
+          Details
+        </button>
         <button className="btn btn-sm" onClick={() => onAction('upi')} title={`Scan UPI QR for ${r.name}`}>
           Scan UPI
         </button>
@@ -271,6 +278,136 @@ function del(r, run) {
   api(`/api/v1/chemists/${r.id}`, { method: 'DELETE' })
     .then(() => { toast('Chemist deleted', 'success'); run(); })
     .catch((err) => toast(err.message, 'error'));
+}
+
+/* ── Full chemist profile (read-only) ───────────────────────────────────── */
+
+function DetailModal({ chemistId, onClose }) {
+  const { data, loading, error, run } = useAsync(() => api(`/api/v1/chemists/${chemistId}`), [chemistId]);
+
+  return (
+    <Modal open wide title="Chemist profile" onClose={onClose} footer={
+      <button className="btn" onClick={onClose}>Close</button>
+    }>
+      {loading && <Spinner label="Loading profile…" />}
+      {error && <ErrorBox error={error} onRetry={run} />}
+      {!loading && !error && data && <ChemistProfile data={data} />}
+    </Modal>
+  );
+}
+
+function ChemistProfile({ data }) {
+  const d = data;
+  const act = d.activity || {};
+  const grat = d.gratification || {};
+  const visits = d.visits || {};
+  const chain = d.registered_by_hierarchy || [];
+  const location = [d.address, d.city, d.district, d.state, d.pin].filter(Boolean).join(', ');
+
+  return (
+    <div>
+      <div className="detail-hero" data-tone={d.status === 'active' ? 'green' : 'gray'}>
+        <div className="detail-hero-top">
+          <div className="detail-hero-title">
+            <h2>{d.name}</h2>
+            <p>{[d.shop_name, d.area].filter(Boolean).join(' — ') || d.owner_name || ''}</p>
+            <div className="detail-hero-badges">
+              <StatusBadge value={d.status} />
+              {d.attachment_type && <Badge tone="blue">{d.attachment_type}</Badge>}
+              {d.potential_category && <Badge tone="amber">{d.potential_category}</Badge>}
+              {d.category && <Badge tone="teal">{d.category}</Badge>}
+            </div>
+          </div>
+          <div className="detail-hero-amount">
+            <span className="stat-label">Verified POB value</span>
+            <span className="detail-hero-value">{fmtMoney(act.verified_value)}</span>
+            <span className="stat-sub">{act.verified_pobs || 0} verified of {act.pobs || 0} POBs</span>
+          </div>
+        </div>
+        <div className="detail-hero-facts">
+          {d.mobile && <div className="fact-pill"><span>Mobile</span><strong>{d.mobile}</strong></div>}
+          {d.owner_name && <div className="fact-pill"><span>Owner</span><strong>{d.owner_name}</strong></div>}
+          {d.visit_frequency && <div className="fact-pill"><span>Visit</span><strong>{d.visit_frequency}</strong></div>}
+          {visits.count > 0 && <div className="fact-pill"><span>Visits</span><strong>{visits.count}{visits.last_visit ? ` · ${fmtDate(visits.last_visit)}` : ''}</strong></div>}
+          {d.upi_id && <div className="fact-pill"><span>UPI</span><strong>{d.upi_id}</strong></div>}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, marginBottom: 16 }}>
+        <div className="card" style={{ padding: 12 }}>
+          <div className="stat-label">Pending</div>
+          <strong style={{ fontSize: 18 }}>{act.pending_pobs || 0}</strong>
+        </div>
+        <div className="card" style={{ padding: 12 }}>
+          <div className="stat-label">Invoiced</div>
+          <strong style={{ fontSize: 18 }}>{act.invoiced_pobs || 0}</strong>
+        </div>
+        <div className="card" style={{ padding: 12 }}>
+          <div className="stat-label">Gratifications</div>
+          <strong style={{ fontSize: 18 }}>{grat.count || 0}</strong>
+          <span className="muted" style={{ fontSize: 12 }}> {fmtMoney(grat.value)}</span>
+        </div>
+        <div className="card" style={{ padding: 12 }}>
+          <div className="stat-label">Paid out</div>
+          <strong style={{ fontSize: 18 }}>{fmtMoney(grat.paid_value)}</strong>
+        </div>
+      </div>
+
+      <h4 className="section-title">Identity &amp; contact</h4>
+      <div className="detail-grid">
+        {[['Name', d.name], ['Shop name', d.shop_name], ['Owner', d.owner_name],
+          ['Mobile', d.mobile], ['Alt mobile', d.alternate_mobile], ['Email', d.email],
+          ['GST', d.gst], ['DL number', d.dl_number], ['UPI', d.upi_id],
+          ['OCID', d.ocid], ['Doctor', d.doctor_name], ['Category', d.category],
+          ['Area', d.area]].map(([k, v]) => (
+          <div className="detail-item" key={k}><span className="detail-label">{k}</span><span className="detail-value">{v || '—'}</span></div>
+        ))}
+      </div>
+
+      <h4 className="section-title">Address &amp; location</h4>
+      <div className="detail-grid">
+        <div className="detail-item" style={{ gridColumn: '1 / -1' }}><span className="detail-label">Address</span><span className="detail-value">{location || '—'}</span></div>
+        {[['City', d.city], ['District', d.district], ['State', d.state], ['PIN', d.pin],
+          ['Latitude', d.latitude], ['Longitude', d.longitude]].map(([k, v]) => (
+          <div className="detail-item" key={k}><span className="detail-label">{k}</span><span className="detail-value">{v || '—'}</span></div>
+        ))}
+      </div>
+
+      <h4 className="section-title">Classification &amp; potential</h4>
+      <div className="detail-grid">
+        {[['Attachment type', d.attachment_type], ['Potential category', d.potential_category],
+          ['Institution', d.institution_name], ['Institution type', d.institution_type],
+          ['Department', d.institution_department], ['Contact person', d.institution_contact_person],
+          ['Monthly potential', d.monthly_business_potential ? fmtMoney(d.monthly_business_potential) : null],
+          ['Est. monthly sales', d.estimated_monthly_sales ? fmtMoney(d.estimated_monthly_sales) : null],
+          ['Brand potential', d.brand_potential], ['Strategic importance', d.strategic_importance],
+          ['Visit frequency', d.visit_frequency], ['Last visit', d.last_visit_date ? fmtDate(d.last_visit_date) : null],
+          ].map(([k, v]) => (
+          <div className="detail-item" key={k}><span className="detail-label">{k}</span><span className="detail-value">{v || '—'}</span></div>
+        ))}
+        {d.institution_address && (
+          <div className="detail-item" style={{ gridColumn: '1 / -1' }}><span className="detail-label">Institution address</span><span className="detail-value">{d.institution_address}</span></div>
+        )}
+      </div>
+
+      {d.registered_by_name && (
+        <>
+          <h4 className="section-title">Registrant</h4>
+          <div className="detail-grid">
+            <div className="detail-item"><span className="detail-label">Registered by</span><span className="detail-value">{d.registered_by_name}{d.registered_by_level ? ` (${d.registered_by_level})` : ''}</span></div>
+            {chain.length > 1 && (
+              <div className="detail-item" style={{ gridColumn: '1 / -1' }}><span className="detail-label">Hierarchy</span>
+                <span className="detail-value">{chain.map((h) => h.name).join(' › ')}</span>
+              </div>
+            )}
+            {d.created_at && (
+              <div className="detail-item"><span className="detail-label">Onboarded</span><span className="detail-value">{fmtDate(d.created_at)}</span></div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 /* ── Inline POB / Invoice action modals ────────────────────────────────── */
