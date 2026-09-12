@@ -456,7 +456,7 @@ def delete_division(conn, actor: dict, did: int) -> None:
 def list_campaigns(conn, q: str = "", status: str = "", active: bool = None,
                    brand_id: int = None, division_id: int = None) -> list[dict]:
     sql = """SELECT c.*, b.name AS brand_name, d.name AS division_name,
-             (SELECT count(*) FROM products p WHERE p.campaign_id=c.id) AS product_count,
+             (SELECT count(*) FROM campaign_products cp WHERE cp.campaign_id=c.id) AS product_count,
              (SELECT count(*) FROM pob_activities pa WHERE pa.campaign_id=c.id) AS pob_count
              FROM campaigns c
              LEFT JOIN brands b ON b.id=c.brand_id
@@ -563,7 +563,11 @@ def get_campaign(conn, cid: int) -> dict | None:
         return None
     row["brand_ids"] = _brand_ids_list(row)
     row["brand_names"] = _brand_names(conn, row["brand_ids"])
-    c.execute("SELECT * FROM products WHERE campaign_id=%s ORDER BY id", (cid,))
+    c.execute("""SELECT p.*, b.name AS brand_name, b.division_id AS brand_division_id
+                 FROM campaign_products cp
+                 JOIN products p ON p.id=cp.product_id
+                 LEFT JOIN brands b ON b.id=p.brand_id
+                 WHERE cp.campaign_id=%s ORDER BY cp.id""", (cid,))
     row["products"] = fetchall_dict(c)
     from .rules import list_rules
     row["rules"] = list_rules(conn, cid)
@@ -616,8 +620,7 @@ def create_campaign(conn, actor: dict, body: dict) -> int:
     )
     cid = c.fetchone()[0]
     _sync_campaign_rules(conn, cid, body.get("rules"), actor)
-    for p in body.get("products") or []:
-        _insert_product(conn, cid, p)
+    _sync_products(conn, cid, body.get("products"), division_id=body.get("division_id"))
     if body.get("assignment") is not None:
         set_campaign_assignments(conn, cid, body, actor)
     conn.commit()
@@ -685,7 +688,7 @@ def update_campaign(conn, actor: dict, cid: int, body: dict, request=None) -> No
         params.append(cid)
         c.execute(f"UPDATE campaigns SET {', '.join(sets)} WHERE id=%s", params)
     _sync_campaign_rules(conn, cid, body.get("rules"), actor)
-    _sync_products(conn, cid, body.get("products"))
+    _sync_products(conn, cid, body.get("products"), division_id=body.get("division_id"))
     if body.get("assignment") is not None:
         set_campaign_assignments(conn, cid, body, actor)
     conn.commit()
@@ -742,15 +745,15 @@ def delete_campaign(conn, actor: dict, cid: int) -> None:
     log_action(conn, actor.get("id"), "campaign.delete", "campaign", cid, actor=actor.get("name"))
 
 
-# ── Products (inline with campaigns) ────────────────────────────────────────
+# ── Products (division-scoped master catalogue; campaigns link via junction) ─
 
-def _insert_product(conn, campaign_id: int, p: dict) -> int:
+def _insert_product(conn, p: dict, division_id: int = None) -> int:
     c = conn.cursor()
     c.execute(
-        """INSERT INTO products (campaign_id, brand_id, sku, name, strength, pack, ptr, pts, mrp,
+        """INSERT INTO products (brand_id, division_id, sku, name, strength, pack, ptr, pts, mrp,
            min_quantity, min_pob, max_pob, scheme_eligibility, status, division)
            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-        (campaign_id, p.get("brand_id"), p.get("sku"), (p.get("name") or "").strip(),
+        (p.get("brand_id"), division_id, p.get("sku"), (p.get("name") or "").strip(),
          p.get("strength"), p.get("pack"), p.get("ptr") or 0, p.get("pts") or 0,
          p.get("mrp") or 0, p.get("min_quantity") or 1, p.get("min_pob") or 0,
          p.get("max_pob"), p.get("scheme_eligibility", True), p.get("status") or "active",
@@ -760,11 +763,12 @@ def _insert_product(conn, campaign_id: int, p: dict) -> int:
 
 
 def _update_product(conn, pid: int, p: dict) -> None:
-    fields = ["brand_id", "sku", "name", "strength", "pack", "ptr", "pts", "mrp",
+    fields = ["brand_id", "division_id", "sku", "name", "strength", "pack", "ptr", "pts", "mrp",
               "min_quantity", "min_pob", "max_pob", "scheme_eligibility", "status", "division"]
     sets, params = [], []
     for f in fields:
-        if f in p and p[f] is not None:
+        if f in p:
+            # Explicit None clears the column; absent keys are left untouched.
             sets.append(f"{f}=%s")
             params.append(p[f])
     if not sets:
@@ -773,28 +777,39 @@ def _update_product(conn, pid: int, p: dict) -> None:
     conn.cursor().execute(f"UPDATE products SET {', '.join(sets)} WHERE id=%s", params)
 
 
-def _sync_products(conn, cid: int, products) -> None:
-    """Synchronize a campaign's products from the inline builder. Rows carrying
-    an existing id are updated, new rows are inserted, and rows that disappeared
-    are deleted -- unless they already have POB activities."""
+def _sync_products(conn, cid: int, products, division_id: int = None) -> None:
+    """Synchronize a campaign's product links from the builder. Rows carrying an
+    existing id are linked to the campaign (and updated in place), new rows are
+    inserted as division master products, and links that disappeared are removed
+    -- master products themselves are never deleted from a campaign sync."""
     if products is None:
         return
     c = conn.cursor()
-    c.execute("SELECT id FROM products WHERE campaign_id=%s", (cid,))
+    c.execute("SELECT product_id FROM campaign_products WHERE campaign_id=%s", (cid,))
     existing = {r[0] for r in c.fetchall()}
-    seen = set()
+    linked = set()
     for p in products:
-        pid = p.get("id")
-        if pid in existing:
-            seen.add(pid)
-            _update_product(conn, pid, p)
-        else:
-            _insert_product(conn, cid, p)
-    for pid in existing - seen:
-        c.execute("SELECT id FROM pob_activities WHERE product_id=%s LIMIT 1", (pid,))
-        if c.fetchone():
+        if isinstance(p, dict) and not p.get("id"):
+            pid = _insert_product(conn, p, division_id)
+            _link_product(c, cid, pid, list(existing))
+            linked.add(pid)
             continue
-        c.execute("DELETE FROM products WHERE id=%s", (pid,))
+        pid = p.get("id") if isinstance(p, dict) else p
+        if not pid:
+            continue
+        linked.add(pid)
+        _link_product(c, cid, pid, list(existing))
+        if isinstance(p, dict):
+            _update_product(conn, pid, p)
+    for pid in existing - linked:
+        c.execute("DELETE FROM campaign_products WHERE campaign_id=%s AND product_id=%s", (cid, pid))
+
+
+def _link_product(c, cid: int, pid: int, existing: list) -> None:
+    c.execute(
+        "INSERT INTO campaign_products (campaign_id, product_id, sort_order) VALUES (%s,%s,0) "
+        "ON CONFLICT (campaign_id, product_id) DO NOTHING", (cid, pid),
+    )
 
 
 def _sync_campaign_rules(conn, cid: int, rules, actor: dict) -> None:

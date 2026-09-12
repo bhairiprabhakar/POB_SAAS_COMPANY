@@ -29,7 +29,7 @@ def _build_report(conn, report_type: str, visible=None) -> tuple[list[list], lis
     if report_type == "campaign":
         c.execute("""SELECT c.id, c.name, b.name AS brand, c.division, c.start_date,
                      c.end_date, c.status, c.scheme_type,
-                     (SELECT count(*) FROM products p WHERE p.campaign_id=c.id) AS products,
+                     (SELECT count(*) FROM campaign_products cp WHERE cp.campaign_id=c.id) AS products,
                      (SELECT count(*) FROM pob_activities pa WHERE pa.campaign_id=c.id) AS pobs,
                      (SELECT coalesce(sum(pa.pob_amount),0) FROM pob_activities pa WHERE pa.campaign_id=c.id) AS amount
                      FROM campaigns c LEFT JOIN brands b ON b.id=c.brand_id ORDER BY c.id""")

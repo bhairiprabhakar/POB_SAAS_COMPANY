@@ -136,8 +136,9 @@ CREATE TABLE IF NOT EXISTS campaigns (
 
 CREATE TABLE IF NOT EXISTS products (
     id SERIAL PRIMARY KEY,
-    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    campaign_id INTEGER REFERENCES campaigns(id) ON DELETE SET NULL,
     brand_id INTEGER REFERENCES brands(id),
+    division_id INTEGER REFERENCES divisions(id),
     sku TEXT,
     name TEXT NOT NULL,
     strength TEXT,
@@ -151,6 +152,14 @@ CREATE TABLE IF NOT EXISTS products (
     scheme_eligibility BOOLEAN DEFAULT TRUE,
     status TEXT DEFAULT 'active',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- A campaign offers products that live in its division's master catalogue.
+CREATE TABLE IF NOT EXISTS campaign_products (
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    sort_order INTEGER DEFAULT 0,
+    PRIMARY KEY (campaign_id, product_id)
 );
 
 CREATE TABLE IF NOT EXISTS chemists (
@@ -1443,4 +1452,28 @@ JOIN (VALUES
   ON t.role_name = r.name
 JOIN permissions p ON p.code = t.code
 ON CONFLICT (role_id, permission_code) DO NOTHING;
+
+-- ── Products become division-scoped master data ───────────────────────────
+-- Products are no longer children of a single campaign. They are masters owned
+-- by a division; a campaign only links to them via campaign_products. The old
+-- campaign_id column is kept (nullable) so legacy rows keep their traceability,
+-- but the NOT NULL constraint and CASCADE delete are removed so deleting a
+-- campaign can never delete master products.
+CREATE TABLE IF NOT EXISTS campaign_products (
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    sort_order INTEGER DEFAULT 0,
+    PRIMARY KEY (campaign_id, product_id)
+);
+ALTER TABLE products ALTER COLUMN campaign_id DROP NOT NULL;
+ALTER TABLE products DROP CONSTRAINT IF EXISTS products_campaign_id_fkey;
+ALTER TABLE products ADD CONSTRAINT products_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE SET NULL;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS division_id INTEGER REFERENCES divisions(id);
+INSERT INTO campaign_products (campaign_id, product_id, sort_order)
+    SELECT campaign_id, id, 0 FROM products WHERE campaign_id IS NOT NULL
+    ON CONFLICT (campaign_id, product_id) DO NOTHING;
+UPDATE products p SET division_id = c.division_id
+    FROM campaigns c WHERE c.id = p.campaign_id AND p.division_id IS NULL;
+UPDATE products p SET division_id = b.division_id
+    FROM brands b WHERE b.id = p.brand_id AND p.division_id IS NULL;
 """

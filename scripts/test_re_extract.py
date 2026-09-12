@@ -79,6 +79,8 @@ def main():
           "VALUES (%s,%s,%s,%s,%s,'active',1) RETURNING id",
           (campaign_id, f"REXTR Product {tag}", f"RX-{tag}", 100, 140))
         product_id = cur.fetchone()[0]
+        q("INSERT INTO campaign_products (campaign_id, product_id, sort_order) VALUES (%s,%s,0)",
+          (campaign_id, product_id))
         q("INSERT INTO chemists (name, shop_name, mobile, city, state, status) "
           "VALUES (%s,%s,%s,%s,%s,'active') RETURNING id",
           (f"Chemist {tag}", f"Shop {tag}", "9880011223", "Pune", "Maharashtra"))

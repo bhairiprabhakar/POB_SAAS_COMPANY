@@ -56,6 +56,8 @@ def main():
         # defensive cleanup from earlier runs
         q("DELETE FROM pob_activities WHERE campaign_id IN "
           "(SELECT id FROM campaigns WHERE name LIKE 'INVPROOF %')")
+        q("DELETE FROM campaign_products WHERE campaign_id IN "
+          "(SELECT id FROM campaigns WHERE name LIKE 'INVPROOF %')")
         q("DELETE FROM products WHERE campaign_id IN "
           "(SELECT id FROM campaigns WHERE name LIKE 'INVPROOF %')")
         q("DELETE FROM gratifications WHERE campaign_id IN "
@@ -92,6 +94,8 @@ def main():
              VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,'active') RETURNING id""",
           (live_camp, f"INVP-{tag}", "INVPROOF Product", "10 mg", "10x10", 100.0, 120.0, 1, 100.0, 100000.0))
         created["product"] = cur.fetchone()[0]
+        q("INSERT INTO campaign_products (campaign_id, product_id, sort_order) VALUES (%s,%s,0)",
+          (live_camp, created["product"]))
         old_product = None
         q("""INSERT INTO products (campaign_id, sku, name, strength, pack, ptr, mrp, min_quantity,
              min_pob, max_pob, scheme_eligibility, status)
@@ -99,6 +103,8 @@ def main():
           (old_camp, f"INVP-O-{tag}", "INVPROOF Old Product", "10 mg", "10x10",
            100.0, 120.0, 1, 100.0, 100000.0))
         old_product = cur.fetchone()[0]
+        q("INSERT INTO campaign_products (campaign_id, product_id, sort_order) VALUES (%s,%s,0)",
+          (old_camp, old_product))
 
         q("""INSERT INTO chemists (name, shop_name, gst, mobile, city, state, status)
              VALUES (%s,%s,%s,%s,%s,%s,'active') RETURNING id""",

@@ -107,10 +107,15 @@ def main():
     for i, (cid, cname) in enumerate(campaigns):
         pname, sku = product_names[i % len(product_names)]
         cur.execute(
-            """INSERT INTO products (campaign_id, brand_id, sku, name, strength, pack, ptr, mrp,
-               min_quantity, min_pob, max_pob, scheme_eligibility) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE)""",
-            (cid, _resolve_id(cur, "brands", brands[i % len(brands)]), sku, pname,
+            """INSERT INTO products (brand_id, sku, name, strength, pack, ptr, mrp,
+               min_quantity, min_pob, max_pob, scheme_eligibility) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE) RETURNING id""",
+            (_resolve_id(cur, "brands", brands[i % len(brands)]), sku, pname,
              "20 mg", "10x10", 120.0, 145.0, 1, 500.0, 50000.0),
+        )
+        pid = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO campaign_products (campaign_id, product_id, sort_order) VALUES (%s,%s,0)",
+            (cid, pid),
         )
 
     # chemists

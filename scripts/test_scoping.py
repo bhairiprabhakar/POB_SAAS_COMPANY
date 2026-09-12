@@ -115,6 +115,8 @@ def main():
           (created["campaign"], f"SCOP-{tag}", "SCOP Product", "1 mg", "1x1",
            100.0, 120.0, 1, 100.0, 100000.0))
         created["product"] = cur.fetchone()[0]
+        q("INSERT INTO campaign_products (campaign_id, product_id, sort_order) VALUES (%s,%s,0)",
+          (created["campaign"], created["product"]))
         q("""INSERT INTO chemists (name, shop_name, gst, mobile, city, state, status)
              VALUES (%s,%s,%s,%s,%s,%s,'active') RETURNING id""",
           (f"SCOP Chemist {tag}", "SCOP Shop", f"27SCOP{tag}1Z", "9833333333", "Mumbai", "MH"))

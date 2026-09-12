@@ -618,9 +618,10 @@ async def submit_pob(
         if role_name not in allowed:
             raise HTTPException(403, f"Role '{role_name}' is not allowed to upload for this campaign (allowed: {', '.join(sorted(allowed))})")
 
-    c.execute("SELECT * FROM products WHERE id=%s", (product_id,))
+    c.execute("SELECT p.* FROM products p WHERE p.id=%s", (product_id,))
     product = fetchone_dict(c)
-    if not product or product["campaign_id"] != campaign_id:
+    c.execute("SELECT 1 FROM campaign_products WHERE campaign_id=%s AND product_id=%s", (campaign_id, product_id))
+    if not product or not c.fetchone():
         raise HTTPException(400, "Product does not belong to this campaign")
 
     c.execute("SELECT * FROM chemists WHERE id=%s", (chemist_id,))
@@ -941,8 +942,10 @@ async def submit_invoice_only(
     # Extract line items and match to campaign products
     items = fields.get("items") or []
     c.execute("""SELECT pr.id, pr.name, pr.ptr, pr.mrp, b.name AS brand_name, pr.sku
-                 FROM products pr LEFT JOIN brands b ON b.id=pr.brand_id
-                 WHERE pr.campaign_id=%s AND pr.status='active'""", (campaign_id,))
+                 FROM campaign_products cp
+                 JOIN products pr ON pr.id=cp.product_id
+                 LEFT JOIN brands b ON b.id=pr.brand_id
+                 WHERE cp.campaign_id=%s AND pr.status='active'""", (campaign_id,))
     products = fetchall_dict(c)
 
     matched_product = None
@@ -1253,9 +1256,10 @@ def submit_visit(body: dict, request: Request = None,
         quantity = float(item.get("quantity") or 0)
         if not product_id or quantity <= 0:
             raise HTTPException(400, "each brand item needs product_id and quantity > 0")
-        c.execute("SELECT * FROM products WHERE id=%s", (product_id,))
+        c.execute("SELECT p.* FROM products p WHERE p.id=%s", (product_id,))
         product = fetchone_dict(c)
-        if not product or product["campaign_id"] != campaign_id:
+        c.execute("SELECT 1 FROM campaign_products WHERE campaign_id=%s AND product_id=%s", (campaign_id, product_id))
+        if not product or not c.fetchone():
             raise HTTPException(400, f"Product {product_id} does not belong to this campaign")
 
         ptr = float(product.get("ptr") or 0)
@@ -1454,9 +1458,10 @@ def _create_pobs_from_invoice(conn, ctx, campaign, chemist_id, extraction):
                                  "Please upload a clear invoice photo/PDF, or submit a POB visit first.")
     c = conn.cursor()
     c.execute(
-        """SELECT pr.*, b.name AS brand_name FROM products pr
+        """SELECT pr.*, b.name AS brand_name FROM campaign_products cp
+           JOIN products pr ON pr.id=cp.product_id
            LEFT JOIN brands b ON b.id=pr.brand_id
-           WHERE pr.campaign_id=%s AND pr.status='active' ORDER BY pr.name, pr.id""",
+           WHERE cp.campaign_id=%s AND pr.status='active' ORDER BY pr.name, pr.id""",
         (campaign["id"],),
     )
     products = fetchall_dict(c)
@@ -1724,9 +1729,10 @@ def get_pob(pob_id: int, ctx: TenantContext = Depends(get_tenant_context)):
     # Campaign product master (brand-wise qty/amount bounds) so the POB detail
     # can show what the campaign expects per brand alongside the submission.
     c.execute(
-        """SELECT pr.*, b.name AS brand_name FROM products pr
+        """SELECT pr.*, b.name AS brand_name FROM campaign_products cp
+           JOIN products pr ON pr.id=cp.product_id
            LEFT JOIN brands b ON b.id=pr.brand_id
-           WHERE pr.campaign_id=%s AND pr.status='active' ORDER BY pr.name, pr.id""",
+           WHERE cp.campaign_id=%s AND pr.status='active' ORDER BY pr.name, pr.id""",
         (row["campaign_id"],),
     )
     row["campaign_products"] = fetchall_dict(c)
@@ -1816,8 +1822,9 @@ def pob_eligibility(pob_id: int, ctx: TenantContext = Depends(get_tenant_context
     # products may not meet their own min/max thresholds.
     c.execute("""
         SELECT pr.id, pr.name AS product_name, pr.min_quantity, pr.min_pob, pr.max_pob
-        FROM products pr
-        WHERE pr.campaign_id = %s AND pr.status = 'active'
+        FROM campaign_products cp
+        JOIN products pr ON pr.id = cp.product_id
+        WHERE cp.campaign_id = %s AND pr.status = 'active'
     """, (pob["campaign_id"],))
     products = fetchall_dict(c)
 

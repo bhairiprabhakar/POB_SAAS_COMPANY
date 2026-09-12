@@ -78,6 +78,8 @@ def main():
              VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,'active') RETURNING id""",
           (campaign_id, f"SKU-{tag}", name, "10 mg", "10x10", 100.0, 120.0, 1, 100.0, 100000.0))
         pid = cur.fetchone()[0]
+        q("INSERT INTO campaign_products (campaign_id, product_id, sort_order) VALUES (%s,%s,0)",
+          (campaign_id, pid))
         created["products"].append(pid)
         return pid
 

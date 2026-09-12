@@ -945,6 +945,29 @@ a.user-chip:hover { border-color: var(--primary); text-decoration: none; }
 .prod-builder-row .input { width: 100%; }
 .prod-builder-foot { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
 
+/* Product master picker (campaign form) */
+.prod-picker { margin: 10px 0 6px; border: 1px solid var(--border); border-radius: 8px; max-height: 280px; overflow-y: auto; }
+.prod-picker-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  border-bottom: 1px solid var(--bg-3); cursor: pointer; transition: background .12s;
+}
+.prod-picker-row:last-child { border-bottom: none; }
+.prod-picker-row:hover { background: var(--bg-2); }
+.prod-picker-row.sel { background: var(--primary-tint); }
+.prod-picker-row input { flex: 0 0 auto; }
+.prod-picker-name { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.prod-picker-price { flex: 0 0 auto; font-size: 12px; }
+.prod-picker-quick { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+.prod-picker-quick .input { flex: 1 1 140px; }
+.prod-picker-selected { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0; }
+.prod-picker-selected .chip {
+  display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border);
+  background: var(--bg-2); color: var(--text); font-size: 12px; padding: 4px 8px 4px 10px;
+  border-radius: 16px; cursor: default;
+}
+.chip-x { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 12px; line-height: 1; padding: 2px; }
+.chip-x:hover { color: var(--red); }
+
 /* â”€â”€ Very small phones â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @media (max-width: 480px) {
   .ver-chip { display: none; }

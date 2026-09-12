@@ -185,9 +185,10 @@ def verification_detail(vid: int, ctx: TenantContext = Depends(require_permissio
     # Campaign product master (brand-wise qty/amount bounds) so the report can
     # show what the campaign expects per brand alongside the submission.
     c.execute(
-        """SELECT pr.*, b.name AS brand_name FROM products pr
+        """SELECT pr.*, b.name AS brand_name FROM campaign_products cp
+           JOIN products pr ON pr.id=cp.product_id
            LEFT JOIN brands b ON b.id=pr.brand_id
-           WHERE pr.campaign_id=%s AND pr.status='active' ORDER BY pr.name, pr.id""",
+           WHERE cp.campaign_id=%s AND pr.status='active' ORDER BY pr.name, pr.id""",
         (row["campaign_id"],),
     )
     row["campaign_products"] = fetchall_dict(c)

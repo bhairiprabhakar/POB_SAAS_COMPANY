@@ -125,7 +125,7 @@ def main():
     # ── 2. Owner creates platform admins ─────────────────────────────────────
     section("2. Platform admin CRUD (owner-only)")
 
-    for role in ("campaign_admin", "finance_admin", "verification_admin"):
+    for role in ("campaign_admin", "finance_admin", "verification_admin", "division_admin"):
         r = client.post(f"{BASE}/platform-admins", headers=OA, json={
             "username": f"test_{role}", "password": PASSWD,
             "full_name": f"Test {role}", "email": f"{role}@test.local",
@@ -162,7 +162,7 @@ def main():
     # Invalid role rejected
     r = client.post(f"{BASE}/platform-admins", headers=OA, json={
         "username": "badrole", "password": PASSWD, "full_name": "Bad",
-        "role": "division_admin",
+        "role": "billing_admin",
     })
     check("invalid role rejected", r.status_code == 400, f"{r.status_code}")
 
@@ -170,7 +170,7 @@ def main():
     r = client.get(f"{BASE}/platform-admins", headers=OA)
     check("list admins succeeds", ok(r), f"{r.status_code}")
     admins = j(r).get("items", [])
-    check("correct admin count", len(admins) == 6, f"expected 6, got {len(admins)}")
+    check("correct admin count", len(admins) == 7, f"expected 7, got {len(admins)}")
     owner_count = sum(1 for a in admins if a["role"] == "owner")
     check("exactly 1 owner", owner_count == 1)
 
@@ -208,7 +208,7 @@ def main():
     # ── 3. Role login returns correct role ────────────────────────────────────
     section("3. Role-based login and token claims")
     role_tokens = {}
-    for role in ("campaign_admin", "finance_admin", "verification_admin", "full"):
+    for role in ("campaign_admin", "finance_admin", "verification_admin", "division_admin", "full"):
         r = client.post("/api/v1/auth/superadmin/login",
                          json={"username": f"test_{role}", "password": PASSWD})
         check(f"{role} login succeeds", ok(r), f"{r.status_code}")
@@ -272,6 +272,36 @@ def main():
     check("campaign_admin -> /finance BLOCKED", r.status_code == 403, f"{r.status_code}")
     r = client.get(f"{BASE}/finance", headers=ROLE_TOKENS["verification_admin"])
     check("verification_admin -> /finance BLOCKED", r.status_code == 403, f"{r.status_code}")
+
+    # division_admin can reach /divisions (its own area) but nothing else
+    r = client.get(f"{BASE}/divisions", headers=ROLE_TOKENS["division_admin"])
+    check("division_admin -> /divisions OK", ok(r), f"{r.status_code}")
+    r = client.post(f"{BASE}/divisions", headers=ROLE_TOKENS["division_admin"], json={
+        "name": f"DA-Created Div {UUID}", "code": f"DA{UUID}",
+        "description": "created by division_admin",
+    })
+    check("division_admin can create a division", ok(r), f"{r.status_code} {j(r)}")
+    r = client.get(f"{BASE}/analytics", headers=ROLE_TOKENS["division_admin"])
+    check("division_admin -> /analytics OK", ok(r), f"{r.status_code}")
+    r = client.post(f"{BASE}/divisions/999999/gratification/999999/approve",
+                    headers=ROLE_TOKENS["division_admin"])
+    check("division_admin -> gratification approve BLOCKED (role gate)",
+          r.status_code == 403, f"{r.status_code}")
+    r = client.get(f"{BASE}/platform-admins", headers=ROLE_TOKENS["division_admin"])
+    check("division_admin -> /platform-admins BLOCKED", r.status_code == 403, f"{r.status_code}")
+    r = client.get(f"{BASE}/finance", headers=ROLE_TOKENS["division_admin"])
+    check("division_admin -> /finance BLOCKED", r.status_code == 403, f"{r.status_code}")
+    r = client.get(f"{BASE}/campaigns", headers=ROLE_TOKENS["division_admin"])
+    check("division_admin -> /campaigns BLOCKED", r.status_code == 403, f"{r.status_code}")
+    r = client.get(f"{BASE}/pob", headers=ROLE_TOKENS["division_admin"])
+    check("division_admin -> /pob BLOCKED", r.status_code == 403, f"{r.status_code}")
+    r = client.get(f"{BASE}/gratification", headers=ROLE_TOKENS["division_admin"])
+    check("division_admin -> /gratification BLOCKED", r.status_code == 403, f"{r.status_code}")
+
+    # Other specialised admins stay blocked on /divisions
+    for rname in ("campaign_admin", "finance_admin", "verification_admin"):
+        r = client.get(f"{BASE}/divisions", headers=ROLE_TOKENS[rname])
+        check(f"{rname} -> /divisions BLOCKED", r.status_code == 403, f"{r.status_code}")
 
     # Owner and full can access everything
     for rname, hdr in [("owner", OA), ("full", ROLE_TOKENS["full"])]:

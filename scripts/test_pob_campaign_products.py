@@ -38,11 +38,15 @@ try:
          VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,'active') RETURNING id""",
       (created["campaign"], f"SKU-A-{tag}", "Voveran 50", "50 mg", "10x10", 100.0, 95.0, 120.0, 1, 500.0, 5000.0))
     created["product"] = cur.fetchone()[0]
+    cur.execute("INSERT INTO campaign_products (campaign_id, product_id, sort_order) VALUES (%s,%s,0)",
+                (created["campaign"], created["product"]))
     cur.execute("""INSERT INTO products (campaign_id, sku, name, strength, pack, ptr, pts, mrp,
          min_quantity, min_pob, max_pob, scheme_eligibility, status)
          VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,'active') RETURNING id""",
       (created["campaign"], f"SKU-B-{tag}", "Voveran Gel", "30 g", "1x1", 150.0, 140.0, 170.0, 2, 1000.0, None))
     created["second"] = cur.fetchone()[0]
+    cur.execute("INSERT INTO campaign_products (campaign_id, product_id, sort_order) VALUES (%s,%s,0)",
+                (created["campaign"], created["second"]))
     cur.execute("""INSERT INTO chemists (name, shop_name, gst, mobile, city, state, status)
          VALUES (%s,%s,%s,%s,%s,%s,'active') RETURNING id""",
       (f"CAMPLIST Chemist {tag}", "CL Shop", f"27CL{tag}1Z", "9844444444", "Mumbai", "MH"))

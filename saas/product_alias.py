@@ -40,8 +40,9 @@ def find_matching_product(conn, extracted_text: str, campaign_id: int) -> dict:
                pr.name AS product_name
         FROM product_aliases pa
         JOIN products pr ON pr.id = pa.product_id
+        JOIN campaign_products cp ON cp.product_id = pr.id
         WHERE pa.active = TRUE
-          AND pr.campaign_id = %s
+          AND cp.campaign_id = %s
           AND pr.status = 'active'
     """, (campaign_id,))
     aliases = c.fetchall()
@@ -116,16 +117,18 @@ def list_product_aliases(conn, campaign_id: int = None) -> list:
     if campaign_id:
         c.execute("""
             SELECT pa.id, pa.product_id, pa.alias_text, pa.match_type, pa.confidence_weight,
-                   pr.name AS product_name, pr.campaign_id
+                   pr.name AS product_name, cp.campaign_id
             FROM product_aliases pa
             JOIN products pr ON pr.id = pa.product_id
-            WHERE pa.active = TRUE AND pr.campaign_id = %s
+            JOIN campaign_products cp ON cp.product_id = pr.id
+            WHERE pa.active = TRUE AND cp.campaign_id = %s
             ORDER BY pa.product_id, pa.alias_text
         """, (campaign_id,))
     else:
         c.execute("""
             SELECT pa.id, pa.product_id, pa.alias_text, pa.match_type, pa.confidence_weight,
-                   pr.name AS product_name, pr.campaign_id
+                   pr.name AS product_name,
+                   (SELECT MAX(cp2.campaign_id) FROM campaign_products cp2 WHERE cp2.product_id=pr.id) AS campaign_id
             FROM product_aliases pa
             JOIN products pr ON pr.id = pa.product_id
             WHERE pa.active = TRUE

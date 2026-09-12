@@ -49,16 +49,15 @@ const CONFIGS = {
     ],
   },
   products: {
-    title: 'Products', subtitle: 'Products eligible under each campaign',
+    title: 'Products', subtitle: "Your division's master product catalogue",
     endpoint: '/api/v1/products',
     perm: 'product.view',
-    readonly: true,
-    search: (r, q) => (r.name + r.sku + r.campaign_name || '').toLowerCase().includes(q),
+    search: (r, q) => (r.name + r.sku + (r.brand_name || '')).toLowerCase().includes(q),
     cols: [
       { key: 'id', label: 'ID', render: (r) => <strong>#{r.id}</strong> },
       { key: 'name', label: 'Name' },
       { key: 'sku', label: 'SKU' },
-      { key: 'campaign_name', label: 'Campaign' },
+      { key: 'brand_name', label: 'Brand' },
       { key: 'ptr', label: 'PTR', render: (r) => `₹${r.ptr || 0}` },
       { key: 'min_quantity', label: 'Min qty' },
       { key: 'max_pob', label: 'Max POB' },
@@ -66,7 +65,6 @@ const CONFIGS = {
     ],
     fields: [
       { name: 'name', label: 'Name', required: true },
-      { name: 'campaign_id', label: 'Campaign', type: 'select', required: true, ref: '/api/v1/campaigns' },
       { name: 'brand_id', label: 'Brand', type: 'select', ref: '/api/v1/brands' },
       { name: 'sku', label: 'SKU' },
       { name: 'strength', label: 'Strength' },

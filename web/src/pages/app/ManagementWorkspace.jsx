@@ -287,7 +287,7 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
     active: true, invoice_verification_required: true, status: 'draft', scheme_type: 'others',
     assignment: { mode: 'all', regions: [], employee_ids: [], manager_id: '' }, ...editing,
   });
-  const [products, setProducts] = useState(isEdit ? [] : [{}]);
+  const [products, setProducts] = useState([]);
   const [busy, setBusy] = useState(false);
   const [files, setFiles] = useState({ logo: null, banner: null });
   const loaded = useRef(false);
@@ -339,12 +339,6 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
     const v = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
     setF((p) => ({ ...p, [k]: v }));
   };
-  const setP = (i, k) => (e) => {
-    const v = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
-    setProducts((prev) => prev.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
-  };
-  const addRow = () => setProducts((prev) => [...prev, {}]);
-  const delRow = (i) => setProducts((prev) => prev.filter((_, j) => j !== i));
 
   const roleItems = roles.data?.items || [];
   const allowed = (f.upload_roles || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -560,7 +554,7 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
                 <Select value={f.brand_id || ''} onChange={set('brand_id')} options={brandOpts} />
               )}
             </Field>
-            <ProductBuilder products={products} brands={divBrands} setP={setP} addRow={addRow} delRow={delRow} />
+            <ProductBuilder base={base} products={products} setProducts={setProducts} brands={brands} divBrands={divBrands} />
           </>
         )}
         {step === 2 && (
@@ -749,36 +743,104 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
   );
 }
 
-function ProductBuilder({ products, brands, setP, addRow, delRow }) {
+function ProductBuilder({ base, products, setProducts, brands, divBrands }) {
+  const masters = useAsync(() => api(`${base}/products`), [base]);
+  const [q, setQ] = useState('');
+  const [quick, setQuick] = useState(false);
+  const [n, setN] = useState({ brand_id: '', name: '', ptr: '', pts: '', mrp: '' });
+  const [busy, setBusy] = useState(false);
+
+  const all = masters.data?.items || [];
+  const selectedIds = new Set((products || []).map((p) => p.id).filter(Boolean));
+  const filtered = all.filter((p) => !q || (p.name || '').toLowerCase().includes(q.toLowerCase())
+    || (p.brand_name || '').toLowerCase().includes(q.toLowerCase())
+    || (p.sku || '').toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => (selectedIds.has(b.id) ? 1 : 0) - (selectedIds.has(a.id) ? 1 : 0));
+
+  const toggle = (m) => {
+    if (selectedIds.has(m.id)) setProducts((prev) => prev.filter((p) => p.id !== m.id));
+    else setProducts((prev) => [...prev, m]);
+  };
+
+  const addQuick = async (e) => {
+    e.preventDefault();
+    if (!(n.name || '').trim()) { toast('Product name is required', 'error'); return; }
+    setBusy(true);
+    try {
+      const r = await api(`${base}/products`, {
+        method: 'POST',
+        body: {
+          brand_id: n.brand_id || null,
+          name: n.name,
+          ptr: n.ptr === '' ? 0 : Number(n.ptr),
+          pts: n.pts === '' ? 0 : Number(n.pts),
+          mrp: n.mrp === '' ? 0 : Number(n.mrp),
+          status: 'active', scheme_eligibility: true,
+        },
+      });
+      await masters.run();
+      const created = [{ ...(await api(`${base}/products?q=${encodeURIComponent(n.name)}`)).items?.find((p) => p.id === r.id) }];
+      setProducts((prev) => [...prev, ...created].filter(Boolean));
+      setN({ brand_id: '', name: '', ptr: '', pts: '', mrp: '' });
+      setQuick(false);
+      toast('Product added to catalogue and selected', 'success');
+    } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
+  };
+
   return (
     <>
-      <h3 className="sub-head">Campaign brands &amp; prices (PTR / PTS)</h3>
+      <h3 className="sub-head">Campaign products</h3>
+      <p className="muted">Pick from your division's master product catalogue — the campaign will offer exactly the products you select.</p>
       <div className="prod-builder">
-        <div className="prod-builder-head">
-          <span>Brand</span><span>Product name</span><span>Pack</span>
-          <span>PTR (₹)</span><span>PTS (₹)</span><span>MRP (₹)</span>
-          <span>Min qty</span><span>Min POB</span><span>Max POB</span><span />
+        <SearchBox value={q} onChange={setQ} placeholder="Search your division's products…" />
+        <div className="prod-picker">
+          {masters.loading && <div className="muted" style={{ padding: 12 }}>Loading products…</div>}
+          {!masters.loading && filtered.length === 0 && (
+            <div className="muted" style={{ padding: 12 }}>
+              No matching products. Add them on the Products page, or use “New product” below.
+            </div>
+          )}
+          {filtered.map((m) => {
+            const sel = selectedIds.has(m.id);
+            return (
+              <label key={m.id} className={`prod-picker-row${sel ? ' sel' : ''}`}>
+                <input type="checkbox" checked={sel} onChange={() => toggle(m)} />
+                <span className="prod-picker-name"><strong>{m.name}</strong>
+                  <span className="muted cell-sub">{[m.brand_name, m.pack, m.sku].filter(Boolean).join(' · ')}</span>
+                </span>
+                <span className="muted prod-picker-price">{m.ptr ? `PTR ₹${m.ptr}` : ''}</span>
+              </label>
+            );
+          })}
         </div>
-        {products.map((p, i) => (
-          <div className="prod-builder-row" key={i}>
-            <select className="input" value={p.brand_id || ''} onChange={setP(i, 'brand_id')}>
-              <option value="">— select —</option>
-              {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        {quick && (
+          <form className="prod-picker-quick" onSubmit={addQuick}>
+            <select className="input" value={n.brand_id || ''} onChange={(e) => setN((p) => ({ ...p, brand_id: e.target.value }))}>
+              <option value="">No brand</option>
+              {divBrands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
-            <input className="input" placeholder="Product name" value={p.name || ''} onChange={setP(i, 'name')} />
-            <input className="input" placeholder="Pack" value={p.pack || ''} onChange={setP(i, 'pack')} />
-            <input className="input" type="number" step="0.01" min="0" value={p.ptr ?? ''} onChange={setP(i, 'ptr')} />
-            <input className="input" type="number" step="0.01" min="0" value={p.pts ?? ''} onChange={setP(i, 'pts')} />
-            <input className="input" type="number" step="0.01" min="0" value={p.mrp ?? ''} onChange={setP(i, 'mrp')} />
-            <input className="input" type="number" min="0" value={p.min_quantity ?? 1} onChange={setP(i, 'min_quantity')} />
-            <input className="input" type="number" step="0.01" min="0" value={p.min_pob ?? 0} onChange={setP(i, 'min_pob')} />
-            <input className="input" type="number" step="0.01" min="0" value={p.max_pob ?? ''} onChange={setP(i, 'max_pob')} />
-            <button type="button" className="btn-link danger" onClick={() => delRow(i)} title="Remove row">✕</button>
+            <input className="input" placeholder="Product name" value={n.name || ''} onChange={(e) => setN((p) => ({ ...p, name: e.target.value }))} />
+            <input className="input" type="number" step="0.01" min="0" placeholder="PTR" value={n.ptr ?? ''} onChange={(e) => setN((p) => ({ ...p, ptr: e.target.value }))} />
+            <input className="input" type="number" step="0.01" min="0" placeholder="MRP" value={n.mrp ?? ''} onChange={(e) => setN((p) => ({ ...p, mrp: e.target.value }))} />
+            <button className="btn btn-primary btn-sm" disabled={busy}>{busy ? 'Saving…' : 'Add & select'}</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setQuick(false)}>Cancel</button>
+          </form>
+        )}
+        {products.length > 0 && (
+          <div className="prod-picker-selected">
+            <span className="muted">Selected ({products.length}):</span>
+            {products.map((p) => (
+              <span key={p.id || p._k} className="chip">
+                {p.name || 'Unnamed'}
+                {p.ptr ? ` · ₹${p.ptr}` : ''}
+                <button type="button" className="chip-x" onClick={() => setProducts((prev) => prev.filter((x) => x !== p))}>✕</button>
+              </span>
+            ))}
           </div>
-        ))}
+        )}
         <div className="prod-builder-foot">
-          <button type="button" className="btn btn-ghost btn-sm" onClick={addRow}>+ Add product</button>
-          <span className="muted">Enter the brands and their PTR/PTS prices for this campaign.</span>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setQuick(true)}>+ New product (add to catalogue)</button>
+          <span className="muted">Selected products are added to this campaign automatically.</span>
         </div>
       </div>
     </>

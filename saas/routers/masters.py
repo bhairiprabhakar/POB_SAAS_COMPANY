@@ -56,6 +56,18 @@ def _assert_brand_in_div(conn, bid: int, div: int) -> None:
         raise HTTPException(404, "brand not found")
 
 
+def _assert_brand_for_div(conn, bid: int, div: int | None) -> None:
+    """Validate a brand exists; when the caller is division-scoped also enforce
+    the division (or global) brand is theirs."""
+    if div:
+        _assert_brand_in_div(conn, bid, div)
+    else:
+        c = conn.cursor()
+        c.execute("SELECT id FROM brands WHERE id=%s", (bid,))
+        if not c.fetchone():
+            raise HTTPException(404, "brand not found")
+
+
 def _assert_campaign_in_div(conn, cid: int, div: int) -> None:
     """A campaign belongs to a division directly, or through the brand it
     promotes (division -> brands -> campaigns). Mirrors list_campaigns."""
@@ -448,7 +460,22 @@ async def upload_campaign_asset(cid: int, kind: str = "logo", file: UploadFile =
     return {"ok": True, "path": rel, "url": storage.public_url(rel)}
 
 
-# ── Products (read-only list for POB flows) ─────────────────────────────────
+# ── Products (division-scoped master catalogue for POB flows) ───────────────
+
+def _assert_product_in_div(conn, p: dict, div: int) -> None:
+    """A product belongs to a division directly (division_id) or through its
+    brand (brand -> division). Mirror of brands scoping."""
+    if p.get("division_id") == div:
+        return
+    bid = p.get("brand_id")
+    if bid:
+        c = conn.cursor()
+        c.execute("SELECT id FROM brands WHERE id=%s AND (division_id=%s OR division_id IS NULL)",
+                  (bid, div))
+        if c.fetchone():
+            return
+    raise HTTPException(404, "product not found")
+
 
 @router.get("/products")
 def list_products(campaign_id: int = None, brand_id: int = None, q: str = "",
@@ -456,12 +483,12 @@ def list_products(campaign_id: int = None, brand_id: int = None, q: str = "",
                   ctx: TenantContext = Depends(require_permission("product.view"))):
     conn = ctx.conn
     c = conn.cursor()
-    sql = """SELECT p.*, c.name AS campaign_name, b.name AS brand_name FROM products p
-             LEFT JOIN campaigns c ON c.id=p.campaign_id
-             LEFT JOIN brands b ON b.id=p.brand_id"""
+    sql = """SELECT p.*, b.name AS brand_name, d.name AS division_name FROM products p
+             LEFT JOIN brands b ON b.id=p.brand_id
+             LEFT JOIN divisions d ON d.id=p.division_id"""
     where, params = [], []
     if campaign_id:
-        where.append("p.campaign_id=%s")
+        where.append("EXISTS (SELECT 1 FROM campaign_products cp WHERE cp.campaign_id=%s AND cp.product_id=p.id)")
         params.append(campaign_id)
     if brand_id:
         where.append("p.brand_id=%s")
@@ -471,13 +498,199 @@ def list_products(campaign_id: int = None, brand_id: int = None, q: str = "",
         params.extend([f"%{q}%", f"%{q}%"])
     div = user_division_id(ctx.conn, ctx)
     if div:
-        where.append("c.division_id=%s")
-        params.append(div)
+        where.append("(p.division_id IS NULL OR p.division_id=%s OR b.division_id IS NULL OR b.division_id=%s)")
+        params.extend([div, div])
     if where:
         sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY p.id DESC LIMIT %s OFFSET %s"
     c.execute(sql, params + [limit, offset])
     return {"items": fetchall_dict(c)}
+
+
+def _get_product(conn, pid: int) -> dict:
+    c = conn.cursor()
+    c.execute("SELECT * FROM products WHERE id=%s", (pid,))
+    return fetchone_dict(c)
+
+
+@router.post("/products")
+def create_product(body: dict, ctx: TenantContext = Depends(require_permission("campaign.manage"))):
+    name = str(body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Product name is required")
+    div = division_scope(ctx.conn, ctx)
+    bid = body.get("brand_id")
+    if bid is not None:
+        _assert_brand_for_div(ctx.conn, int(bid), div)
+    cid = body.get("campaign_id")
+    if cid:
+        if div:
+            _assert_campaign_in_div(ctx.conn, int(cid), div)
+        pid = campaign_service._insert_product(ctx.conn, {**body, "name": name}, division_id=div)
+        c = ctx.conn.cursor()
+        c.execute("INSERT INTO campaign_products (campaign_id, product_id, sort_order) VALUES (%s,%s,0)",
+                  (int(cid), pid))
+    else:
+        pid = campaign_service._insert_product(ctx.conn, {**body, "name": name}, division_id=div)
+    ctx.conn.commit()
+    log_action(ctx.conn, _actor(ctx)["id"], "product.create", "product", pid,
+               {"name": name, "campaign_id": cid}, actor=_actor(ctx)["name"])
+    return {"ok": True, "id": pid}
+
+
+@router.put("/products/{pid}")
+def update_product(pid: int, body: dict, ctx: TenantContext = Depends(require_permission("campaign.manage"))):
+    p = _get_product(ctx.conn, pid)
+    if not p:
+        raise HTTPException(404, "product not found")
+    div = division_scope(ctx.conn, ctx)
+    if div:
+        _assert_product_in_div(ctx.conn, p, div)
+    if "name" in body and not str(body.get("name") or "").strip():
+        raise HTTPException(400, "Product name cannot be empty")
+    if body.get("brand_id") is not None:
+        _assert_brand_for_div(ctx.conn, int(body["brand_id"]), div)
+    campaign_service._update_product(ctx.conn, pid, body)
+    ctx.conn.commit()
+    log_action(ctx.conn, _actor(ctx)["id"], "product.update", "product", pid,
+               {"name": body.get("name") or p.get("name")}, actor=_actor(ctx)["name"])
+    return {"ok": True, "id": pid}
+
+
+@router.delete("/products/{pid}")
+def delete_product(pid: int, ctx: TenantContext = Depends(require_permission("campaign.manage"))):
+    p = _get_product(ctx.conn, pid)
+    if not p:
+        raise HTTPException(404, "product not found")
+    div = division_scope(ctx.conn, ctx)
+    if div:
+        _assert_product_in_div(ctx.conn, p, div)
+    c = ctx.conn.cursor()
+    c.execute("SELECT id FROM pob_activities WHERE product_id=%s LIMIT 1", (pid,))
+    if c.fetchone():
+        raise HTTPException(409, "Product has POB activities and can't be deleted")
+    c.execute("DELETE FROM campaign_products WHERE product_id=%s", (pid,))
+    c.execute("DELETE FROM products WHERE id=%s", (pid,))
+    ctx.conn.commit()
+    log_action(ctx.conn, _actor(ctx)["id"], "product.delete", "product", pid,
+               {"name": p.get("name")}, actor=_actor(ctx)["name"])
+    return {"ok": True}
+
+
+# ── Products bulk upload ───────────────────────────────────────────────────
+
+def _product_brand_id(conn, div: int | None, name: str) -> int | None:
+    """Resolve a brand by name within the caller's division (or globally)."""
+    name = str(name or "").strip()
+    if not name:
+        return None
+    c = conn.cursor()
+    if div:
+        c.execute("SELECT id FROM brands WHERE lower(name)=lower(%s) AND (division_id=%s OR division_id IS NULL) LIMIT 1",
+                  (name, div))
+    else:
+        c.execute("SELECT id FROM brands WHERE lower(name)=lower(%s) LIMIT 1", (name,))
+    row = c.fetchone()
+    return row[0] if row else None
+
+
+@router.post("/products/bulk-upload")
+async def bulk_upload_products(file: UploadFile = File(...),
+                               ctx: TenantContext = Depends(require_permission("campaign.manage"))):
+    data = await file.read()
+    try:
+        validate_upload(data, filename=file.filename or "", allowed_kinds=SPREADSHEET_KINDS,
+                        max_size=config.MAX_UPLOAD_SIZE)
+    except UploadValidationError as exc:
+        raise HTTPException(400, str(exc))
+    try:
+        wb = load_workbook(io.BytesIO(data))
+        ws = wb.active
+    except Exception:
+        raise HTTPException(400, "Invalid Excel file")
+    headers = [str(c.value).strip() if c.value is not None else "" for c in ws[1]]
+    rows = list(ws.iter_rows(min_row=2, values_only=True))
+    conn = ctx.conn
+    c = conn.cursor()
+    fields = ["brand", "name", "sku", "strength", "pack", "ptr", "pts", "mrp",
+              "min_quantity", "min_pob", "max_pob", "scheme_eligibility", "status"]
+    created, errors = 0, []
+    div = division_scope(conn, ctx)
+    for i, row in enumerate(rows, start=2):
+        if not row or all(v is None or str(v).strip() == "" for v in row):
+            continue
+        d = {headers[j]: (row[j] if j < len(row) else None) for j in range(len(headers))}
+        name = (d.get("name") or "").strip()
+        if not name:
+            errors.append(f"row {i}: name required")
+            continue
+        brand_id = _product_brand_id(conn, div, d.get("brand"))
+        if d.get("brand") and not brand_id:
+            errors.append(f"row {i}: brand '{d.get('brand')}' not found")
+            continue
+        def _num(v, default=0):
+            try:
+                if v is None or str(v).strip() == "":
+                    return None if default is None else default
+                return float(v)
+            except (TypeError, ValueError):
+                return default
+        def _intnum(v, default=1):
+            try:
+                if v is None or str(v).strip() == "":
+                    return default
+                return int(float(v))
+            except (TypeError, ValueError):
+                return default
+        def _yesno(v, default=True):
+            if v is None or str(v).strip() == "":
+                return default
+            return str(v).strip().lower() in ("1", "true", "yes", "y")
+        vals = {
+            "brand_id": brand_id,
+            "name": name,
+            "sku": (d.get("sku") or "").strip() or None,
+            "strength": d.get("strength"),
+            "pack": d.get("pack"),
+            "ptr": _num(d.get("ptr")),
+            "pts": _num(d.get("pts")),
+            "mrp": _num(d.get("mrp")),
+            "min_quantity": _intnum(d.get("min_quantity")),
+            "min_pob": _num(d.get("min_pob")),
+            "max_pob": _num(d.get("max_pob"), None),
+            "scheme_eligibility": _yesno(d.get("scheme_eligibility")),
+            "status": (d.get("status") or "active").strip() or "active",
+        }
+        try:
+            c.execute(
+                """INSERT INTO products (brand_id, division_id, sku, name, strength, pack, ptr, pts, mrp,
+                   min_quantity, min_pob, max_pob, scheme_eligibility, status)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (vals["brand_id"], div, vals["sku"], vals["name"], vals["strength"], vals["pack"],
+                 vals["ptr"], vals["pts"], vals["mrp"], vals["min_quantity"], vals["min_pob"],
+                 vals["max_pob"], vals["scheme_eligibility"], vals["status"]),
+            )
+            created += 1
+        except Exception as exc:
+            errors.append(f"row {i}: {exc}")
+    conn.commit()
+    log_action(conn, ctx.user["id"], "product.bulk_upload", "product", None,
+               {"created": created, "errors": len(errors)})
+    return {"created": created, "errors": errors}
+
+
+@router.get("/products/bulk-template")
+def product_template(ctx: TenantContext = Depends(require_permission("campaign.manage"))):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Products"
+    ws.append(["brand", "name", "sku", "strength", "pack", "ptr", "pts", "mrp",
+               "min_quantity", "min_pob", "max_pob", "scheme_eligibility", "status"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition": "attachment; filename=products_template.xlsx"})
 
 
 # ── Chemists ────────────────────────────────────────────────────────────────
