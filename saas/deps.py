@@ -71,6 +71,7 @@ def require_superadmin(claims: dict = Depends(get_claims)) -> dict:
 #   campaign_admin       -> cross-division campaign approvals
 #   finance_admin        -> cross-division gratification approvals / payments
 #   verification_admin   -> cross-division POB verification approvals
+#   division_admin       -> create and manage divisions (tenant lifecycle)
 _FULL_ROLES = {"owner", "full"}
 
 
@@ -109,6 +110,7 @@ _SA_PATH_ALLOW = {
     "campaign_admin": ("/campaigns",) + _SA_ROLE_VIEW,
     "finance_admin": ("/gratification", "/finance") + _SA_ROLE_VIEW,
     "verification_admin": ("/pob", "/verification") + _SA_ROLE_VIEW,
+    "division_admin": ("/divisions",) + _SA_ROLE_VIEW,
 }
 
 

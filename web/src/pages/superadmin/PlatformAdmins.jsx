@@ -12,6 +12,7 @@ const ROLE_LABELS = {
   campaign_admin: 'Campaign Admin · campaign approvals',
   finance_admin: 'Finance Admin · gratification & payments',
   verification_admin: 'Verification Admin · POB verification',
+  division_admin: 'Division Admin · create & manage divisions',
 };
 
 const ROLE_OPTIONS = [
@@ -19,9 +20,10 @@ const ROLE_OPTIONS = [
   { value: 'campaign_admin', label: 'Campaign Admin' },
   { value: 'finance_admin', label: 'Finance Admin' },
   { value: 'verification_admin', label: 'Verification Admin' },
+  { value: 'division_admin', label: 'Division Admin' },
 ];
 
-const TONES = { full: 'blue', campaign_admin: 'teal', finance_admin: 'green', verification_admin: 'amber' };
+const TONES = { full: 'blue', campaign_admin: 'teal', finance_admin: 'green', verification_admin: 'amber', division_admin: 'teal' };
 
 export default function PlatformAdmins() {
   const me = saRole();

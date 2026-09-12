@@ -38,7 +38,10 @@ export default function SuperAnalytics() {
 
   const [roiTab, setRoiTab] = useState('all');
   const { data: roiData, loading: roiLoading, error: roiError, run: roiRun } = useAsync(
-    () => roiRole ? api('/api/v1/superadmin/campaigns/roi?days=' + days) : null, [days, roiRole]);
+    () => roiRole
+      ? api('/api/v1/superadmin/campaigns/roi?days=' + days)
+      : Promise.resolve({ summary: {}, campaigns: [], top_winning: [], top_losing: [] }),
+    [days, roiRole]);
 
   const d = data || {};
   const totals = d.totals || {};

@@ -2099,6 +2099,7 @@ PLATFORM_ROLES = (
     "campaign_admin",
     "finance_admin",
     "verification_admin",
+    "division_admin",
 )
 
 
@@ -2135,7 +2136,7 @@ def create_platform_admin(body: dict):
         raise HTTPException(400, "Username and full name are required")
     if len(password) < 6:
         raise HTTPException(400, "Password must be at least 6 characters")
-    if role not in ("full", "campaign_admin", "finance_admin", "verification_admin"):
+    if role not in ("full", "campaign_admin", "finance_admin", "verification_admin", "division_admin"):
         raise HTTPException(400, "Invalid platform role")
     conn = platform_db.get_db()
     try:
@@ -2169,7 +2170,7 @@ def update_platform_admin(aid: int, body: dict, request: Request = None,
         if target["owner"]:
             raise HTTPException(403, "The company owner account cannot be edited")
         role = str(body.get("role") or target["role"]).strip()
-        if role not in ("full", "campaign_admin", "finance_admin", "verification_admin"):
+        if role not in ("full", "campaign_admin", "finance_admin", "verification_admin", "division_admin"):
             raise HTTPException(400, "Invalid platform role")
         status = str(body.get("status") or target["status"]).strip()
         if status not in ("active", "suspended"):

@@ -324,11 +324,11 @@ function SideCollapse({ collapsed, onToggle }) {
 
 function SuperSidebar({ onNavigate, open, collapsed, onToggleCollapse }) {
   const items = [
-    { to: '/superadmin', label: 'Dashboard', icon: '▦', end: true, group: 'Overview', tone: 'primary', roles: ['owner', 'full', 'campaign_admin', 'finance_admin', 'verification_admin'] },
+    { to: '/superadmin', label: 'Dashboard', icon: '▦', end: true, group: 'Overview', tone: 'primary', roles: ['owner', 'full', 'campaign_admin', 'finance_admin', 'verification_admin', 'division_admin'] },
 
     { to: '/superadmin/company', label: 'Company Profile', icon: '◈', group: 'Company', tone: 'blue', roles: ['owner', 'full'] },
 
-    { to: '/superadmin/divisions', label: 'All Divisions', icon: '▣', group: 'Divisions', tone: 'blue', roles: ['owner', 'full'] },
+    { to: '/superadmin/divisions', label: 'All Divisions', icon: '▣', group: 'Divisions', tone: 'blue', roles: ['owner', 'full', 'division_admin'] },
 
     { to: '/superadmin/users', label: 'All Employees', icon: '👥', group: 'Users & Hierarchy', tone: 'blue', roles: ['owner', 'full'] },
 

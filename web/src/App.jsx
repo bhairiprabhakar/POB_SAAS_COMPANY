@@ -89,13 +89,14 @@ function ProtectedSuper({ children }) {
   const s = getSession();
   if (!s || s.kind !== 'sa') return <Navigate to="/superadmin-login" replace />;
   const role = s.user?.role || 'full';
-  const home = { campaign_admin: '/superadmin/campaigns', finance_admin: '/superadmin/gratification', verification_admin: '/superadmin/pob' }[role];
+  const home = { campaign_admin: '/superadmin/campaigns', finance_admin: '/superadmin/gratification', verification_admin: '/superadmin/pob', division_admin: '/superadmin/divisions' }[role];
   if (home) {
     const path = window.location.pathname;
     const allowed = [home, '/superadmin'];
     if (role === 'campaign_admin') allowed.push('/superadmin/analytics');
     if (role === 'finance_admin') allowed.push('/superadmin/finance');
-    if (!allowed.includes(path)) return <Navigate to={home} replace />;
+    if (role === 'division_admin') allowed.push('/superadmin/divisions');
+    if (!allowed.includes(path) && !allowed.some((a) => path.startsWith(a + '/'))) return <Navigate to={home} replace />;
   }
   return children;
 }
