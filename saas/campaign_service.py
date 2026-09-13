@@ -282,7 +282,8 @@ def _validate_division(conn, division_id):
 
 
 def list_brands(conn, q: str = "", status: str = "", division_id: int = None) -> list[dict]:
-    sql = """SELECT b.*, d.name AS division_name, d.slug AS division_slug
+    sql = """SELECT b.*, d.name AS division_name, d.slug AS division_slug,
+             (SELECT count(*) FROM products p WHERE p.brand_id=b.id) AS product_count
              FROM brands b LEFT JOIN divisions d ON d.id=b.division_id"""
     where, params = [], []
     if q:
@@ -308,31 +309,78 @@ def create_brand(conn, actor: dict, body: dict) -> int:
         raise HTTPException(400, "brand name required")
     division_id = _validate_division(conn, body.get("division_id"))
     c = conn.cursor()
-    c.execute("INSERT INTO brands (name, code, description, status, division_id) "
-              "VALUES (%s,%s,%s,%s,%s) RETURNING id",
-              (name, body.get("code"), body.get("description"),
-               body.get("status") or "active", division_id))
+    code = (body.get("code") or "").strip() or None
+    _assert_brand_unique(conn, name=name, code=code, division_id=division_id)
+    c.execute("INSERT INTO brands (name, code, description, status, division_id, created_by, updated_by, updated_at) "
+              "VALUES (%s,%s,%s,%s,%s,%s,%s,CURRENT_TIMESTAMP) RETURNING id",
+              (name, code, body.get("description"),
+               body.get("status") or "active", division_id, actor.get("id"), actor.get("id")))
     bid = c.fetchone()[0]
     conn.commit()
     log_action(conn, actor.get("id"), "brand.create", "brand", bid, {"name": name}, actor=actor.get("name"))
     return bid
 
 
+def _assert_brand_unique(conn, name: str, code: str = None, division_id: int = None,
+                         exclude_id: int = None) -> None:
+    """Brand name and code must each be unique within the same division."""
+    c = conn.cursor()
+    if name:
+        if division_id:
+            c.execute("SELECT id FROM brands WHERE lower(name)=lower(%s) AND (division_id=%s OR division_id IS NULL) AND id<>%s",
+                      (name, division_id, exclude_id if exclude_id else 0))
+        else:
+            c.execute("SELECT id FROM brands WHERE lower(name)=lower(%s) AND division_id IS NULL AND id<>%s",
+                      (name, exclude_id if exclude_id else 0))
+        if c.fetchone():
+            raise HTTPException(409, "a brand with this name already exists in your division")
+    if code:
+        if division_id:
+            c.execute("SELECT id FROM brands WHERE lower(code)=lower(%s) AND (division_id=%s OR division_id IS NULL) AND id<>%s",
+                      (code, division_id, exclude_id if exclude_id else 0))
+        else:
+            c.execute("SELECT id FROM brands WHERE lower(code)=lower(%s) AND division_id IS NULL AND id<>%s",
+                      (code, exclude_id if exclude_id else 0))
+        if c.fetchone():
+            raise HTTPException(409, "a brand with this code already exists in your division")
+
+
 def update_brand(conn, actor: dict, bid: int, body: dict) -> None:
     if "division_id" in body:
         _validate_division(conn, body.get("division_id"))
+    name = body.get("name")
+    if name is not None and not str(name).strip():
+        raise HTTPException(400, "brand name cannot be empty")
     fields = ["name", "code", "description", "status", "division_id"]
     sets, params = [], []
     for f in fields:
         if f in body and body[f] is not None:
             sets.append(f"{f}=%s")
             params.append(body[f])
+    if body.get("name") is not None:
+        _assert_brand_unique(conn, name=str(body["name"]).strip(),
+                             code=(body.get("code") or "").strip() or None,
+                             division_id=_validate_division(conn, body.get("division_id")) or _current_brand_division(conn, bid),
+                             exclude_id=bid)
+    elif body.get("code") is not None:
+        _assert_brand_unique(conn, name=None, code=str(body["code"]).strip() or None,
+                             division_id=_current_brand_division(conn, bid), exclude_id=bid)
     if not sets:
         raise HTTPException(400, "Nothing to update")
+    sets.append("updated_by=%s")
+    params.append(actor.get("id"))
+    sets.append("updated_at=CURRENT_TIMESTAMP")
     params.append(bid)
     conn.cursor().execute(f"UPDATE brands SET {', '.join(sets)} WHERE id=%s", params)
     conn.commit()
     log_action(conn, actor.get("id"), "brand.update", "brand", bid, actor=actor.get("name"))
+
+
+def _current_brand_division(conn, bid: int):
+    c = conn.cursor()
+    c.execute("SELECT division_id FROM brands WHERE id=%s", (bid,))
+    row = c.fetchone()
+    return row[0] if row else None
 
 
 def delete_brand(conn, actor: dict, bid: int) -> None:
@@ -563,7 +611,8 @@ def get_campaign(conn, cid: int) -> dict | None:
         return None
     row["brand_ids"] = _brand_ids_list(row)
     row["brand_names"] = _brand_names(conn, row["brand_ids"])
-    c.execute("""SELECT p.*, b.name AS brand_name, b.division_id AS brand_division_id
+    c.execute("""SELECT cp.min_quantity, cp.min_pob, cp.max_pob, cp.scheme_eligibility,
+                 p.*, b.name AS brand_name, b.division_id AS brand_division_id
                  FROM campaign_products cp
                  JOIN products p ON p.id=cp.product_id
                  LEFT JOIN brands b ON b.id=p.brand_id
@@ -620,7 +669,8 @@ def create_campaign(conn, actor: dict, body: dict) -> int:
     )
     cid = c.fetchone()[0]
     _sync_campaign_rules(conn, cid, body.get("rules"), actor)
-    _sync_products(conn, cid, body.get("products"), division_id=body.get("division_id"))
+    _sync_products(conn, cid, body.get("products"), division_id=body.get("division_id"),
+                   actor_id=actor.get("id"))
     if body.get("assignment") is not None:
         set_campaign_assignments(conn, cid, body, actor)
     conn.commit()
@@ -688,7 +738,8 @@ def update_campaign(conn, actor: dict, cid: int, body: dict, request=None) -> No
         params.append(cid)
         c.execute(f"UPDATE campaigns SET {', '.join(sets)} WHERE id=%s", params)
     _sync_campaign_rules(conn, cid, body.get("rules"), actor)
-    _sync_products(conn, cid, body.get("products"), division_id=body.get("division_id"))
+    _sync_products(conn, cid, body.get("products"), division_id=body.get("division_id"),
+                   actor_id=actor.get("id"))
     if body.get("assignment") is not None:
         set_campaign_assignments(conn, cid, body, actor)
     conn.commit()
@@ -747,24 +798,23 @@ def delete_campaign(conn, actor: dict, cid: int) -> None:
 
 # ── Products (division-scoped master catalogue; campaigns link via junction) ─
 
-def _insert_product(conn, p: dict, division_id: int = None) -> int:
+def _insert_product(conn, p: dict, division_id: int = None, actor_id: int = None) -> int:
     c = conn.cursor()
     c.execute(
-        """INSERT INTO products (brand_id, division_id, sku, name, strength, pack, ptr, pts, mrp,
-           min_quantity, min_pob, max_pob, scheme_eligibility, status, division)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+        """INSERT INTO products (brand_id, division_id, sku, name, composition, strength, dosage_form,
+           pack, ptr, pts, mrp, gst, status, created_by, updated_by, updated_at)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,CURRENT_TIMESTAMP) RETURNING id""",
         (p.get("brand_id"), division_id, p.get("sku"), (p.get("name") or "").strip(),
-         p.get("strength"), p.get("pack"), p.get("ptr") or 0, p.get("pts") or 0,
-         p.get("mrp") or 0, p.get("min_quantity") or 1, p.get("min_pob") or 0,
-         p.get("max_pob"), p.get("scheme_eligibility", True), p.get("status") or "active",
-         p.get("division")),
+         p.get("composition"), p.get("strength"), p.get("dosage_form"), p.get("pack"),
+         p.get("ptr") or 0, p.get("pts") or 0, p.get("mrp") or 0, p.get("gst") or 0,
+         p.get("status") or "active", actor_id, actor_id),
     )
     return c.fetchone()[0]
 
 
-def _update_product(conn, pid: int, p: dict) -> None:
-    fields = ["brand_id", "division_id", "sku", "name", "strength", "pack", "ptr", "pts", "mrp",
-              "min_quantity", "min_pob", "max_pob", "scheme_eligibility", "status", "division"]
+def _update_product(conn, pid: int, p: dict, actor_id: int = None) -> None:
+    fields = ["brand_id", "division_id", "sku", "name", "composition", "strength", "dosage_form",
+              "pack", "ptr", "pts", "mrp", "gst", "status"]
     sets, params = [], []
     for f in fields:
         if f in p:
@@ -773,15 +823,35 @@ def _update_product(conn, pid: int, p: dict) -> None:
             params.append(p[f])
     if not sets:
         return
+    sets.append("updated_by=%s")
+    params.append(actor_id)
+    sets.append("updated_at=CURRENT_TIMESTAMP")
     params.append(pid)
     conn.cursor().execute(f"UPDATE products SET {', '.join(sets)} WHERE id=%s", params)
 
 
-def _sync_products(conn, cid: int, products, division_id: int = None) -> None:
+_CONSTRAINT_FIELDS = ("min_quantity", "min_pob", "max_pob", "scheme_eligibility")
+
+
+def _constraint_vals(p: dict) -> dict:
+    """The per-campaign POB constraints carried on a product payload, or defaults."""
+    if not isinstance(p, dict):
+        return {}
+    out = {}
+    for f in _CONSTRAINT_FIELDS:
+        if f in p:
+            out[f] = p[f]
+    return out
+
+
+def _sync_products(conn, cid: int, products, division_id: int = None, actor_id: int = None) -> None:
     """Synchronize a campaign's product links from the builder. Rows carrying an
     existing id are linked to the campaign (and updated in place), new rows are
     inserted as division master products, and links that disappeared are removed
-    -- master products themselves are never deleted from a campaign sync."""
+    -- master products themselves are never deleted from a campaign sync.
+    Per-campaign constraints (min quantity / min/max POB / scheme eligibility)
+    ride on the link, so the same master can carry a different threshold per
+    campaign."""
     if products is None:
         return
     c = conn.cursor()
@@ -790,25 +860,36 @@ def _sync_products(conn, cid: int, products, division_id: int = None) -> None:
     linked = set()
     for p in products:
         if isinstance(p, dict) and not p.get("id"):
-            pid = _insert_product(conn, p, division_id)
-            _link_product(c, cid, pid, list(existing))
+            pid = _insert_product(conn, p, division_id, actor_id)
+            _link_product(c, cid, pid, p, list(existing))
             linked.add(pid)
             continue
         pid = p.get("id") if isinstance(p, dict) else p
         if not pid:
             continue
         linked.add(pid)
-        _link_product(c, cid, pid, list(existing))
+        _link_product(c, cid, pid, p if isinstance(p, dict) else {}, list(existing))
         if isinstance(p, dict):
-            _update_product(conn, pid, p)
+            _update_product(conn, pid, p, actor_id)
     for pid in existing - linked:
         c.execute("DELETE FROM campaign_products WHERE campaign_id=%s AND product_id=%s", (cid, pid))
 
 
-def _link_product(c, cid: int, pid: int, existing: list) -> None:
+def _link_product(c, cid: int, pid: int, p: dict, existing: list) -> None:
+    """Link a product to a campaign and persist the campaign-level constraints
+    carried on the payload (falling back to the link defaults)."""
+    vals = _constraint_vals(p)
     c.execute(
-        "INSERT INTO campaign_products (campaign_id, product_id, sort_order) VALUES (%s,%s,0) "
-        "ON CONFLICT (campaign_id, product_id) DO NOTHING", (cid, pid),
+        """INSERT INTO campaign_products (campaign_id, product_id, sort_order,
+           min_quantity, min_pob, max_pob, scheme_eligibility)
+           VALUES (%s,%s,0,%s,%s,%s,%s)
+           ON CONFLICT (campaign_id, product_id) DO UPDATE SET
+             min_quantity=EXCLUDED.min_quantity,
+             min_pob=EXCLUDED.min_pob,
+             max_pob=EXCLUDED.max_pob,
+             scheme_eligibility=EXCLUDED.scheme_eligibility""",
+        (cid, pid, vals.get("min_quantity") or 1, vals.get("min_pob") or 0,
+         vals.get("max_pob"), vals.get("scheme_eligibility", True)),
     )
 
 

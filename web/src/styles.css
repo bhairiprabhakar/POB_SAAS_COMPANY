@@ -968,6 +968,16 @@ a.user-chip:hover { border-color: var(--primary); text-decoration: none; }
 .chip-x { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 12px; line-height: 1; padding: 2px; }
 .chip-x:hover { color: var(--red); }
 
+.prod-constraint-row {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;
+  width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--bg-2);
+}
+.prod-picker-selected .prod-constraint-row { flex: 1 1 100%; }
+.prod-constraint-inputs { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.prod-constraint-inputs label { display: inline-flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--muted); }
+.prod-constraint-inputs .input { width: 88px; padding: 4px 8px; font-size: 12px; }
+.prod-constraint-inputs .check { display: inline-flex; flex-direction: row; align-items: center; gap: 4px; font-size: 12px; color: var(--text); }
+
 /* â”€â”€ Very small phones â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @media (max-width: 480px) {
   .ver-chip { display: none; }

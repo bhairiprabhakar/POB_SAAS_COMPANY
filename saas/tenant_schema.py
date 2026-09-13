@@ -111,7 +111,10 @@ CREATE TABLE IF NOT EXISTS brands (
     code TEXT,
     description TEXT,
     status TEXT DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_by INTEGER,
+    updated_by INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS campaigns (
@@ -141,24 +144,33 @@ CREATE TABLE IF NOT EXISTS products (
     division_id INTEGER REFERENCES divisions(id),
     sku TEXT,
     name TEXT NOT NULL,
+    composition TEXT,
     strength TEXT,
+    dosage_form TEXT,
     pack TEXT,
     ptr REAL DEFAULT 0,
     pts REAL DEFAULT 0,
     mrp REAL DEFAULT 0,
-    min_quantity INTEGER DEFAULT 1,
-    min_pob REAL DEFAULT 0,
-    max_pob REAL,
-    scheme_eligibility BOOLEAN DEFAULT TRUE,
+    gst REAL DEFAULT 0,
     status TEXT DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_by INTEGER,
+    updated_by INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP
 );
 
 -- A campaign offers products that live in its division's master catalogue.
+-- Campaign-specific POB constraints (min qty / min POB / max POB / scheme
+-- eligibility) hang off the LINK, not the product master: the same product
+-- can be offered with different thresholds in different campaigns.
 CREATE TABLE IF NOT EXISTS campaign_products (
     campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
     product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     sort_order INTEGER DEFAULT 0,
+    min_quantity INTEGER DEFAULT 1,
+    min_pob REAL DEFAULT 0,
+    max_pob REAL,
+    scheme_eligibility BOOLEAN DEFAULT TRUE,
     PRIMARY KEY (campaign_id, product_id)
 );
 
@@ -1476,4 +1488,49 @@ UPDATE products p SET division_id = c.division_id
     FROM campaigns c WHERE c.id = p.campaign_id AND p.division_id IS NULL;
 UPDATE products p SET division_id = b.division_id
     FROM brands b WHERE b.id = p.brand_id AND p.division_id IS NULL;
+
+-- ── Brand / Product master reshaping (3.10.0) ──────────────────────────────
+-- Brands get full audit fields (created/updated by/at) so division admins can
+-- see who changed what. Products gain composition + dosage_form and the same
+-- audit columns, and the POB constraints (min qty / min POB / max POB /
+-- scheme eligibility) move OFF the product master ONTO the campaign_products
+-- link -- a product may carry different thresholds per campaign.
+ALTER TABLE brands ADD COLUMN IF NOT EXISTS created_by INTEGER;
+ALTER TABLE brands ADD COLUMN IF NOT EXISTS updated_by INTEGER;
+ALTER TABLE brands ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;
+
+ALTER TABLE products ADD COLUMN IF NOT EXISTS composition TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS dosage_form TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS created_by INTEGER;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS updated_by INTEGER;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS gst REAL DEFAULT 0;
+
+ALTER TABLE campaign_products ADD COLUMN IF NOT EXISTS min_quantity INTEGER DEFAULT 1;
+ALTER TABLE campaign_products ADD COLUMN IF NOT EXISTS min_pob REAL DEFAULT 0;
+ALTER TABLE campaign_products ADD COLUMN IF NOT EXISTS max_pob REAL;
+ALTER TABLE campaign_products ADD COLUMN IF NOT EXISTS scheme_eligibility BOOLEAN DEFAULT TRUE;
+
+-- Backfill: carry each product's legacy thresholds over to its campaign links
+-- so existing campaigns keep their behaviour after the column move. The source
+-- columns only exist on pre-3.10.0 tenants, so the block is a no-op elsewhere.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = current_schema() AND table_name = 'products'
+               AND column_name = 'min_quantity') THEN
+    UPDATE campaign_products cp
+    SET min_quantity = COALESCE(pr.min_quantity, 1),
+        min_pob = COALESCE(pr.min_pob, 0),
+        max_pob = pr.max_pob,
+        scheme_eligibility = COALESCE(pr.scheme_eligibility, TRUE)
+    FROM products pr
+    WHERE pr.id = cp.product_id;
+  END IF;
+END $$;
+
+ALTER TABLE products DROP COLUMN IF EXISTS min_quantity;
+ALTER TABLE products DROP COLUMN IF EXISTS min_pob;
+ALTER TABLE products DROP COLUMN IF EXISTS max_pob;
+ALTER TABLE products DROP COLUMN IF EXISTS scheme_eligibility;
 """

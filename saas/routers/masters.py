@@ -478,21 +478,33 @@ def _assert_product_in_div(conn, p: dict, div: int) -> None:
 
 
 @router.get("/products")
-def list_products(campaign_id: int = None, brand_id: int = None, q: str = "",
+def list_products(campaign_id: int = None, brand_id: int = None, status: str = "", q: str = "",
                   limit: int = PageLimit(default=200), offset: int = PageOffset(),
                   ctx: TenantContext = Depends(require_permission("product.view"))):
     conn = ctx.conn
     c = conn.cursor()
-    sql = """SELECT p.*, b.name AS brand_name, d.name AS division_name FROM products p
-             LEFT JOIN brands b ON b.id=p.brand_id
-             LEFT JOIN divisions d ON d.id=p.division_id"""
+    # When a campaign is given, the campaign link's POB constraints are the
+    # values that apply (a product may carry different thresholds per campaign).
+    base = """SELECT p.*, b.name AS brand_name, d.name AS division_name
+              FROM products p
+              LEFT JOIN brands b ON b.id=p.brand_id
+              LEFT JOIN divisions d ON d.id=p.division_id"""
+    sql = base
     where, params = [], []
     if campaign_id:
-        where.append("EXISTS (SELECT 1 FROM campaign_products cp WHERE cp.campaign_id=%s AND cp.product_id=p.id)")
+        sql = ("SELECT cp.min_quantity, cp.min_pob, cp.max_pob, cp.scheme_eligibility, "
+               "p.*, b.name AS brand_name, d.name AS division_name "
+               "FROM products p "
+               "LEFT JOIN brands b ON b.id=p.brand_id "
+               "LEFT JOIN divisions d ON d.id=p.division_id "
+               "JOIN campaign_products cp ON cp.campaign_id=%s AND cp.product_id=p.id")
         params.append(campaign_id)
     if brand_id:
         where.append("p.brand_id=%s")
         params.append(brand_id)
+    if status:
+        where.append("p.status=%s")
+        params.append(status)
     if q:
         where.append("(p.name ILIKE %s OR p.sku ILIKE %s)")
         params.extend([f"%{q}%", f"%{q}%"])
@@ -502,15 +514,48 @@ def list_products(campaign_id: int = None, brand_id: int = None, q: str = "",
         params.extend([div, div])
     if where:
         sql += " WHERE " + " AND ".join(where)
+    # Total count for pagination (same filters, no limit/offset).
+    t = conn.cursor()
+    t.execute(f"SELECT count(*) FROM ({sql}) AS _counted", params)
+    total = int((t.fetchone() or [0])[0])
     sql += " ORDER BY p.id DESC LIMIT %s OFFSET %s"
     c.execute(sql, params + [limit, offset])
-    return {"items": fetchall_dict(c)}
+    return {"items": fetchall_dict(c), "total": total}
 
 
 def _get_product(conn, pid: int) -> dict:
     c = conn.cursor()
     c.execute("SELECT * FROM products WHERE id=%s", (pid,))
     return fetchone_dict(c)
+
+
+def _assert_product_unique(conn, name: str, brand_id=None, sku=None, division_id: int = None,
+                           exclude_id: int = None) -> None:
+    """Product SKU must be unique within the division; the (name, brand) pair
+    must be unique within the division too. Division admins are compared
+    against their own division only."""
+    c = conn.cursor()
+    exc = exclude_id if exclude_id else 0
+    if name:
+        if brand_id:
+            c.execute(
+                "SELECT id FROM products p WHERE (p.division_id=%s OR p.division_id IS NULL) "
+                "AND lower(p.name)=lower(%s) AND p.brand_id=%s AND p.id<>%s",
+                (division_id, name, brand_id, exc))
+        else:
+            c.execute(
+                "SELECT id FROM products p WHERE (p.division_id=%s OR p.division_id IS NULL) "
+                "AND lower(p.name)=lower(%s) AND p.brand_id IS NULL AND p.id<>%s",
+                (division_id, name, exc))
+        if c.fetchone():
+            raise HTTPException(409, "a product with this name already exists for this brand in your division")
+    if sku:
+        c.execute(
+            "SELECT id FROM products p WHERE (p.division_id=%s OR p.division_id IS NULL) "
+            "AND lower(p.sku)=lower(%s) AND p.id<>%s",
+            (division_id, sku, exc))
+        if c.fetchone():
+            raise HTTPException(409, "a product with this SKU already exists in your division")
 
 
 @router.post("/products")
@@ -522,16 +567,21 @@ def create_product(body: dict, ctx: TenantContext = Depends(require_permission("
     bid = body.get("brand_id")
     if bid is not None:
         _assert_brand_for_div(ctx.conn, int(bid), div)
+    _assert_product_unique(ctx.conn, name=name, brand_id=int(bid) if bid is not None else None,
+                           sku=(body.get("sku") or "").strip() or None, division_id=div)
     cid = body.get("campaign_id")
+    payload = {**body, "name": name}
     if cid:
         if div:
             _assert_campaign_in_div(ctx.conn, int(cid), div)
-        pid = campaign_service._insert_product(ctx.conn, {**body, "name": name}, division_id=div)
+        pid = campaign_service._insert_product(ctx.conn, payload, division_id=div,
+                                               actor_id=_actor(ctx)["id"])
         c = ctx.conn.cursor()
         c.execute("INSERT INTO campaign_products (campaign_id, product_id, sort_order) VALUES (%s,%s,0)",
                   (int(cid), pid))
     else:
-        pid = campaign_service._insert_product(ctx.conn, {**body, "name": name}, division_id=div)
+        pid = campaign_service._insert_product(ctx.conn, payload, division_id=div,
+                                               actor_id=_actor(ctx)["id"])
     ctx.conn.commit()
     log_action(ctx.conn, _actor(ctx)["id"], "product.create", "product", pid,
                {"name": name, "campaign_id": cid}, actor=_actor(ctx)["name"])
@@ -546,11 +596,16 @@ def update_product(pid: int, body: dict, ctx: TenantContext = Depends(require_pe
     div = division_scope(ctx.conn, ctx)
     if div:
         _assert_product_in_div(ctx.conn, p, div)
-    if "name" in body and not str(body.get("name") or "").strip():
+    new_name = str(body.get("name") or "").strip() if "name" in body else str(p.get("name") or "").strip()
+    if "name" in body and not new_name:
         raise HTTPException(400, "Product name cannot be empty")
-    if body.get("brand_id") is not None:
-        _assert_brand_for_div(ctx.conn, int(body["brand_id"]), div)
-    campaign_service._update_product(ctx.conn, pid, body)
+    bid = body.get("brand_id")
+    if bid is not None:
+        _assert_brand_for_div(ctx.conn, int(bid), div)
+    _assert_product_unique(ctx.conn, name=new_name,
+                           brand_id=int(bid) if bid is not None else p.get("brand_id"),
+                           sku=body.get("sku") or p.get("sku") or None, division_id=div, exclude_id=pid)
+    campaign_service._update_product(ctx.conn, pid, body, actor_id=_actor(ctx)["id"])
     ctx.conn.commit()
     log_action(ctx.conn, _actor(ctx)["id"], "product.update", "product", pid,
                {"name": body.get("name") or p.get("name")}, actor=_actor(ctx)["name"])
@@ -612,8 +667,8 @@ async def bulk_upload_products(file: UploadFile = File(...),
     rows = list(ws.iter_rows(min_row=2, values_only=True))
     conn = ctx.conn
     c = conn.cursor()
-    fields = ["brand", "name", "sku", "strength", "pack", "ptr", "pts", "mrp",
-              "min_quantity", "min_pob", "max_pob", "scheme_eligibility", "status"]
+    fields = ["brand", "name", "sku", "composition", "strength", "dosage_form", "pack",
+              "ptr", "pts", "mrp", "gst", "status"]
     created, errors = 0, []
     div = division_scope(conn, ctx)
     for i, row in enumerate(rows, start=2):
@@ -635,40 +690,31 @@ async def bulk_upload_products(file: UploadFile = File(...),
                 return float(v)
             except (TypeError, ValueError):
                 return default
-        def _intnum(v, default=1):
-            try:
-                if v is None or str(v).strip() == "":
-                    return default
-                return int(float(v))
-            except (TypeError, ValueError):
-                return default
-        def _yesno(v, default=True):
-            if v is None or str(v).strip() == "":
-                return default
-            return str(v).strip().lower() in ("1", "true", "yes", "y")
         vals = {
             "brand_id": brand_id,
             "name": name,
             "sku": (d.get("sku") or "").strip() or None,
+            "composition": (d.get("composition") or "").strip() if d.get("composition") else None,
             "strength": d.get("strength"),
+            "dosage_form": (d.get("dosage_form") or "").strip() if d.get("dosage_form") else None,
             "pack": d.get("pack"),
             "ptr": _num(d.get("ptr")),
             "pts": _num(d.get("pts")),
             "mrp": _num(d.get("mrp")),
-            "min_quantity": _intnum(d.get("min_quantity")),
-            "min_pob": _num(d.get("min_pob")),
-            "max_pob": _num(d.get("max_pob"), None),
-            "scheme_eligibility": _yesno(d.get("scheme_eligibility")),
+            "gst": _num(d.get("gst"), 0),
             "status": (d.get("status") or "active").strip() or "active",
         }
         try:
+            _assert_product_unique(conn, name=name, brand_id=brand_id,
+                                   sku=vals["sku"], division_id=div)
             c.execute(
-                """INSERT INTO products (brand_id, division_id, sku, name, strength, pack, ptr, pts, mrp,
-                   min_quantity, min_pob, max_pob, scheme_eligibility, status)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (vals["brand_id"], div, vals["sku"], vals["name"], vals["strength"], vals["pack"],
-                 vals["ptr"], vals["pts"], vals["mrp"], vals["min_quantity"], vals["min_pob"],
-                 vals["max_pob"], vals["scheme_eligibility"], vals["status"]),
+                """INSERT INTO products (brand_id, division_id, sku, name, composition, strength,
+                   dosage_form, pack, ptr, pts, mrp, gst, status, created_by, updated_by, updated_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,CURRENT_TIMESTAMP)""",
+                (vals["brand_id"], div, vals["sku"], vals["name"], vals["composition"],
+                 vals["strength"], vals["dosage_form"], vals["pack"],
+                 vals["ptr"], vals["pts"], vals["mrp"], vals["gst"], vals["status"],
+                 ctx.user["id"], ctx.user["id"]),
             )
             created += 1
         except Exception as exc:
@@ -684,8 +730,8 @@ def product_template(ctx: TenantContext = Depends(require_permission("campaign.m
     wb = Workbook()
     ws = wb.active
     ws.title = "Products"
-    ws.append(["brand", "name", "sku", "strength", "pack", "ptr", "pts", "mrp",
-               "min_quantity", "min_pob", "max_pob", "scheme_eligibility", "status"])
+    ws.append(["brand", "name", "sku", "composition", "strength", "dosage_form", "pack",
+               "ptr", "pts", "mrp", "gst", "status"])
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)

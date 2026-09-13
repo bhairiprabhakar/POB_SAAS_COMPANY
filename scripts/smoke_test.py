@@ -124,8 +124,9 @@ def main():
 
         r = client.post(f"{BASE}/products", headers=ADM, json={
             "campaign_id": campaign_id, "brand_id": brand_id, "sku": "ASKD-10",
-            "name": "Asthakind 10", "strength": "10mg", "pack": "15x10", "ptr": 185.0, "mrp": 205.0,
-            "min_quantity": 2, "min_pob": 100, "max_pob": 5000, "scheme_eligibility": True})
+            "name": "Asthakind 10", "composition": "Amlodipine 10mg", "strength": "10mg",
+            "dosage_form": "Tablet", "pack": "15x10", "ptr": 185.0, "pts": 178.0,
+            "mrp": 205.0, "gst": 12})
         check("create product", r.status_code == 200, r.text[:200])
         product_id = r.json()["id"]
 
@@ -235,8 +236,7 @@ def main():
             "name": "Celevida Reward", "status": "active", "scheme_type": "physical_gift"})
         gift_campaign = r.json()["id"]
         r = client.post(f"{BASE}/products", headers=ADM, json={
-            "campaign_id": gift_campaign, "name": "Celevida 100g", "ptr": 500, "mrp": 550,
-            "min_quantity": 1, "min_pob": 100})
+            "campaign_id": gift_campaign, "name": "Celevida 100g", "ptr": 500, "mrp": 550})
         gift_product = r.json()["id"]
         r = client.post(f"{BASE}/gifts", headers=ADM, json={
             "name": "Bluetooth Speaker", "cost": 1200, "stock": 5})
@@ -272,7 +272,7 @@ def main():
             "name": "Nise Cashback Voucher", "status": "active", "scheme_type": "voucher"})
         vch_campaign = r.json()["id"]
         r = client.post(f"{BASE}/products", headers=ADM, json={
-            "campaign_id": vch_campaign, "name": "Nise 100", "ptr": 300, "mrp": 340, "min_pob": 100})
+            "campaign_id": vch_campaign, "name": "Nise 100", "ptr": 300, "mrp": 340})
         vch_product = r.json()["id"]
         r = client.post(f"{BASE}/pob/submit", headers=MR,
                         data={"campaign_id": vch_campaign, "product_id": vch_product, "chemist_id": chemist_id,

@@ -462,6 +462,10 @@ def _finalize_pob(conn, ctx, campaign, pob_id: int, invoice_bytes: bytes, filena
         # Build full context for auto-verify (all 12 checks)
         c.execute("SELECT * FROM products WHERE id=%s", (pob["product_id"],))
         product = fetchone_dict(c) or {}
+        c.execute("""SELECT cp.min_quantity, cp.min_pob, cp.max_pob, cp.scheme_eligibility
+                     FROM campaign_products cp WHERE cp.campaign_id=%s AND cp.product_id=%s""",
+                  (campaign["id"], pob["product_id"]))
+        link = fetchone_dict(c) or {}
         c.execute("SELECT name, shop_name FROM chemists WHERE id=%s", (pob["chemist_id"],))
         ch = fetchone_dict(c) or {}
         is_dup = bool(_find_invoice_duplicate(conn, chemist_id, invoice_number, invoice_date,
@@ -476,9 +480,9 @@ def _finalize_pob(conn, ctx, campaign, pob_id: int, invoice_bytes: bytes, filena
             "campaign_grace_days": campaign.get("grace_days"),
             "campaign_grace_months": campaign.get("grace_months"),
             "campaign_pre_grace_days": campaign.get("pre_grace_days"),
-            "min_quantity": product.get("min_quantity") if product else None,
-            "min_pob": product.get("min_pob") if product else None,
-            "max_pob": product.get("max_pob") if product else None,
+            "min_quantity": link.get("min_quantity") if link else (product.get("min_quantity") if product else None),
+            "min_pob": link.get("min_pob") if link else (product.get("min_pob") if product else None),
+            "max_pob": link.get("max_pob") if link else (product.get("max_pob") if product else None),
         }
         verdict = _ocr.verify_invoice(
             {"invoice_number": invoice_number, "invoice_amount": pob["invoice_amount"],
@@ -618,7 +622,10 @@ async def submit_pob(
         if role_name not in allowed:
             raise HTTPException(403, f"Role '{role_name}' is not allowed to upload for this campaign (allowed: {', '.join(sorted(allowed))})")
 
-    c.execute("SELECT p.* FROM products p WHERE p.id=%s", (product_id,))
+    c.execute("SELECT p.*, cp.min_quantity, cp.min_pob, cp.max_pob, cp.scheme_eligibility "
+              "FROM products p "
+              "JOIN campaign_products cp ON cp.product_id=p.id AND cp.campaign_id=%s "
+              "WHERE p.id=%s", (campaign_id, product_id))
     product = fetchone_dict(c)
     c.execute("SELECT 1 FROM campaign_products WHERE campaign_id=%s AND product_id=%s", (campaign_id, product_id))
     if not product or not c.fetchone():
@@ -941,7 +948,8 @@ async def submit_invoice_only(
 
     # Extract line items and match to campaign products
     items = fields.get("items") or []
-    c.execute("""SELECT pr.id, pr.name, pr.ptr, pr.mrp, b.name AS brand_name, pr.sku
+    c.execute("""SELECT pr.id, pr.name, pr.ptr, pr.mrp, b.name AS brand_name, pr.sku,
+                 cp.min_quantity, cp.min_pob, cp.max_pob, cp.scheme_eligibility
                  FROM campaign_products cp
                  JOIN products pr ON pr.id=cp.product_id
                  LEFT JOIN brands b ON b.id=pr.brand_id
@@ -1256,7 +1264,10 @@ def submit_visit(body: dict, request: Request = None,
         quantity = float(item.get("quantity") or 0)
         if not product_id or quantity <= 0:
             raise HTTPException(400, "each brand item needs product_id and quantity > 0")
-        c.execute("SELECT p.* FROM products p WHERE p.id=%s", (product_id,))
+        c.execute("SELECT p.*, cp.min_quantity, cp.min_pob, cp.max_pob, cp.scheme_eligibility "
+                  "FROM products p "
+                  "JOIN campaign_products cp ON cp.product_id=p.id AND cp.campaign_id=%s "
+                  "WHERE p.id=%s", (campaign_id, product_id))
         product = fetchone_dict(c)
         c.execute("SELECT 1 FROM campaign_products WHERE campaign_id=%s AND product_id=%s", (campaign_id, product_id))
         if not product or not c.fetchone():
@@ -1729,7 +1740,8 @@ def get_pob(pob_id: int, ctx: TenantContext = Depends(get_tenant_context)):
     # Campaign product master (brand-wise qty/amount bounds) so the POB detail
     # can show what the campaign expects per brand alongside the submission.
     c.execute(
-        """SELECT pr.*, b.name AS brand_name FROM campaign_products cp
+        """SELECT cp.min_quantity, cp.min_pob, cp.max_pob, cp.scheme_eligibility,
+           pr.*, b.name AS brand_name FROM campaign_products cp
            JOIN products pr ON pr.id=cp.product_id
            LEFT JOIN brands b ON b.id=pr.brand_id
            WHERE cp.campaign_id=%s AND pr.status='active' ORDER BY pr.name, pr.id""",
@@ -1821,7 +1833,7 @@ def pob_eligibility(pob_id: int, ctx: TenantContext = Depends(get_tenant_context
     # Even if the gratification rule matches at campaign level, individual
     # products may not meet their own min/max thresholds.
     c.execute("""
-        SELECT pr.id, pr.name AS product_name, pr.min_quantity, pr.min_pob, pr.max_pob
+        SELECT pr.id, pr.name AS product_name, cp.min_quantity, cp.min_pob, cp.max_pob
         FROM campaign_products cp
         JOIN products pr ON pr.id = cp.product_id
         WHERE cp.campaign_id = %s AND pr.status = 'active'
@@ -2068,7 +2080,9 @@ async def re_extract_pob(
         pname = pname_row[0] if pname_row else ""
         c.execute("SELECT name, shop_name FROM chemists WHERE id=%s", (pob["chemist_id"],))
         ch = fetchone_dict(c) or {}
-        c.execute("SELECT min_quantity, min_pob, max_pob FROM products WHERE id=%s", (pob["product_id"],))
+        c.execute("""SELECT cp.min_quantity, cp.min_pob, cp.max_pob FROM campaign_products cp
+                     WHERE cp.campaign_id=%s AND cp.product_id=%s""",
+                  (pob["campaign_id"], pob["product_id"]))
         pr = fetchone_dict(c) or {}
         is_dup = bool(_find_invoice_duplicate(conn, pob["chemist_id"], invoice_number, invoice_date,
                                               (extraction.get("fields") or {}).get("items") or [],

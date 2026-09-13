@@ -122,9 +122,9 @@ def main():
     check("product with blank name -> 400", r.status_code == 400, f"{r.status_code} {j(r)}")
 
     r = client.post("/api/v1/products", headers=T, json={
-        "name": "Master Panadol Solo", "sku": "PAN-SOLO-1", "strength": "500 mg",
-        "pack": "10×10", "ptr": 32.5, "pts": 30.0, "mrp": 40.0,
-        "min_quantity": 1, "min_pob": 100, "max_pob": 1000,
+        "name": "Master Panadol Solo", "sku": "PAN-SOLO-1", "composition": "Paracetamol",
+        "strength": "500 mg", "dosage_form": "Tablet", "pack": "10×10",
+        "ptr": 32.5, "pts": 30.0, "mrp": 40.0, "gst": 12,
     })
     check("product can be created without a campaign (master)", ok(r, 200, 201), f"{r.status_code} {j(r)}")
     master_id = j(r).get("id")
@@ -156,9 +156,9 @@ def main():
 
     r = client.post("/api/v1/products", headers=T, json={
         "campaign_id": campaign_id, "brand_id": brand_id,
-        "name": "Allegra 120mg Strip", "sku": "ALG-120-1", "strength": "120 mg",
-        "pack": "10×10", "ptr": 112.5, "pts": 105.0, "mrp": 128.0,
-        "min_quantity": 1, "min_pob": 500, "max_pob": 5000,
+        "name": "Allegra 120mg Strip", "sku": "ALG-120-1", "composition": "Fexofenadine HCl",
+        "strength": "120 mg", "dosage_form": "Tablet", "pack": "10×10",
+        "ptr": 112.5, "pts": 105.0, "mrp": 128.0, "gst": 18,
     })
     check("create product linked to campaign", ok(r, 200, 201), f"{r.status_code} {j(r)}")
     pid = j(r).get("id")
@@ -246,12 +246,12 @@ def main():
           f"{r.status_code} {r.headers.get('content-type')}")
     wb = Workbook()
     ws = wb.active
-    ws.append(["brand", "name", "sku", "strength", "pack", "ptr", "pts", "mrp",
-               "min_quantity", "min_pob", "max_pob", "scheme_eligibility", "status"])
-    ws.append([f"PROD Brand {UUID}", "Bulk One", "BLK-1", "250 mg", "5×5", 20, 18, 25, 1, 200, 2000, "yes", "active"])
-    ws.append(["", "Bulk Two (no brand)", "BLK-2", "10 mg", "", 9.5, 8, 12, 1, "", "", "no", "active"])
-    ws.append(["", "", "BLK-3-no-name", "", "", 10, 9, 14, 1, "", "", "yes", "active"])
-    ws.append(["No Such Brand", "Bulk Four", "BLK-4", "", "", 5, 4, 8, 1, "", "", "yes", "active"])
+    ws.append(["brand", "name", "sku", "composition", "strength", "dosage_form", "pack",
+               "ptr", "pts", "mrp", "gst", "status"])
+    ws.append([f"PROD Brand {UUID}", "Bulk One", "BLK-1", "Diclofenac", "250 mg", "Tablet", "5×5", 20, 18, 25, 12, "active"])
+    ws.append(["", "Bulk Two (no brand)", "BLK-2", "", "10 mg", "Drops", "", 9.5, 8, 12, 5, "active"])
+    ws.append(["", "", "BLK-3-no-name", "", "", "", "", 10, 9, 14, 0, "active"])
+    ws.append(["No Such Brand", "Bulk Four", "BLK-4", "", "", "", "", 5, 4, 8, 0, "active"])
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)

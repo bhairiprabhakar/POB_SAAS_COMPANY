@@ -759,8 +759,16 @@ function ProductBuilder({ base, products, setProducts, brands, divBrands }) {
 
   const toggle = (m) => {
     if (selectedIds.has(m.id)) setProducts((prev) => prev.filter((p) => p.id !== m.id));
-    else setProducts((prev) => [...prev, m]);
+    else setProducts((prev) => [...prev, {
+      ...m,
+      min_quantity: m.min_quantity ?? 1,
+      min_pob: m.min_pob ?? 0,
+      max_pob: m.max_pob ?? null,
+      scheme_eligibility: m.scheme_eligibility ?? true,
+    }]);
   };
+
+  const setCon = (p, k, v) => setProducts((prev) => prev.map((x) => (x === p ? { ...x, [k]: v } : x)));
 
   const addQuick = async (e) => {
     e.preventDefault();
@@ -775,7 +783,7 @@ function ProductBuilder({ base, products, setProducts, brands, divBrands }) {
           ptr: n.ptr === '' ? 0 : Number(n.ptr),
           pts: n.pts === '' ? 0 : Number(n.pts),
           mrp: n.mrp === '' ? 0 : Number(n.mrp),
-          status: 'active', scheme_eligibility: true,
+          status: 'active',
         },
       });
       await masters.run();
@@ -828,13 +836,34 @@ function ProductBuilder({ base, products, setProducts, brands, divBrands }) {
         )}
         {products.length > 0 && (
           <div className="prod-picker-selected">
-            <span className="muted">Selected ({products.length}):</span>
+            <span className="muted">Selected ({products.length}) — set this campaign's constraints per product:</span>
             {products.map((p) => (
-              <span key={p.id || p._k} className="chip">
-                {p.name || 'Unnamed'}
-                {p.ptr ? ` · ₹${p.ptr}` : ''}
-                <button type="button" className="chip-x" onClick={() => setProducts((prev) => prev.filter((x) => x !== p))}>✕</button>
-              </span>
+              <div key={p.id || p._k} className="prod-constraint-row">
+                <span className="prod-picker-name"><strong>{p.name || 'Unnamed'}</strong>
+                  {p.brand_name || p.ptr ? <span className="muted cell-sub">
+                    {[p.brand_name, p.ptr ? `PTR ₹${p.ptr}` : ''].filter(Boolean).join(' · ')}
+                  </span> : null}
+                </span>
+                <span className="prod-constraint-inputs">
+                  <label>Min qty
+                    <input className="input" type="number" min="1" value={p.min_quantity ?? 1}
+                      onChange={(e) => setCon(p, 'min_quantity', Number(e.target.value))} />
+                  </label>
+                  <label>Min POB
+                    <input className="input" type="number" step="0.01" min="0" value={p.min_pob ?? 0}
+                      onChange={(e) => setCon(p, 'min_pob', Number(e.target.value))} />
+                  </label>
+                  <label>Max POB
+                    <input className="input" type="number" step="0.01" min="0" value={p.max_pob ?? ''}
+                      onChange={(e) => setCon(p, 'max_pob', e.target.value === '' ? null : Number(e.target.value))} />
+                  </label>
+                  <label className="check">Scheme eligible
+                    <input type="checkbox" checked={!!p.scheme_eligibility}
+                      onChange={(e) => setCon(p, 'scheme_eligibility', e.target.checked)} />
+                  </label>
+                  <button type="button" className="chip-x" onClick={() => setProducts((prev) => prev.filter((x) => x !== p))}>✕</button>
+                </span>
+              </div>
             ))}
           </div>
         )}
@@ -852,8 +881,14 @@ export function BrandsTab({ base }) {
   const divisions = useAsync(() => api(`${base}/divisions`));
   const [q, setQ] = useState('');
   const [divFilter, setDivFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const [editing, setEditing] = useState(null);
+  const [viewBrand, setViewBrand] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  const brandProducts = useAsync(
+    () => viewBrand ? api(`${base}/products?brand_id=${viewBrand.id}`) : Promise.resolve({ items: [] }),
+    [viewBrand?.id, run]);
 
   if (loading) return <Spinner label="Loading brands..." />;
   if (error) return <ErrorBox error={error} onRetry={run} />;
@@ -864,7 +899,8 @@ export function BrandsTab({ base }) {
     const matchQ = !q || (r.name || '').toLowerCase().includes(q.toLowerCase())
       || (r.code || '').toLowerCase().includes(q.toLowerCase());
     const matchD = !divFilter || String(r.division_id) === String(divFilter);
-    return matchQ && matchD;
+    const matchS = !statusFilter || r.status === statusFilter;
+    return matchQ && matchD && matchS;
   });
 
   const submit = async (e) => {
@@ -878,10 +914,13 @@ export function BrandsTab({ base }) {
     } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
   };
 
-  const del = async (row) => {
-    if (!window.confirm('Delete ' + row.name + '?')) return;
-    try { await api(`${base}/brands/${row.id}`, { method: 'DELETE' }); toast('Deleted', 'success'); run(); }
-    catch (err) { toast(err.message, 'error'); }
+  const toggleStatus = async (row) => {
+    const next = row.status === 'active' ? 'inactive' : 'active';
+    try {
+      await api(`${base}/brands/${row.id}`, { method: 'PUT', body: { status: next } });
+      toast(next === 'active' ? 'Brand activated' : 'Brand deactivated', 'success');
+      run();
+    } catch (err) { toast(err.message, 'error'); }
   };
 
   const set = (k) => (e) => {
@@ -893,14 +932,16 @@ export function BrandsTab({ base }) {
     { key: 'id', label: 'ID', render: (r) => <strong>#{r.id}</strong> },
     { key: 'name', label: 'Brand' },
     { key: 'code', label: 'Code' },
+    { key: 'product_count', label: 'Products', render: (r) => r.product_count ?? 0 },
     ...(singleDivision ? [] : [{ key: 'division_name', label: 'Division', render: (r) => (r.division_name
       ? <span>{r.division_name}</span>
       : <span className="muted" title="Campaigns for this brand cannot be reached from a division login link">Unassigned</span>) }]),
     { key: 'status', label: 'Status', render: (r) => <StatusBadge value={r.status} /> },
     { key: '_a', label: '', thClass: 'actions-th', render: (r) => (
       <span className="row-actions">
+        <button className="btn-link" onClick={() => setViewBrand(r)}>View</button>
         <button className="btn-link" onClick={() => setEditing({ ...r })}>Edit</button>
-        <button className="btn-link danger" onClick={() => del(r)}>Delete</button>
+        <button className="btn-link" onClick={() => toggleStatus(r)}>{r.status === 'active' ? 'Deactivate' : 'Activate'}</button>
       </span>
     ) },
   ];
@@ -917,6 +958,9 @@ export function BrandsTab({ base }) {
               placeholder="All divisions"
               options={divs.map((d) => ({ value: d.id, label: d.name }))} />
           )}
+          <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+            placeholder="All statuses"
+            options={['active', 'inactive'].map((o) => ({ value: o, label: o }))} />
           <button className="btn btn-primary" onClick={() => setEditing({})}>+ Add</button>
         </>} />
       {!singleDivision && unassigned > 0 && (
@@ -946,6 +990,20 @@ export function BrandsTab({ base }) {
               options={['active', 'inactive'].map((o) => ({ value: o, label: o }))} /></Field>
             <Field label="Description" className="span-2"><TextArea rows={3} value={editing.description || ''} onChange={set('description')} /></Field>
           </form>
+        </Modal>
+      )}
+      {viewBrand && (
+        <Modal open wide title={`Products — ${viewBrand.name}`} onClose={() => setViewBrand(null)}
+          footer={<button className="btn" onClick={() => setViewBrand(null)}>Close</button>}>
+          {brandProducts.loading ? <Spinner label="Loading products..." /> : (
+            <Table cols={[
+              { key: 'name', label: 'Product' },
+              { key: 'sku', label: 'SKU', render: (r) => <code>{r.sku || '—'}</code> },
+              { key: 'ptr', label: 'PTR', thClass: 'num', tdClass: 'num', render: (r) => r.ptr ? `₹${r.ptr}` : '—' },
+              { key: 'mrp', label: 'MRP', thClass: 'num', tdClass: 'num', render: (r) => r.mrp ? `₹${r.mrp}` : '—' },
+              { key: 'status', label: 'Status', render: (r) => <StatusBadge value={r.status} /> },
+            ]} rows={brandProducts.data?.items || []} keyOf={(r) => r.id} empty="No products for this brand yet" />
+          )}
         </Modal>
       )}
     </div>

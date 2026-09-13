@@ -185,7 +185,8 @@ def verification_detail(vid: int, ctx: TenantContext = Depends(require_permissio
     # Campaign product master (brand-wise qty/amount bounds) so the report can
     # show what the campaign expects per brand alongside the submission.
     c.execute(
-        """SELECT pr.*, b.name AS brand_name FROM campaign_products cp
+        """SELECT cp.min_quantity, cp.min_pob, cp.max_pob, cp.scheme_eligibility,
+           pr.*, b.name AS brand_name FROM campaign_products cp
            JOIN products pr ON pr.id=cp.product_id
            LEFT JOIN brands b ON b.id=pr.brand_id
            WHERE cp.campaign_id=%s AND pr.status='active' ORDER BY pr.name, pr.id""",
@@ -674,6 +675,13 @@ def run_verification_pipeline(body: dict, request: Request = None,
     campaign = fetchone_dict(c)
     c.execute("SELECT * FROM products WHERE id=%s", (v["product_id"],))
     product = fetchone_dict(c)
+    c.execute("""SELECT cp.min_quantity, cp.min_pob, cp.max_pob, cp.scheme_eligibility
+                 FROM campaign_products cp
+                 WHERE cp.campaign_id=%s AND cp.product_id=%s""",
+              (v["campaign_id"], v["product_id"]))
+    link = fetchone_dict(c)
+    if product and link:
+        product = {**product, **link}
     c.execute("SELECT * FROM chemists WHERE id=%s", (v["chemist_id"],))
     chemist = fetchone_dict(c)
 
