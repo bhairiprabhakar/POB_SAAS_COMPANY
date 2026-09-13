@@ -1418,6 +1418,7 @@ CREATE INDEX IF NOT EXISTS idx_chemists_attachment_type ON chemists (attachment_
 CREATE INDEX IF NOT EXISTS idx_chemists_potential_category ON chemists (potential_category);
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS eligible_chemist_attachment_types TEXT[] DEFAULT '{}';
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS eligible_chemist_potential_categories TEXT[] DEFAULT '{}';
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS eligible_states TEXT[] DEFAULT '{}';
 ALTER TABLE gratification_types ADD COLUMN IF NOT EXISTS min_value REAL DEFAULT 0;
 ALTER TABLE gratification_types ADD COLUMN IF NOT EXISTS max_value REAL;
 ALTER TABLE gratification_types ADD COLUMN IF NOT EXISTS requires_approval BOOLEAN DEFAULT FALSE;

@@ -19,7 +19,7 @@ log = logging.getLogger("saas.migrations")
 # the new patch -- that is how campaigns.pob_required went missing on 27 of 35
 # tenant databases. Every patch is idempotent, so re-running the whole set is
 # safe and is exactly how existing tenants catch up.
-SCHEMA_VERSION = "3.10.0"
+SCHEMA_VERSION = "3.11.0"
 
 # RLock: ensure_migrated re-enters via get_tenant_pool → _try_migrate path.
 _lock = threading.RLock()

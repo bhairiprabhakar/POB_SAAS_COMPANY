@@ -1,8 +1,8 @@
 // Shared UI primitives: layout shell, data table, modal, form fields,
 // stat cards, badges, toasts and a tiny data-fetching hook.
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { api, fmtDateTime, fmtMoney, getSession, saRole, tenantLoginPath } from './api';
 
 // ── Toasts ─────────────────────────────────────────────────────────────────
@@ -228,18 +228,8 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
     { to: '/app/gifts', label: 'Gifts', icon: '🎁', perm: 'gratification.manage', group: 'Masters', tone: 'purple' },
 
     { to: '/app/campaigns', label: 'All Campaigns', icon: '◎', perm: 'campaign.view', group: 'Campaigns', tone: 'teal' },
-    { to: '/app/campaigns?new=1', label: 'Create Campaign', icon: '＋', perm: 'campaign.view', group: 'Campaigns', tone: 'green' },
-    { to: '/app/campaigns?status=draft', label: 'Draft', icon: '◌', perm: 'campaign.view', group: 'Campaigns', tone: 'gray' },
-    { to: '/app/campaigns?status=pending_approval', label: 'Pending Approval', icon: '◔', perm: 'campaign.view', group: 'Campaigns', tone: 'amber' },
-    { to: '/app/campaigns?status=scheduled', label: 'Scheduled', icon: '◑', perm: 'campaign.view', group: 'Campaigns', tone: 'blue' },
-    { to: '/app/campaigns?status=active', label: 'Active', icon: '●', perm: 'campaign.view', group: 'Campaigns', tone: 'green' },
-    { to: '/app/campaigns?status=completed', label: 'Completed', icon: '◉', perm: 'campaign.view', group: 'Campaigns', tone: 'gray' },
-    { to: '/app/campaigns?status=rejected', label: 'Rejected', icon: '○', perm: 'campaign.view', group: 'Campaigns', tone: 'red' },
 
     { to: '/app/pob', label: 'All POB', icon: '≣', perm: 'pob.view', group: 'POB', tone: 'blue' },
-    { to: '/app/pob?status=pending_verification', label: 'Pending', icon: '⏳', perm: 'pob.view', group: 'POB', tone: 'amber' },
-    { to: '/app/pob?status=verified', label: 'Approved', icon: '✓', perm: 'pob.view', group: 'POB', tone: 'green' },
-    { to: '/app/pob?status=rejected', label: 'Rejected', icon: '✕', perm: 'pob.view', group: 'POB', tone: 'red' },
 
     { to: '/app/verification', label: 'Verification', icon: '✔', perm: 'verification.view', group: 'Operations', tone: 'green' },
     { to: '/app/gratification', label: 'Gratification', icon: '🎁', perm: 'gratification.view', group: 'Operations', tone: 'purple' },
@@ -284,29 +274,60 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
   );
 }
 
-/* Grouped navigation list: emits a section header whenever `group` changes and
-   gives every item a tone-coloured icon tile. */
+/* Grouped navigation list: renders a collapsible section header for every
+   group that has more than one page; single-page groups are shown as plain
+   links. Sections start collapsed except the one containing the active page. */
 function SideNav({ items, badges = {}, onNavigate }) {
-  let lastGroup = null;
+  const { pathname } = useLocation();
+  const groups = [];
+  for (const i of items) {
+    const label = i.group || '';
+    const last = groups[groups.length - 1];
+    if (!last || last.label !== label) groups.push({ label, items: [i] });
+    else last.items.push(i);
+  }
+  const matchActive = (i) =>
+    (i.end ? pathname === i.to : pathname === i.to || (i.to.endsWith('/') && pathname.startsWith(i.to)) || pathname.startsWith(i.to + '/'));
   return (
     <nav>
-      {items.map((i) => {
-        const b = badges[i.to];
-        const header = i.group && i.group !== lastGroup ? i.group : null;
-        lastGroup = i.group || lastGroup;
-        return (
-          <Fragment key={i.to}>
-            {header && <div className="side-group">{header}</div>}
-            <NavLink to={i.to} end={i.end} onClick={onNavigate} title={i.label}
-              className={({ isActive }) => `side-link ${isActive ? 'active' : ''}`}>
-              <span className="side-icon" data-tone={i.tone || 'gray'}>{i.icon}</span>
-              <span className="side-label">{i.label}</span>
-              {b && b.n > 0 && <span className={`side-badge ${b.tone}`} title={b.title}>{b.n}</span>}
-            </NavLink>
-          </Fragment>
-        );
-      })}
+      {groups.map((g) =>
+        g.items.length === 1 ? (
+          <SideLink key={g.items[0].to} item={g.items[0]}
+            badge={badges[g.items[0].to]} onNavigate={onNavigate} />
+        ) : (
+          <SideGroup key={g.label} label={g.label} items={g.items}
+            badges={badges} onNavigate={onNavigate}
+            defaultOpen={g.items.some(matchActive)} />
+        )
+      )}
     </nav>
+  );
+}
+
+function SideLink({ item, badge, onNavigate }) {
+  return (
+    <NavLink to={item.to} end={item.end} onClick={onNavigate} title={item.label}
+      className={({ isActive }) => `side-link ${isActive ? 'active' : ''}`}>
+      <span className="side-icon" data-tone={item.tone || 'gray'}>{item.icon}</span>
+      <span className="side-label">{item.label}</span>
+      {badge && badge.n > 0 && <span className={`side-badge ${badge.tone}`} title={badge.title}>{badge.n}</span>}
+    </NavLink>
+  );
+}
+
+function SideGroup({ label, items, badges, onNavigate, defaultOpen }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className={`side-section ${open ? 'open' : 'closed'}`}>
+      <button type="button" className="side-group-btn" onClick={() => setOpen((o) => !o)}
+        aria-expanded={open} title={label}>
+        <span className="side-group-label">{label}</span>
+        <span className={`side-chevron${open ? ' open' : ''}`}>▾</span>
+      </button>
+      {items.map((i) => (
+        <SideLink key={i.to} item={i} badge={badges[i.to]} onNavigate={onNavigate} />
+      ))}
+    </div>
   );
 }
 

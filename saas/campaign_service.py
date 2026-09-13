@@ -49,7 +49,12 @@ def campaign_readiness(conn) -> dict:
     for i in items:
         i["ready"] = i["count"] > 0
     keyed = {i["key"]: i for i in items}
-    ready = all(keyed[k]["ready"] for k in ("brands", "chemists", "gifts"))
+    # Only brands are truly mandatory for drafting. A campaign starts as a
+    # Draft and needs the platform approver's sign-off before it goes live, so
+    # chemists (built by MR/ASM on the ground), gifts, hierarchy, and territories
+    # are guidance, not gates. Requiring them blocked every division (chemists /
+    # gifts are platform-owned and usually 0 when a rollout starts).
+    ready = all(keyed[k]["ready"] for k in ("brands",))
     complete = ready and all(keyed[k]["ready"] for k in ("hierarchy", "employees", "regions", "states"))
     return {"ready": ready, "complete": complete, "items": items}
 
@@ -240,31 +245,38 @@ def chemist_eligibility(conn, cid: int, chemist_id: int) -> dict:
 
     att = chem.get("attachment_type") or ""
     pot = chem.get("potential_category") or ""
+    st = (chem.get("state") or "").strip().lower()
     c.execute(
-        "SELECT eligible_chemist_attachment_types, eligible_chemist_potential_categories "
-        "FROM campaigns WHERE id=%s", (cid,),
+        "SELECT eligible_chemist_attachment_types, eligible_chemist_potential_categories, "
+        "eligible_states FROM campaigns WHERE id=%s", (cid,),
     )
-    types, cats = c.fetchone()
+    types, cats, states = c.fetchone()
     types = [t for t in (types or []) if t]
     cats = [t for t in (cats or []) if t]
+    states = [s for s in (states or []) if s]
 
     match_att = (not types) or att in types
     match_pot = (not cats) or pot in cats
-    eligible = match_att and match_pot
+    match_state = (not states) or st in [s.strip().lower() for s in states if s.strip()]
+    eligible = match_att and match_pot and match_state
     missing = []
     if not match_att:
         missing.append("attachment_type")
     if not match_pot:
         missing.append("potential_category")
+    if not match_state:
+        missing.append("state")
     return {
         "eligible": eligible,
-        "restricted": bool(types or cats),
-        "matches": {"attachment_type": match_att, "potential_category": match_pot},
-        "chemist": {"attachment_type": att, "potential_category": pot},
+        "restricted": bool(types or cats or states),
+        "matches": {"attachment_type": match_att, "potential_category": match_pot,
+                    "state": match_state},
+        "chemist": {"attachment_type": att, "potential_category": pot, "state": st},
         "campaign": {"eligible_chemist_attachment_types": types,
-                     "eligible_chemist_potential_categories": cats},
+                     "eligible_chemist_potential_categories": cats,
+                     "eligible_states": states},
         "reason": ("Chemist does not match the campaign's eligible chemist "
-                   f"types/categories ({', '.join(missing)})") if missing else None,
+                   f"types/categories/states ({', '.join(missing)})") if missing else None,
     }
 
 
@@ -616,7 +628,7 @@ def get_campaign(conn, cid: int) -> dict | None:
                  FROM campaign_products cp
                  JOIN products p ON p.id=cp.product_id
                  LEFT JOIN brands b ON b.id=p.brand_id
-                 WHERE cp.campaign_id=%s ORDER BY cp.id""", (cid,))
+                 WHERE cp.campaign_id=%s ORDER BY cp.sort_order, cp.product_id""", (cid,))
     row["products"] = fetchall_dict(c)
     from .rules import list_rules
     row["rules"] = list_rules(conn, cid)
@@ -647,8 +659,9 @@ def create_campaign(conn, actor: dict, body: dict) -> int:
            upload_roles, approval_workflow_id, payout_cycle, payout_weekday, payout_month_day,
            auto_verify, auto_verify_confidence, pob_required, notification_rules,
            period_type, grace_days, grace_months, pre_grace_days,
-           eligible_chemist_attachment_types, eligible_chemist_potential_categories)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+           eligible_chemist_attachment_types, eligible_chemist_potential_categories,
+           eligible_states)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
         (name, primary, ",".join(map(str, brand_ids)),
          body.get("division_id"),
          body.get("division"), body.get("start_date"), body.get("end_date"), body.get("active", True),
@@ -665,7 +678,8 @@ def create_campaign(conn, actor: dict, body: dict) -> int:
          body.get("period_type") or "none", body.get("grace_days") or 15,
          body.get("grace_months") or 0, body.get("pre_grace_days") or 0,
          body.get("eligible_chemist_attachment_types") or [],
-         body.get("eligible_chemist_potential_categories") or []),
+         body.get("eligible_chemist_potential_categories") or [],
+         body.get("eligible_states") or []),
     )
     cid = c.fetchone()[0]
     _sync_campaign_rules(conn, cid, body.get("rules"), actor)
@@ -711,7 +725,8 @@ def update_campaign(conn, actor: dict, cid: int, body: dict, request=None) -> No
               "upload_roles", "approval_workflow_id", "payout_cycle", "payout_weekday",
               "payout_month_day", "auto_verify", "auto_verify_confidence", "pob_required", "notification_rules",
               "period_type", "grace_days", "grace_months", "pre_grace_days",
-              "eligible_chemist_attachment_types", "eligible_chemist_potential_categories"]
+              "eligible_chemist_attachment_types", "eligible_chemist_potential_categories",
+              "eligible_states"]
     sets, params = [], []
     for f in fields:
         if f in body and body[f] is not None:
@@ -720,7 +735,7 @@ def update_campaign(conn, actor: dict, cid: int, body: dict, request=None) -> No
             if f == "notification_rules":
                 import json
                 val = json.dumps(val or {})
-            if f.startswith("eligible_chemist_"):
+            if f.startswith("eligible_"):
                 val = val or []
             params.append(val)
     # brand_ids column is stored as a comma-separated string; also keep the

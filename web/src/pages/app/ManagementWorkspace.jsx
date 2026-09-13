@@ -24,6 +24,18 @@ const CONFIG_LINKS = {
   gifts: null,
 };
 
+// Rollout-scope picker for the campaign wizard (states served as dropdowns,
+// not as a free-text field, so the eligibility check matches at POB time).
+const INDIAN_STATES = [
+  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa',
+  'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala',
+  'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland',
+  'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura',
+  'Uttar Pradesh', 'Uttarakhand', 'West Bengal', 'Andaman and Nicobar Islands',
+  'Chandigarh', 'Dadra and Nagar Haveli and Daman and Diu', 'Delhi',
+  'Jammu and Kashmir', 'Ladakh', 'Lakshadweep', 'Puducherry',
+];
+
 function ConfigChecklist({ data, compact }) {
   if (!data) return null;
   const { ready, complete, items } = data;
@@ -34,7 +46,7 @@ function ConfigChecklist({ data, compact }) {
           ready ? 'Configuration complete — campaigns can be created ✓'
             : 'Set up these masters before creating a campaign'
         }</strong>
-        {!ready && <span className="muted">The wizard can’t be submitted until the mandatory items (brands, chemists, gifts) are in place.</span>}
+        {!ready && <span className="muted">Campaigns need at least one brand before they can be created — the rest of these masters are optional guidance.</span>}
         {ready && !complete && <span className="muted">Add hierarchy, territories and gratitude breadth for a fully configured company.</span>}
       </div>
       <div className="config-checklist-items">
@@ -283,16 +295,18 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
   const roles = useAsync(() => api(`${base}/roles`), [base]);
   const users = useAsync(() => api(`${base}/users`), [base]);
   const readiness = useAsync(() => api(`${base}/campaigns/readiness`), [isEdit, base]);
+  const chemistMasters = useAsync(() => api('/api/v1/chemist-masters'), [isEdit, base]);
   const [f, setF] = useState({
     active: true, invoice_verification_required: true, status: 'draft', scheme_type: 'others',
     assignment: { mode: 'all', regions: [], employee_ids: [], manager_id: '' }, ...editing,
+    eligible_states: [], eligible_chemist_attachment_types: [], eligible_chemist_potential_categories: [],
   });
   const [products, setProducts] = useState([]);
   const [busy, setBusy] = useState(false);
   const [files, setFiles] = useState({ logo: null, banner: null });
   const loaded = useRef(false);
   const [step, setStep] = useState(0);
-  const STEPS = ['Details', 'Brand & Products', 'Timeline & Rules', 'Assignment', 'Branding & Submissions', 'Review'];
+  const STEPS = ['Details', 'Brand & Products', 'Rollout Scope', 'Timeline & Rules', 'Assignment', 'Branding & Submissions', 'Review'];
   const lastStep = STEPS.length - 1;
 
   const nextStep = () => {
@@ -330,6 +344,9 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
         brand_ids: brandIds,
         logo_path: detail.data.logo_path ?? prev.logo_path ?? '',
         banner_path: detail.data.banner_path ?? prev.banner_path ?? '',
+        eligible_states: detail.data.eligible_states || [],
+        eligible_chemist_attachment_types: detail.data.eligible_chemist_attachment_types || [],
+        eligible_chemist_potential_categories: detail.data.eligible_chemist_potential_categories || [],
       }));
       setProducts((detail.data.products || []).map((x) => ({ ...x })));
     }
@@ -439,6 +456,13 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
   const reviewDivision = divisions.find((d) => String(d.id) === String(f.division_id))?.name || '—';
   const reviewProducts = products.filter((p) => (p.name || '').trim() || p.brand_id);
   const reviewRoles = f.upload_roles === '*' || !f.upload_roles ? 'All roles' : f.upload_roles;
+  const _attName = (code) => (chemistMasters.data?.attachment_types || []).find((m) => m.code === code)?.name || code;
+  const _catName = (code) => (chemistMasters.data?.potential_categories || []).find((m) => m.code === code)?.name || code;
+  const reviewStates = (f.eligible_states || []).length ? f.eligible_states.join(', ') : 'Any state';
+  const reviewChemistTypes = (f.eligible_chemist_attachment_types || []).length
+    ? (f.eligible_chemist_attachment_types || []).map(_attName).join(', ') : 'Any type';
+  const reviewChemistCats = (f.eligible_chemist_potential_categories || []).length
+    ? (f.eligible_chemist_potential_categories || []).map(_catName).join(', ') : 'Any category';
   const reviewAssignment = (() => {
     const a = (isEdit && detail.data?.assignment) || f.assignment || {};
     if (a.mode === 'all' || !a.mode) return 'All eligible employees';
@@ -558,6 +582,87 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
           </>
         )}
         {step === 2 && (
+          <div>
+            <Field label="States to rollout" className="span-2"
+              hint={(f.eligible_states || []).length
+                ? `${f.eligible_states.length} state(s) selected`
+                : 'No states selected — chemists in any state are accepted'}>
+              <div className="role-picker">
+                {INDIAN_STATES.map((s) => {
+                  const sel = (f.eligible_states || []).includes(s);
+                  return (
+                    <label key={s} className="check">
+                      <input type="checkbox" checked={sel}
+                        onChange={() => setF((p) => ({
+                          ...p,
+                          eligible_states: sel ? (p.eligible_states || []).filter((x) => x !== s) : [...(p.eligible_states || []), s],
+                        }))} />
+                      {s}
+                    </label>
+                  );
+                })}
+              </div>
+            </Field>
+            <Field label="Chemist types (attachment)" className="span-2"
+              hint={(f.eligible_chemist_attachment_types || []).length
+                ? `${f.eligible_chemist_attachment_types.length} type(s) selected`
+                : 'No types selected — all chemist types are accepted'}>
+              <div className="role-picker">
+                {(chemistMasters.data?.attachment_types || []).map((m) => {
+                  const sel = (f.eligible_chemist_attachment_types || []).includes(m.code);
+                  return (
+                    <label key={m.code} className="check">
+                      <input type="checkbox" checked={sel}
+                        onChange={() => setF((p) => ({
+                          ...p,
+                          eligible_chemist_attachment_types: sel
+                            ? (p.eligible_chemist_attachment_types || []).filter((x) => x !== m.code)
+                            : [...(p.eligible_chemist_attachment_types || []), m.code],
+                        }))} />
+                      {m.name}
+                    </label>
+                  );
+                })}
+                {(chemistMasters.data?.attachment_types || []).length === 0 && (
+                  <span className="muted">No chemist types configured yet</span>
+                )}
+              </div>
+            </Field>
+            <Field label="Chemist categories (potential)" className="span-2"
+              hint={(f.eligible_chemist_potential_categories || []).length
+                ? `${f.eligible_chemist_potential_categories.length} categor(y/ies) selected`
+                : 'No categories selected — all potential categories are accepted'}>
+              <div className="role-picker">
+                {(chemistMasters.data?.potential_categories || []).map((m) => {
+                  const sel = (f.eligible_chemist_potential_categories || []).includes(m.code);
+                  return (
+                    <label key={m.code} className="check">
+                      <input type="checkbox" checked={sel}
+                        onChange={() => setF((p) => ({
+                          ...p,
+                          eligible_chemist_potential_categories: sel
+                            ? (p.eligible_chemist_potential_categories || []).filter((x) => x !== m.code)
+                            : [...(p.eligible_chemist_potential_categories || []), m.code],
+                        }))} />
+                      {m.name}
+                    </label>
+                  );
+                })}
+                {(chemistMasters.data?.potential_categories || []).length === 0 && (
+                  <span className="muted">No potential categories configured yet</span>
+                )}
+              </div>
+            </Field>
+            <div className="span-2">
+              <p className="ai-note">
+                This is the <strong>rollout scope</strong> for your brand products. MR / ASM register chemists
+                on the ground — this scope tells them which states and chemist categories to focus on, and a
+                POB is only accepted from a chemist that fits it. Leave a section empty to accept any.
+              </p>
+            </div>
+          </div>
+        )}
+        {step === 3 && (
           <div className="grid-2">
             <Field label="Start date"><TextInput type="date" value={f.start_date || ''} onChange={set('start_date')} /></Field>
             <Field label="End date"><TextInput type="date" value={f.end_date || ''} onChange={set('end_date')} /></Field>
@@ -585,7 +690,7 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
             </div>
           </div>
         )}
-        {step === 3 && (
+        {step === 4 && (
           <div className="grid-2">
             <Field label="Who can execute this campaign?" className="span-2"
               hint="The audience allowed to submit POBs for this campaign. Choose to keep it open, restrict by region, pick specific employees, or give a manager and their whole team.">
@@ -683,7 +788,7 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
             )}
           </div>
         )}
-        {step === 4 && (
+        {step === 5 && (
           <div className="grid-2">
             <Field label="Campaign page logo" className="span-2"
               hint={files.logo ? 'Uploaded when you Save' : (f.logo_path ? 'Current logo' : 'No logo yet')}>
@@ -712,7 +817,7 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
             </Field>
           </div>
         )}
-        {step === 5 && (
+        {step === 6 && (
           <div>
             <h3 className="sub-head">Review campaign</h3>
             <div className="kv-grid">
@@ -723,6 +828,9 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
               <span>Scheme type<strong>{f.scheme_type || 'others'}</strong></span>
               <span>Status<strong>{isCreate ? 'Draft (awaiting approval)' : (f.status || 'draft')}</strong></span>
               <span>Execute scope<strong>{reviewAssignment}</strong></span>
+              <span>Rollout states<strong>{reviewStates}</strong></span>
+              <span>Rollout chemist types<strong>{reviewChemistTypes}</strong></span>
+              <span>Rollout chemist categories<strong>{reviewChemistCats}</strong></span>
               <span>Run dates<strong>{f.start_date || '—'} → {f.end_date || '—'}</strong></span>
               <span>Invoice window<strong>{windowPreview || '—'}</strong></span>
               <span>Period type<strong>{f.period_type || 'none'}</strong></span>

@@ -39,10 +39,30 @@ export default function RegisterChemist({ demo }) {
   const [looking, setLooking] = useState(null);
   const [dups, setDups] = useState(null);
   const [masters, setMasters] = useState({ attachment_types: [], potential_categories: [] });
+  const [guide, setGuide] = useState([]);
   const set = (k) => (e) => setF((p) => ({ ...p, [k]: e.target.value }));
 
   useEffect(() => {
     api('/api/v1/chemist-masters').then(setMasters).catch(() => {});
+  }, []);
+
+  // Show live campaigns' target states / chemist types / categories so the
+  // field user registers the right profile while a rollout is running.
+  useEffect(() => {
+    api('/api/v1/campaigns?active=true')
+      .then((d) => {
+        const rows = (d.items || []).filter((c) =>
+          ['active', 'scheduled', 'pending_approval'].includes(c.status) &&
+          ((c.eligible_states || []).length || (c.eligible_chemist_attachment_types || []).length ||
+           (c.eligible_chemist_potential_categories || []).length));
+        setGuide(rows.map((c) => ({
+          name: c.name,
+          states: c.eligible_states || [],
+          types: c.eligible_chemist_attachment_types || [],
+          cats: c.eligible_chemist_potential_categories || [],
+        })));
+      })
+      .catch(() => setGuide([]));
   }, []);
 
   const applyPostOffice = (po) => {
@@ -141,6 +161,27 @@ export default function RegisterChemist({ demo }) {
       <PageHeader title="Register Chemist"
         subtitle="Add a retail chemist / pharmacy. Enter the 6-digit PIN to auto-fetch city, district & state from the India Post pincode API."
         actions={!demo && <button className="btn" onClick={() => navigate('/app/chemists')}>View chemists</button>} />
+      {guide.length > 0 && (
+        <div className="scope-banner" data-tone="blue">
+          <span className="scope-dot" />
+          <div>
+            <strong>Live campaigns are targeting these chemist profiles</strong>
+            <small>Register chemists that match, so they are eligible for POBs.</small>
+            {guide.map((g) => {
+              const typeNames = g.types.map((code) => (masters.attachment_types || []).find((m) => m.code === code)?.name || code);
+              const catNames = g.cats.map((code) => (masters.potential_categories || []).find((m) => m.code === code)?.name || code);
+              return (
+                <div key={g.name} className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                  <strong>{g.name}</strong>
+                  {g.states.length ? ` · States: ${g.states.join(', ')}` : ' · Any state'}
+                  {typeNames.length ? ` · Types: ${typeNames.join(', ')}` : ''}
+                  {catNames.length ? ` · Categories: ${catNames.join(', ')}` : ''}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div className="card">
         <form onSubmit={submit}>
           <h4 className="section-title">Details</h4>
