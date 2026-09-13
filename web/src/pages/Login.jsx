@@ -5,7 +5,6 @@ import { api, getSession, setSession } from '../api';
 export default function Login() {
   const nav = useNavigate();
   const { divisionSlug: urlSlug } = useParams();
-  const [slug, setSlug] = useState(urlSlug || '');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
@@ -13,26 +12,12 @@ export default function Login() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [division, setDivision] = useState(null);
-  const [autoSingle, setAutoSingle] = useState(false);
 
   useEffect(() => {
     if (urlSlug) {
-      setSlug(urlSlug);
       api(`/api/v1/auth/login-context/${encodeURIComponent(urlSlug)}`)
         .then((d) => setDivision(d.division))
-        .catch(() => setError('Division not found. Check the link or enter the correct division.'));
-    } else {
-      api('/api/v1/auth/divisions')
-        .then((res) => {
-          if (!Array.isArray(res.divisions) || res.divisions.length !== 1) return;
-          const only = res.divisions[0];
-          setAutoSingle(true);
-          setSlug(only.code);
-          return api(`/api/v1/auth/login-context/${encodeURIComponent(only.code)}`)
-            .then((d) => setDivision(d.division))
-            .catch(() => {});
-        })
-        .catch(() => {});
+        .catch(() => setError('Division not found. Check the link or contact your administrator.'));
     }
   }, [urlSlug]);
 
@@ -59,18 +44,12 @@ export default function Login() {
 
   const submit = async (e) => {
     e.preventDefault();
-    const divisionSlug = (urlSlug || slug || '').trim();
-    if (!divisionSlug) {
-      setError('Enter the division code from your sign-in link.');
-      return;
-    }
     setError('');
     setBusy(true);
     try {
-      const d = await api('/api/v1/auth/login', {
-        method: 'POST',
-        body: { division_slug: divisionSlug, username, password },
-      });
+      const body = { username, password };
+      if (urlSlug) body.division_slug = urlSlug;
+      const d = await api('/api/v1/auth/login', { method: 'POST', body });
       if (d.mfa_required) {
         setMfaToken(d.mfa_token);
         return;
@@ -153,14 +132,6 @@ export default function Login() {
           </>
         ) : (
           <>
-            {!urlSlug && !autoSingle && (
-              <label className="field">
-                <span className="field-label">Division code</span>
-                <input className="input" value={slug}
-                  onChange={(e) => setSlug(e.target.value.toUpperCase())}
-                  placeholder="e.g. DEMO1234" autoCapitalize="characters" />
-              </label>
-            )}
             <label className="field">
               <span className="field-label">Username</span>
               <input className="input" value={username}
@@ -177,7 +148,7 @@ export default function Login() {
           </>
         )}
         <div className="auth-links">
-          <Link to="/forgot-password">Forgot password, username or division code?</Link>
+          <Link to="/forgot-password">Forgot username or password?</Link>
         </div>
         <div className="auth-links">
           <Link to="/superadmin-login">Platform administrator sign in</Link>

@@ -1,12 +1,11 @@
 """
 Self-service account recovery for tenant users.
 
-A user who forgot their division code, their username, or their password can
-prove ownership of an account's contact (email or mobile) by requesting a
-one-time code and entering it. On success the API returns what was forgotten
-(division code / username) or -- for the password purpose -- issues a short-lived
-signed recovery token that lets the user set a new password for exactly one of
-the matched accounts.
+A user who forgot their username or their password can prove ownership of an
+account's contact (email or mobile) by requesting a one-time code and entering
+it. On success the API returns the forgotten username or -- for the password
+purpose -- issues a short-lived signed recovery token that lets the user set a
+new password for exactly one of the matched accounts.
 
 Security notes:
   - The code is only ever stored as a bcrypt hash (never plaintext), is
@@ -40,7 +39,7 @@ RECOVERY_TOKEN_TTL = 600            # seconds
 RECOVERY_REQUEST_LIMIT = 5          # OTP requests per contact per window
 RECOVERY_REQUEST_WINDOW = 600       # seconds
 
-PURPOSES = ("division_code", "username", "password")
+PURPOSES = ("username", "password")
 
 _request_limiter = RateLimiter(RECOVERY_REQUEST_LIMIT, RECOVERY_REQUEST_WINDOW)
 
@@ -164,14 +163,14 @@ def _accounts_for(contact: str) -> list[dict]:
 def recovery_request(body: dict, request: Request):
     """Send a one-time code to the contact that owns an account.
 
-    body: {contact: email-or-mobile, purpose: division_code|username|password}
+    body: {contact: email-or-mobile, purpose: username|password}
     """
     contact = (body.get("contact") or "").strip()
     purpose = (body.get("purpose") or "").strip()
     if not contact:
         raise HTTPException(400, "contact (email or mobile) is required")
     if purpose not in PURPOSES:
-        raise HTTPException(400, "purpose must be one of: division_code, username, password")
+        raise HTTPException(400, "purpose must be one of: username, password")
 
     if not _request_limiter.allow(f"contact:{contact.lower()}"):
         raise HTTPException(429, "Too many requests. Try again later.")
@@ -197,7 +196,6 @@ def recovery_verify(body: dict, request: Request):
     body: {contact, purpose, otp}
 
     Responses by purpose:
-      - division_code -> {accounts: [{division_code, division_name, username}]}
       - username      -> {accounts: [{username, division_code, division_name}]}
       - password      -> {accounts: [...], recovery_token} where the token lets
                          the caller reset the password for one of these accounts.
@@ -227,16 +225,6 @@ def recovery_verify(body: dict, request: Request):
     if not _consume_otp(row["id"]):
         raise HTTPException(400, "Code already used. Request a new one.")
     accounts = _accounts_for(contact)
-
-    if purpose == "division_code":
-        seen, result = set(), []
-        for a in accounts:
-            if a["division_code"] not in seen:
-                seen.add(a["division_code"])
-                result.append({"division_code": a["division_code"],
-                               "division_name": a["division_name"],
-                               "username": a["username"]})
-        return {"accounts": result}
 
     if purpose == "username":
         return {"accounts": [

@@ -396,10 +396,22 @@ def tenant_login(body: dict, request: Request):
     password = body.get("password") or ""
     division_slug = (body.get("division_slug") or "").strip()
 
-    if not division_slug:
-        raise HTTPException(400, "division_slug is required")
-
-    division = _resolve_division_by_slug(division_slug)
+    if division_slug:
+        division = _resolve_division_by_slug(division_slug)
+    else:
+        # Division code is not asked on the login screen. When the username is
+        # unique across the platform we resolve its single division; ambiguous
+        # usernames must use their division's own sign-in link.
+        from . import user_index
+        matches = user_index.lookup_divisions_by_username(username)
+        if len(matches) == 1:
+            division = matches[0]
+        elif not matches:
+            raise HTTPException(401, "Invalid credentials")
+        else:
+            raise HTTPException(
+                400, "This username belongs to several divisions. "
+                     "Sign in with your division's sign-in link.")
     division_code = division["code"]
     if not login_allowed(request, division_code, username):
         _lockout()

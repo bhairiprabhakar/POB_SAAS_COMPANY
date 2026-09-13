@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { api } from '../api';
 
 const PURPOSES = [
-  { key: 'division_code', label: 'Division code', hint: 'Find which division you belong to' },
   { key: 'username', label: 'Username', hint: 'Recover your sign-in username' },
   { key: 'password', label: 'Password', hint: 'Set a new password' },
 ];
@@ -60,7 +59,7 @@ export default function ForgotPassword() {
         <div className="auth-brand">
           <span className="brand-mark lg">C</span>
           <h1>Account recovery</h1>
-          <p className="muted">Recover your division code, username or password using your registered email or mobile.</p>
+          <p className="muted">Recover your username or password using your registered email or mobile.</p>
         </div>
         {error && <div className="error-box">{error}</div>}
 
@@ -220,19 +219,19 @@ function ResultView({ purpose, result, contact }) {
 
   return (
     <div className="field">
-      <span className="field-label">{purpose === 'division_code' ? 'Your division code(s)' : 'Your username(s)'} for {contact}</span>
+      <span className="field-label">Your username(s) for {contact}</span>
       {accounts.map((a, i) => (
         <div key={i} className="recovery-account">
           <span>
-            <strong>{purpose === 'division_code' ? a.division_code : a.username}</strong>
+            <strong>{a.username}</strong>
             <span className="muted" style={{ display: 'block', fontSize: 12 }}>
-              {a.division_name}{purpose === 'division_code' ? ` · ${a.username}` : ` · ${a.division_code}`}
+              {a.division_name} · {a.division_code}
             </span>
           </span>
         </div>
       ))}
       <p className="muted" style={{ marginTop: 12 }}>
-        Head back to sign in and use {purpose === 'division_code' ? 'this division code' : 'your username'}.
+        Head back to sign in and use your username.
       </p>
     </div>
   );
