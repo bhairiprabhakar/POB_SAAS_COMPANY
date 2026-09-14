@@ -583,6 +583,20 @@ def ensure_role_id(conn, role_name: str) -> int | None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 TENANT_PATCHES = r"""
+-- ── Division admin is a read-only chemist reviewer ─────────────────────────
+-- Provision-time seeding (TENANT_DDL) has long granted division_admin _every_
+-- permission (chemist.manage included). That seed only ran when a tenant was
+-- first created, so tenants provisioned before this patch never lost the right.
+-- Run this as the FIRST patch at every migration so already-provisioned
+-- tenants drop the chemist write rights too. An idempotent DELETE, safe on new
+-- tenants, on re-runs, and on tenants where the right was never granted.
+-- Removing chemist.manage flips the frontend canManage flag (== chemist.manage)
+-- and makes the API 403 on write endpoints: everything keys off the same row.
+DELETE FROM role_permissions
+WHERE role_id IN (SELECT id FROM roles WHERE name IN
+                  ('division_admin','campaignos_admin','ho','nsm','zsm','sm','rsm','asm'))
+AND permission_code IN ('chemist.manage','chemist.classification.manage');
+
 -- ── Security hardening (refresh-token reuse detection + hashed reset tokens) ─
 -- family_id groups every rotation of one refresh token lineage so reuse of
 -- an already-rotated token can be detected and the whole family revoked.
