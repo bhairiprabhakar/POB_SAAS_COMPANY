@@ -423,7 +423,13 @@ ALL_PERMISSIONS = [p for _, perms in PERMISSION_CATALOG for p in perms]
 
 # role name -> list of permission codes
 DEFAULT_ROLES = {
-    "division_admin": [p[0] for p in ALL_PERMISSIONS],
+    # Division Admin is a reviewer, not an operator: they see every chemist
+    # with full registrant / reporting-manager lineage (snapshot cols) but must
+    # NOT register, edit, bulk-upload or classify chemists (chemist.manage /
+    # chemist.classification.manage excluded). Frontend canManage keys off
+    # chemist.manage, so granting read-only here drives the UI automatically.
+    "division_admin": [p[0] for p in ALL_PERMISSIONS
+                       if p[0] not in ("chemist.manage", "chemist.classification.manage")],
     "campaignos_admin": [p[0] for p in ALL_PERMISSIONS],
     "ho":  ["dashboard.view", "user.view", "hierarchy.view", "campaign.view", "product.view",
             "brand.view", "chemist.view", "chemist.manage", "pob.view", "verification.view",
@@ -1534,4 +1540,47 @@ ALTER TABLE products DROP COLUMN IF EXISTS min_quantity;
 ALTER TABLE products DROP COLUMN IF EXISTS min_pob;
 ALTER TABLE products DROP COLUMN IF EXISTS max_pob;
 ALTER TABLE products DROP COLUMN IF EXISTS scheme_eligibility;
+
+-- ── Chemist registration lineage (3.12.0) ─────────────────────────────────
+-- Chemists are registered by field end users (MR / ASM). Division admins see
+-- who registered each chemist plus that end user's reporting manager. The
+-- snapshots below freeze the lineage at registration time so it survives
+-- later user / hierarchy edits, and give the admin view a direct query path.
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS registered_by INTEGER REFERENCES users(id);
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS registered_by_name TEXT;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS registered_by_role TEXT;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS registered_by_level TEXT;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS reporting_manager_id INTEGER REFERENCES users(id);
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS reporting_manager_name TEXT;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS reporting_manager_role TEXT;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS reporting_manager_level TEXT;
+UPDATE chemists SET registered_by = created_by
+  WHERE registered_by IS NULL AND created_by IS NOT NULL
+    AND EXISTS (SELECT 1 FROM users u WHERE u.id = created_by);
+UPDATE chemists c SET
+  registered_by_name = u.full_name,
+  registered_by_role = r.name,
+  registered_by_level = hl.label,
+  reporting_manager_id = m.id,
+  reporting_manager_name = m.full_name,
+  reporting_manager_role = mr.name,
+  reporting_manager_level = mhl.label
+FROM users u
+LEFT JOIN roles r ON r.id = u.role_id
+LEFT JOIN hierarchy_levels hl ON hl.id = u.hierarchy_level_id
+LEFT JOIN users m ON m.id = u.parent_id
+LEFT JOIN roles mr ON mr.id = m.role_id
+LEFT JOIN hierarchy_levels mhl ON mhl.id = m.hierarchy_level_id
+WHERE c.registered_by = u.id
+  AND (c.registered_by_name IS NULL OR c.registered_by_name = '');
+CREATE INDEX IF NOT EXISTS idx_chemists_registered_by ON chemists (registered_by);
+
+-- Division admin is a read-only reviewer: revoke chemist write rights so a
+-- div admin can audit registrant / reporting-manager lineage but cannot
+-- register, bulk-upload, classify, edit or delete chemists. The frontend's
+-- canManage (== chemist.manage) and the API's require_permission both key off
+-- this, so removing it flips the Chemists page to read-only everywhere.
+DELETE FROM role_permissions
+WHERE role_id IN (SELECT id FROM roles WHERE name = 'division_admin')
+AND permission_code IN ('chemist.manage','chemist.classification.manage');
 """

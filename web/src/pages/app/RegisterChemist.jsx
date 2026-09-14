@@ -14,6 +14,8 @@ const BLANK = {
   status: 'active',
 };
 
+const STEPS = ['Details', 'Address & location', 'Classification & potential', 'Review'];
+
 const FIELDS = [
   { name: 'name', label: 'Chemist / shop owner name', required: true },
   { name: 'shop_name', label: 'Shop name' },
@@ -30,9 +32,48 @@ const FIELDS = [
   { name: 'area', label: 'Area' },
 ];
 
+const DETAIL_LABELS = { ...Object.fromEntries(FIELDS.map((x) => [x.name, x.label])), status: 'Status' };
+
+const ADDR_LABELS = {
+  address: 'Address', pin: 'PIN code', city: 'City', district: 'District', state: 'State',
+  area: 'Area / zone', latitude: 'Latitude', longitude: 'Longitude',
+};
+
+const CLASS_LABELS = {
+  attachment_type: 'Attachment type', potential_category: 'Potential category',
+  institution_name: 'Institution name', institution_type: 'Institution type',
+  institution_department: 'Department', institution_contact_person: 'Contact person',
+  institution_address: 'Institution address', monthly_business_potential: 'Monthly business potential (INR)',
+  estimated_monthly_sales: 'Estimated monthly sales (INR)', brand_potential: 'Brand potential',
+  strategic_importance: 'Strategic importance', visit_frequency: 'Visit frequency',
+  last_visit_date: 'Last visit date',
+};
+
+const masterName = (masters, kind, code) =>
+  ((masters[kind] || []).find((m) => m.code === code)?.name) || code || '—';
+
+function ReviewRows({ f, labels, masters }) {
+  const rows = Object.entries(labels).filter(([k]) => {
+    const v = f[k];
+    return v != null && String(v).trim() !== '';
+  });
+  if (!rows.length) return <p className="muted" style={{ fontSize: 13 }}>Nothing provided.</p>;
+  return (
+    <div className="kv-grid">
+      {rows.map(([k, label]) => {
+        let v = f[k];
+        if (k === 'attachment_type') v = masterName(masters, 'attachment_types', v);
+        if (k === 'potential_category') v = masterName(masters, 'potential_categories', v);
+        return <span key={k}>{label}<strong>{v}</strong></span>;
+      })}
+    </div>
+  );
+}
+
 export default function RegisterChemist({ demo }) {
   const navigate = useNavigate();
   const [f, setF] = useState({ ...BLANK });
+  const [step, setStep] = useState(0);
   const [busy, setBusy] = useState(false);
   const [posts, setPosts] = useState(null);
   const [lookup, setLookup] = useState('idle');
@@ -107,10 +148,23 @@ export default function RegisterChemist({ demo }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const validate = (s) => {
+    if (s === 0 && !f.name.trim()) { toast('Name is required', 'error'); return false; }
+    if (s === 1 && f.pin && !/^\d{6}$/.test(f.pin.trim())) { toast('PIN code must be 6 digits', 'error'); return false; }
+    return true;
+  };
+
+  const nextStep = () => {
+    if (!validate(step)) return;
+    setStep((s) => Math.min(s + 1, STEPS.length - 1));
+  };
+
+  const backStep = () => setStep((s) => Math.max(s - 1, 0));
+
   const submit = async (e) => {
     e.preventDefault();
+    if (!validate(step)) return;
     if (!f.name.trim()) { toast('Name is required', 'error'); return; }
-    if (f.pin && !/^\d{6}$/.test(f.pin.trim())) { toast('PIN code must be 6 digits', 'error'); return; }
     setBusy(true);
     try {
       if (demo) {
@@ -129,6 +183,7 @@ export default function RegisterChemist({ demo }) {
 
   const reset = () => {
     setF({ ...BLANK });
+    setStep(0);
     setPosts(null);
     setLookup('idle');
     setLooking(null);
@@ -146,6 +201,12 @@ export default function RegisterChemist({ demo }) {
       reset();
     } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
   };
+
+  const reviewSections = [
+    { title: 'Details', labels: DETAIL_LABELS },
+    { title: 'Address & location', labels: ADDR_LABELS },
+    { title: 'Classification & potential', labels: CLASS_LABELS },
+  ];
 
   return (
     <div>
@@ -183,117 +244,162 @@ export default function RegisterChemist({ demo }) {
         </div>
       )}
       <div className="card">
-        <form onSubmit={submit}>
-          <h4 className="section-title">Details</h4>
-          <div className="grid-2">
-            {FIELDS.map((fld) => (
-              <Field key={fld.name} label={fld.label} required={fld.required}>
-                <TextInput type={fld.type || 'text'} value={f[fld.name] || ''} onChange={set(fld.name)} required={fld.required} />
-              </Field>
-            ))}
-          </div>
-
-          <h4 className="section-title" style={{ marginTop: 18 }}>Address &amp; location</h4>
-          <div className="grid-2">
-            <Field label="Address" className="span-2">
-              <TextInput value={f.address || ''} onChange={set('address')} />
-            </Field>
-            <Field label="PIN code" hint="On a 6-digit PIN the city, district & state are fetched from the India Post pincode API">
-              <TextInput value={f.pin || ''} maxLength={6} placeholder="e.g. 500001"
-                onChange={set('pin')}
-                onBlur={(e) => { const v = e.target.value.trim(); if (/^\d{6}$/.test(v) && v !== looking) lookupPin(v); }} />
-            </Field>
-            <Field label="Location (post office)">
-              <Select value={f.city || ''} onChange={(e) => {
-                const po = posts?.find((p) => p.city === e.target.value);
-                setF((p) => ({ ...p, city: e.target.value, district: po?.district || p.district, state: po?.state || p.state }));
-              }}
-                options={(posts || []).map((p) => ({ value: p.city, label: `${p.city} — ${p.district}` }))} />
-            </Field>
-            <Field label="City">
-              <TextInput value={f.city || ''} onChange={set('city')} />
-            </Field>
-            <Field label="District">
-              <TextInput value={f.district || ''} onChange={set('district')} />
-            </Field>
-            <Field label="State">
-              <TextInput value={f.state || ''} onChange={set('state')} />
-            </Field>
-            <Field label="Area / zone" hint="Optional sub-locality">
-              <TextInput value={f.area || ''} onChange={set('area')} />
-            </Field>
-            <Field label="Latitude">
-              <TextInput type="number" step="any" value={f.latitude || ''} onChange={set('latitude')} placeholder="e.g. 17.3850" />
-            </Field>
-            <Field label="Longitude">
-              <TextInput type="number" step="any" value={f.longitude || ''} onChange={set('longitude')} placeholder="e.g. 78.4867" />
-            </Field>
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-            <button type="button" className="btn" onClick={() => lookupPin()} disabled={lookup === 'loading'}>
-              {lookup === 'loading' ? 'Fetching…' : 'Fetch from PIN'}
+        <div className="stepper">
+          {STEPS.map((label, i) => (
+            <button key={label} type="button" className={`step${i === step ? ' active' : ''}${i < step ? ' done' : ''}${i < step ? ' clickable' : ''}`}
+              onClick={() => i < step && setStep(i)} disabled={i > step}>
+              <span className="step-num">{i < step ? '✓' : i + 1}</span>
+              <span className="step-label">{label}</span>
             </button>
-            <button type="button" className="btn" onClick={detectLocation}>📍 Use my location</button>
-          </div>
-          {lookup === 'error' && !posts && (
-            <p className="field-hint" style={{ marginTop: 8, color: '#b91c1c' }}>No location found for this PIN. Fill the fields manually.</p>
+          ))}
+        </div>
+        <form onSubmit={submit}>
+          {step === 0 && (
+            <>
+              <h4 className="section-title">Details</h4>
+              <div className="grid-2">
+                {FIELDS.map((fld) => (
+                  <Field key={fld.name} label={fld.label} required={fld.required}>
+                    <TextInput type={fld.type || 'text'} value={f[fld.name] || ''} onChange={set(fld.name)} required={fld.required} />
+                  </Field>
+                ))}
+              </div>
+            </>
           )}
-          {posts && posts.length > 1 && (
-            <p className="field-hint" style={{ marginTop: 8 }}>{posts.length} post offices found for PIN {looking}. Pick the right one above.</p>
-          )}
-          <p className="field-hint" style={{ marginTop: 8 }}>New chemists are registered with status <strong>active</strong> by default.</p>
 
-          <h4 className="section-title" style={{ marginTop: 18 }}>Classification &amp; potential</h4>
-          <div className="grid-2">
-            <Field label="Attachment type" hint="Hospital, retail, chain, online pharmacy…">
-              <Select value={f.attachment_type || ''} onChange={set('attachment_type')}
-                options={(masters.attachment_types || []).map((m) => ({ value: m.code, label: `${m.name} (${m.code})` }))} />
-            </Field>
-            <Field label="Potential category">
-              <Select value={f.potential_category || ''} onChange={set('potential_category')}
-                options={(masters.potential_categories || []).map((m) => ({ value: m.code, label: `${m.name} (${m.code})` }))} />
-            </Field>
-            <Field label="Institution name" hint="For hospital / nursing home chemists">
-              <TextInput value={f.institution_name || ''} onChange={set('institution_name')} />
-            </Field>
-            <Field label="Institution type">
-              <TextInput value={f.institution_type || ''} onChange={set('institution_type')} />
-            </Field>
-            <Field label="Department">
-              <TextInput value={f.institution_department || ''} onChange={set('institution_department')} />
-            </Field>
-            <Field label="Contact person">
-              <TextInput value={f.institution_contact_person || ''} onChange={set('institution_contact_person')} />
-            </Field>
-            <Field label="Institution address" className="span-2">
-              <TextInput value={f.institution_address || ''} onChange={set('institution_address')} />
-            </Field>
-            <Field label="Monthly business potential (INR)">
-              <TextInput type="number" min="0" value={f.monthly_business_potential || ''} onChange={set('monthly_business_potential')} />
-            </Field>
-            <Field label="Estimated monthly sales (INR)">
-              <TextInput type="number" min="0" value={f.estimated_monthly_sales || ''} onChange={set('estimated_monthly_sales')} />
-            </Field>
-            <Field label="Brand potential">
-              <TextInput value={f.brand_potential || ''} onChange={set('brand_potential')} />
-            </Field>
-            <Field label="Strategic importance">
-              <TextInput value={f.strategic_importance || ''} onChange={set('strategic_importance')} />
-            </Field>
-            <Field label="Visit frequency">
-              <Select value={f.visit_frequency || ''} onChange={set('visit_frequency')} placeholder="— select —"
-                options={['daily', 'weekly', 'monthly', 'quarterly'].map((o) => ({ value: o, label: o }))} />
-            </Field>
-            <Field label="Last visit date">
-              <TextInput type="date" value={f.last_visit_date || ''} onChange={set('last_visit_date')} />
-            </Field>
-          </div>
+          {step === 1 && (
+            <>
+              <h4 className="section-title">Address &amp; location</h4>
+              <div className="grid-2">
+                <Field label="Address" className="span-2">
+                  <TextInput value={f.address || ''} onChange={set('address')} />
+                </Field>
+                <Field label="PIN code" hint="On a 6-digit PIN the city, district & state are fetched from the India Post pincode API">
+                  <TextInput value={f.pin || ''} maxLength={6} placeholder="e.g. 500001"
+                    onChange={set('pin')}
+                    onBlur={(e) => { const v = e.target.value.trim(); if (/^\d{6}$/.test(v) && v !== looking) lookupPin(v); }} />
+                </Field>
+                <Field label="Location (post office)">
+                  <Select value={f.city || ''} onChange={(e) => {
+                    const po = posts?.find((p) => p.city === e.target.value);
+                    setF((p) => ({ ...p, city: e.target.value, district: po?.district || p.district, state: po?.state || p.state }));
+                  }}
+                    options={(posts || []).map((p) => ({ value: p.city, label: `${p.city} — ${p.district}` }))} />
+                </Field>
+                <Field label="City">
+                  <TextInput value={f.city || ''} onChange={set('city')} />
+                </Field>
+                <Field label="District">
+                  <TextInput value={f.district || ''} onChange={set('district')} />
+                </Field>
+                <Field label="State">
+                  <TextInput value={f.state || ''} onChange={set('state')} />
+                </Field>
+                <Field label="Area / zone" hint="Optional sub-locality">
+                  <TextInput value={f.area || ''} onChange={set('area')} />
+                </Field>
+                <Field label="Latitude">
+                  <TextInput type="number" step="any" value={f.latitude || ''} onChange={set('latitude')} placeholder="e.g. 17.3850" />
+                </Field>
+                <Field label="Longitude">
+                  <TextInput type="number" step="any" value={f.longitude || ''} onChange={set('longitude')} placeholder="e.g. 78.4867" />
+                </Field>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                <button type="button" className="btn" onClick={() => lookupPin()} disabled={lookup === 'loading'}>
+                  {lookup === 'loading' ? 'Fetching…' : 'Fetch from PIN'}
+                </button>
+                <button type="button" className="btn" onClick={detectLocation}>📍 Use my location</button>
+              </div>
+              {lookup === 'error' && !posts && (
+                <p className="field-hint" style={{ marginTop: 8, color: '#b91c1c' }}>No location found for this PIN. Fill the fields manually.</p>
+              )}
+              {posts && posts.length > 1 && (
+                <p className="field-hint" style={{ marginTop: 8 }}>{posts.length} post offices found for PIN {looking}. Pick the right one above.</p>
+              )}
+            </>
+          )}
+
+          {step === 2 && (
+            <>
+              <h4 className="section-title">Classification &amp; potential</h4>
+              <p className="field-hint" style={{ marginBottom: 12 }}>
+                Match the profiles your live campaigns are targeting. New chemists are registered with status <strong>active</strong> by default.
+              </p>
+              <div className="grid-2">
+                <Field label="Attachment type" hint="Hospital, retail, chain, online pharmacy…">
+                  <Select value={f.attachment_type || ''} onChange={set('attachment_type')}
+                    options={(masters.attachment_types || []).map((m) => ({ value: m.code, label: `${m.name} (${m.code})` }))} />
+                </Field>
+                <Field label="Potential category">
+                  <Select value={f.potential_category || ''} onChange={set('potential_category')}
+                    options={(masters.potential_categories || []).map((m) => ({ value: m.code, label: `${m.name} (${m.code})` }))} />
+                </Field>
+                <Field label="Institution name" hint="For hospital / nursing home chemists">
+                  <TextInput value={f.institution_name || ''} onChange={set('institution_name')} />
+                </Field>
+                <Field label="Institution type">
+                  <TextInput value={f.institution_type || ''} onChange={set('institution_type')} />
+                </Field>
+                <Field label="Department">
+                  <TextInput value={f.institution_department || ''} onChange={set('institution_department')} />
+                </Field>
+                <Field label="Contact person">
+                  <TextInput value={f.institution_contact_person || ''} onChange={set('institution_contact_person')} />
+                </Field>
+                <Field label="Institution address" className="span-2">
+                  <TextInput value={f.institution_address || ''} onChange={set('institution_address')} />
+                </Field>
+                <Field label="Monthly business potential (INR)">
+                  <TextInput type="number" min="0" value={f.monthly_business_potential || ''} onChange={set('monthly_business_potential')} />
+                </Field>
+                <Field label="Estimated monthly sales (INR)">
+                  <TextInput type="number" min="0" value={f.estimated_monthly_sales || ''} onChange={set('estimated_monthly_sales')} />
+                </Field>
+                <Field label="Brand potential">
+                  <TextInput value={f.brand_potential || ''} onChange={set('brand_potential')} />
+                </Field>
+                <Field label="Strategic importance">
+                  <TextInput value={f.strategic_importance || ''} onChange={set('strategic_importance')} />
+                </Field>
+                <Field label="Visit frequency">
+                  <Select value={f.visit_frequency || ''} onChange={set('visit_frequency')} placeholder="— select —"
+                    options={['daily', 'weekly', 'monthly', 'quarterly'].map((o) => ({ value: o, label: o }))} />
+                </Field>
+                <Field label="Last visit date">
+                  <TextInput type="date" value={f.last_visit_date || ''} onChange={set('last_visit_date')} />
+                </Field>
+              </div>
+            </>
+          )}
+
+          {step === 3 && (
+            <>
+              <h4 className="section-title">Review &amp; confirm</h4>
+              <p className="field-hint" style={{ marginBottom: 12 }}>
+                Check the details before registering this chemist. Everything is saved to the division master.
+              </p>
+              {reviewSections.map((s) => (
+                <div key={s.title} style={{ marginBottom: 16 }}>
+                  <h5 style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--text-2)' }}>{s.title}</h5>
+                  <ReviewRows f={f} labels={s.labels} masters={masters} />
+                </div>
+              ))}
+            </>
+          )}
 
           <div className="page-actions" style={{ marginTop: 18 }}>
-            <button type="button" className="btn" onClick={() => !demo && navigate('/app/chemists')}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={busy}>
-              {busy ? 'Registering…' : demo ? 'Preview registration' : 'Register chemist'}
-            </button>
+            {step > 0 && (
+              <button type="button" className="btn" onClick={backStep}>← Back</button>
+            )}
+            {step < STEPS.length - 1 && (
+              <button type="button" className="btn btn-primary" onClick={nextStep}>Next →</button>
+            )}
+            {step === STEPS.length - 1 && (
+              <button type="submit" className="btn btn-primary" disabled={busy}>
+                {busy ? 'Registering…' : demo ? 'Preview registration' : 'Register chemist'}
+              </button>
+            )}
           </div>
         </form>
       </div>

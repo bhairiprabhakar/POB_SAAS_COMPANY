@@ -108,6 +108,7 @@ export default function Chemists() {
                 <th>Gratification</th>
               </>}
               <th>Registered by</th>
+              <th>Reporting manager</th>
               <th>Hierarchy</th>
               <th>Status</th>
               <th>Actions</th>

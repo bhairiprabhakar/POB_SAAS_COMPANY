@@ -784,9 +784,9 @@ def list_chemists(q: str = "", city: str = "", state: str = "", status: str = ""
             ) grat ON TRUE"""
         params.extend([campaign_id, campaign_id, campaign_id])
     else:
-        sql += """, NULL AS registered_by_name, NULL AS registered_by_role,
-                   NULL AS registered_by_level,
-                   NULL AS pob_status, NULL AS pob_id, NULL AS invoice_status,
+        # Divison-admin listing: lineage snapshot comes straight off the row
+        # (registered_by_* / reporting_manager_* cols are persisted at insert).
+        sql += """, NULL AS pob_status, NULL AS pob_id, NULL AS invoice_status,
                    NULL AS verification_state, NULL AS pob_created_at,
                    NULL AS grat_count, NULL AS grat_total_value, NULL AS grat_latest_status
                    FROM chemists c"""
@@ -944,6 +944,58 @@ def chemist_detail(cid: int,
     return row
 
 
+# chemists columns stored as REAL / DATE; blank strings must become NULL or
+# Postgres raises "invalid input syntax for type real / date".
+_CHEMIST_NULL_EMPTY_FIELDS = {"latitude", "longitude", "monthly_business_potential",
+                              "estimated_monthly_sales", "last_visit_date"}
+
+# Registration-lineage snapshot columns captured on chemists at insert time so
+# division admins always see the registering end user + their reporting manager.
+_CHEMIST_LINEAGE_COLS = [
+    "registered_by", "registered_by_name", "registered_by_role", "registered_by_level",
+    "reporting_manager_id", "reporting_manager_name", "reporting_manager_role",
+    "reporting_manager_level",
+]
+
+
+def _chemist_numeric(v):
+    return None if v == "" else v
+
+
+def _chemist_vals(fields, body):
+    return [_chemist_numeric(body.get(col)) if col in _CHEMIST_NULL_EMPTY_FIELDS else body.get(col)
+            for col in fields]
+
+
+def _chemist_vals_row(fields, row):
+    return [None if col in _CHEMIST_NULL_EMPTY_FIELDS and str(row.get(col) or "").strip() in ("", "None") else _chemist_numeric(row.get(col)) if col in ("latitude", "longitude") else row.get(col)
+            for col in fields]
+
+
+def _registrant_lineage(conn, user_id):
+    """Snapshot of the registering end user and their reporting manager."""
+    c = conn.cursor()
+    c.execute("""SELECT u.full_name, r.name AS role_name, hl.label AS level_label,
+                        m.id AS mgr_id, m.full_name AS mgr_name,
+                        mr.name AS mgr_role, mhl.label AS mgr_level
+                 FROM users u
+                 LEFT JOIN roles r ON r.id = u.role_id
+                 LEFT JOIN hierarchy_levels hl ON hl.id = u.hierarchy_level_id
+                 LEFT JOIN users m ON m.id = u.parent_id AND m.id <> u.id
+                 LEFT JOIN roles mr ON mr.id = m.role_id
+                 LEFT JOIN hierarchy_levels mhl ON mhl.id = m.hierarchy_level_id
+                 WHERE u.id=%s""", (user_id,))
+    row = c.fetchone()
+    if not row:
+        return {c: None for c in _CHEMIST_LINEAGE_COLS}
+    return {
+        "registered_by": user_id,
+        "registered_by_name": row[0], "registered_by_role": row[1], "registered_by_level": row[2],
+        "reporting_manager_id": row[3], "reporting_manager_name": row[4],
+        "reporting_manager_role": row[5], "reporting_manager_level": row[6],
+    }
+
+
 @router.post("/chemists")
 def create_chemist(body: dict, ctx: TenantContext = Depends(require_permission("chemist.manage"))):
     name = (body.get("name") or "").strip()
@@ -1001,7 +1053,7 @@ def create_chemist(body: dict, ctx: TenantContext = Depends(require_permission("
             "institution_department", "institution_contact_person", "institution_address",
             "monthly_business_potential", "estimated_monthly_sales", "brand_potential",
             "strategic_importance", "last_visit_date", "visit_frequency"]
-    vals = [body.get(col) for col in cols]
+    vals = _chemist_vals(cols, body)
     vals[0] = name
     if not vals[20]:
         vals[20] = "active"
@@ -1011,6 +1063,16 @@ def create_chemist(body: dict, ctx: TenantContext = Depends(require_permission("
         vals.append(division_id)
     cols.append("created_by")
     vals.append(ctx.user["id"])
+    # Freeze the registering user + their reporting manager at insert time so
+    # division admins always see that lineage even if users/hierarchy change.
+    for lc, lv in _registrant_lineage(conn, ctx.user["id"]).items():
+        cols.append(lc)
+        vals.append(lv)
+    # Snapshot the registering end user + their reporting manager so division
+    # admins always see the registrant lineage even after users/hierarchy change.
+    for lc, lv in _registrant_lineage(conn, ctx.user["id"]).items():
+        cols.append(lc)
+        vals.append(lv)
     c.execute(
         f"""INSERT INTO chemists ({', '.join(cols)}) VALUES ({', '.join(['%s']*len(cols))}) RETURNING id""",
         vals,
@@ -1037,7 +1099,7 @@ def update_chemist(cid: int, body: dict, ctx: TenantContext = Depends(require_pe
     for f in fields:
         if f in body and body[f] is not None:
             sets.append(f"{f}=%s")
-            params.append(body[f])
+            params.append(_chemist_numeric(body[f]) if f in _CHEMIST_NULL_EMPTY_FIELDS else body[f])
     if not sets:
         raise HTTPException(400, "Nothing to update")
     params.append(cid)
@@ -1181,21 +1243,28 @@ async def bulk_upload_chemists(file: UploadFile = File(...),
         if not (d.get("name") or "").strip():
             errors.append(f"row {i}: name required")
             continue
-        vals = [d.get(f) for f in fields]
+        vals = _chemist_vals_row(fields, d)
         if not vals[20]:
             vals[20] = "active"
-        insert_fields = fields
-        if division_id:
-            insert_fields = fields + ["division_id"]
-            vals = vals + [division_id]
-        try:
-            c.execute(
-                f"INSERT INTO chemists ({', '.join(insert_fields)}) VALUES ({', '.join(['%s']*len(insert_fields))})",
-                vals,
-            )
-            created += 1
-        except Exception as exc:
-            errors.append(f"row {i}: {exc}")
+    insert_fields = fields
+    if division_id:
+        insert_fields = fields + ["division_id"]
+        vals = vals + [division_id]
+    # Bulk rows are registered by the uploading end user; capture both the
+    # created_by identity and the same lineage snapshot used by single insert.
+    insert_fields = insert_fields + ["created_by"]
+    vals = vals + [ctx.user["id"]]
+    for lc in _CHEMIST_LINEAGE_COLS:
+        insert_fields = insert_fields + [lc]
+        vals = vals + [_registrant_lineage(conn, ctx.user["id"]).get(lc)]
+    try:
+        c.execute(
+            f"INSERT INTO chemists ({', '.join(insert_fields)}) VALUES ({', '.join(['%s']*len(insert_fields))})",
+            vals,
+        )
+        created += 1
+    except Exception as exc:
+        errors.append(f"row {i}: {exc}")
     conn.commit()
     log_action(conn, ctx.user["id"], "chemist.bulk_upload", "chemist", None, {"created": created, "errors": len(errors)})
     return {"created": created, "errors": errors}

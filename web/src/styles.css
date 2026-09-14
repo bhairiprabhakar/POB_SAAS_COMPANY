@@ -322,6 +322,11 @@ a.user-chip:hover { border-color: var(--primary); text-decoration: none; }
 
 .stepper { display: flex; align-items: flex-start; gap: 6px; margin: 0 0 16px; padding: 0 0 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .step { display: flex; align-items: center; gap: 7px; padding-right: 14px; }
+.step { background: none; border: none; text-align: left; font: inherit; color: inherit; }
+.step.clickable { cursor: pointer; }
+.step.clickable:hover .step-label { text-decoration: underline; }
+.step:disabled { cursor: default; }
+.step:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 6px; }
 .step + .step { border-left: 1px solid var(--border); padding-left: 14px; }
 .step-num { width: 22px; height: 22px; border-radius: 50%; background: var(--bg-3); color: var(--muted); font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; transition: all .15s; }
 .step.active .step-num { background: var(--primary); color: #fff; box-shadow: var(--ring); }
