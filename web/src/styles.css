@@ -133,8 +133,8 @@ strong { font-weight: 600; }
 
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 24px; background: var(--bg-2);
-  border-bottom: 1px solid var(--border);
+  padding: 10px 16px; background: var(--bg-2);
+  box-shadow: 0 1px 3px rgba(60, 64, 67, .30), 0 4px 8px 3px rgba(60, 64, 67, .15);
   position: sticky; top: 0; z-index: 10;
 }
 .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -145,16 +145,31 @@ strong { font-weight: 600; }
 .menu-btn:hover { border-color: var(--primary); color: var(--primary); }
 .side-backdrop { display: none; }
 .topbar-title {
-  color: var(--text-2); font-size: 13px; font-weight: 500;
+  color: var(--text); font-size: 14px; font-weight: 500;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.topbar-title::before {
+  content: '·'; margin-right: 10px; color: var(--border); font-weight: 400;
 }
 .topbar-right { display: flex; align-items: center; gap: 12px; }
 .user-chip {
-  background: var(--bg-3); border: 1px solid transparent;
-  padding: 6px 14px; border-radius: 20px; font-size: 13px; color: var(--text); font-weight: 500;
+  display: inline-flex; align-items: center; gap: 8px;
+  background: none; padding: 4px 6px;
+  border-radius: 18px; font-size: 13px; color: var(--text); font-weight: 500;
+  transition: background .15s;
 }
-a.user-chip:hover { border-color: var(--primary); text-decoration: none; }
-.bell { position: relative; font-size: 18px; background: none; border: none; cursor: pointer; padding: 4px; }
+a.user-chip:hover { background: var(--bg-3); text-decoration: none; }
+.user-avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--primary); color: #fff; font-size: 13px; font-weight: 600; letter-spacing: .2px;
+}
+.user-chip-name { line-height: 1.2; }
+.bell {
+  position: relative; font-size: 17px; background: none; border: none; cursor: pointer;
+  padding: 7px; line-height: 1; border-radius: 50%;
+}
+.bell:hover { background: var(--bg-3); }
 .bell-dot {
   position: absolute; top: -6px; right: -9px; background: var(--red); color: #fff;
   font-size: 10px; padding: 1px 5px; border-radius: 10px;

@@ -548,7 +548,8 @@ export function AppShell({ children, kind }) {
               <SaBell unread={unread} onDrained={loadUnread} />
             )}
             <Link to={kind === 'sa' ? '/superadmin' : '/app/profile'} className="user-chip" title="View profile">
-              {session?.user?.full_name || session?.user?.username}
+              <span className="user-avatar">{(session?.user?.full_name || session?.user?.username || '?')[0]?.toUpperCase()}</span>
+              <span className="user-chip-name">{session?.user?.full_name || session?.user?.username}</span>
             </Link>
             <button className="btn btn-ghost btn-sm" onClick={logout}>Logout</button>
           </div>
