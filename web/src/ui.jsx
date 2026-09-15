@@ -268,8 +268,8 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
               </div>
             </>}
       </div>
-      <SideNav items={items.filter(canSee)} badges={badges} onNavigate={onNavigate} />
       <SideCollapse collapsed={collapsed} onToggle={onToggleCollapse} />
+      <SideNav items={items.filter(canSee)} badges={badges} onNavigate={onNavigate} />
     </aside>
   );
 }
@@ -338,8 +338,7 @@ function SideCollapse({ collapsed, onToggle }) {
       title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
       aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
       <span className="side-collapse-icon">{collapsed ? '›' : '‹'}</span>
-      <span className="side-label">Collapse</span>
-    </button>
+</button>
   );
 }
 
@@ -407,8 +406,8 @@ function SuperSidebar({ onNavigate, open, collapsed, onToggleCollapse }) {
           : <span className="brand-mark">C</span>}
         <div><strong>{brand.platform_name}</strong><small>Platform Console</small></div>
       </div>
-      <SideNav items={visible} badges={badges} onNavigate={onNavigate} />
       <SideCollapse collapsed={collapsed} onToggle={onToggleCollapse} />
+      <SideNav items={visible} badges={badges} onNavigate={onNavigate} />
     </aside>
   );
 }

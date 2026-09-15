@@ -2253,16 +2253,15 @@ body {
 .side-link.active:hover { background: var(--primary-tint); color: var(--primary-2); }
 
 .side-collapse {
-  display: flex; align-items: center; gap: 9px;
-  margin: 8px 0 2px; padding: 8px 12px;
-  border: none; border-top: 1px solid var(--border); border-radius: 0;
-  background: none; color: var(--muted);
-  font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; margin: 2px 6px 10px; padding: 0; flex: none;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface); color: var(--muted);
+  font: inherit; font-size: 14px; line-height: 1; text-align: center; cursor: pointer;
+  transition: background .12s ease, color .12s ease, border-color .12s ease;
 }
-.side-collapse:hover { color: var(--text); }
-.side-collapse-icon {
-  width: 28px; flex: none; text-align: center; font-size: 15px; line-height: 1;
-}
+.side-collapse:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface-alt); }
+.side-collapse-icon { flex: none; font-size: 14px; line-height: 1; }
 
 /* == Dashboard primitives ================================================= */
 .dash-hero {
