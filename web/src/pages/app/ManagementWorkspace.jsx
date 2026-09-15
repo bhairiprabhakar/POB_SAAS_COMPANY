@@ -578,7 +578,8 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
                 <Select value={f.brand_id || ''} onChange={set('brand_id')} options={brandOpts} />
               )}
             </Field>
-            <ProductBuilder base={base} products={products} setProducts={setProducts} brands={brands} divBrands={divBrands} />
+            <ProductBuilder base={base} products={products} setProducts={setProducts} brands={brands} divBrands={divBrands}
+              singleBrand={f.brand_mode === 'single' ? f.brand_id : null} />
           </>
         )}
         {step === 2 && (
@@ -587,21 +588,8 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
               hint={(f.eligible_states || []).length
                 ? `${f.eligible_states.length} state(s) selected`
                 : 'No states selected — chemists in any state are accepted'}>
-              <div className="role-picker">
-                {INDIAN_STATES.map((s) => {
-                  const sel = (f.eligible_states || []).includes(s);
-                  return (
-                    <label key={s} className="check">
-                      <input type="checkbox" checked={sel}
-                        onChange={() => setF((p) => ({
-                          ...p,
-                          eligible_states: sel ? (p.eligible_states || []).filter((x) => x !== s) : [...(p.eligible_states || []), s],
-                        }))} />
-                      {s}
-                    </label>
-                  );
-                })}
-              </div>
+              <StatePicker value={f.eligible_states || []} onChange={(v) => setF((p) => ({ ...p, eligible_states: v }))}
+                options={INDIAN_STATES} />
             </Field>
             <Field label="Chemist types (attachment)" className="span-2"
               hint={(f.eligible_chemist_attachment_types || []).length
@@ -851,7 +839,7 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
   );
 }
 
-function ProductBuilder({ base, products, setProducts, brands, divBrands }) {
+function ProductBuilder({ base, products, setProducts, brands, divBrands, singleBrand }) {
   const masters = useAsync(() => api(`${base}/products`), [base]);
   const [q, setQ] = useState('');
   const [quick, setQuick] = useState(false);
@@ -859,8 +847,9 @@ function ProductBuilder({ base, products, setProducts, brands, divBrands }) {
   const [busy, setBusy] = useState(false);
 
   const all = masters.data?.items || [];
+  const scoped = singleBrand ? all.filter((p) => p && String(p.brand_id) === String(singleBrand)) : all;
   const selectedIds = new Set((products || []).map((p) => p.id).filter(Boolean));
-  const filtered = all.filter((p) => !q || (p.name || '').toLowerCase().includes(q.toLowerCase())
+  const filtered = scoped.filter((p) => !q || (p.name || '').toLowerCase().includes(q.toLowerCase())
     || (p.brand_name || '').toLowerCase().includes(q.toLowerCase())
     || (p.sku || '').toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => (selectedIds.has(b.id) ? 1 : 0) - (selectedIds.has(a.id) ? 1 : 0));
