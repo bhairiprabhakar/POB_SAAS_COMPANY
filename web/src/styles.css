@@ -1,36 +1,64 @@
-﻿:root {
-  /* ── Google Material tokens: white surfaces, #1A73E8 blue, Roboto ink ── */
-  --bg: #F8F9FA;
+:root {
+  /* ══ Premium Enterprise tokens · Inter type · restrained #2563EB blue ══
+     Single source of truth — same variable names across the whole app so a
+     value change here re-skins every surface consistently from one place. */
+
+  /* Neutral canvas */
+  --bg: #F8FAFC  ;
+  --bg-1: var(--bg);
+
+  /* Surfaces (white → slate-50 → slate-100) */
   --bg-2: #FFFFFF;
-  --bg-3: #F1F3F4;
-  --border: #DADCE0;
-  --text: #202124;
-  --text-2: #5F6368;
-  --muted: #80868B;
+  --bg-3: #F1F5F9  ;
 
-  --primary: #1A73E8;
-  --primary-2: #1765CC;
-  --primary-tint: rgba(26, 115, 232, .12);
+  --surface: var(--bg-2);
+  --surface-alt: var(--bg-3);
+  --surface-strong: var(--bg-3);
+  /* Aliases used by shared surfaces & JSX-inline styles (must exist for tonal fills) */
+  --text-secondary: var(--text-2);
+  --text-muted: var(--muted);
+  --bg-secondary: var(--bg-3);
+  --bg-tertiary: var(--bg-3);
 
-  --green: #188038;
-  --green-tint: rgba(24, 128, 56, .12);
-  --amber: #B06000;
-  --amber-tint: rgba(176, 96, 0, .12);
-  --red: #D93025;
-  --red-tint: rgba(217, 48, 37, .12);
-  --blue: #1A73E8;
-  --blue-tint: rgba(26, 115, 232, .12);
-  --teal: #00695C;
-  --teal-tint: rgba(0, 105, 92, .10);
-  --gray: #5F6368;
-  --gray-tint: rgba(95, 99, 104, .12);
+  /* Hairlines & ink */
+  --border: #E5E7EB;
+  --text: #111827;
+  --text-2: #667085;
+  --muted: #98A2B3;
 
+  /* Brand / interactive (enterprise blue #2563EB, restrained tonal fills) */
+  --primary: #2563EB;
+  --primary-2: #1D4ED8;
+  --primary-tint: rgba(37, 99, 235, .08);
+
+  /* Semantic status · verified / warning / error / info · soft tonal only */
+  --green: #16A34A;
+  --green-tint: rgba(22, 163, 74, .10);
+  --amber: #D97706;
+  --amber-tint: rgba(217, 119, 6, .10);
+  --red: #DC2626;
+  --red-tint: rgba(220, 38, 38, .10);
+  --blue: #2563EB;
+  --blue-tint: rgba(37, 99, 235, .10);
+  --teal: #0F766E;
+  --teal-tint: rgba(15, 118, 110, .10);
+  --gray: #64748B;
+  --gray-tint: rgba(100, 116, 139, .10);
+  --info: #0284C7;
+  --info-tint: rgba(2, 132, 199, .10);
+
+  /* Radius tiers · badges 8 · buttons/inputs 8 · cards 12 · modals 16 · auth 24 */
+  --radius-sm: 8px;
   --radius: 8px;
   --radius-lg: 12px;
-  --radius-sm: 8px;
-  --shadow: 0 1px 2px rgba(60, 64, 67, .30), 0 1px 3px 1px rgba(60, 64, 67, .15);
-  --shadow-hover: 0 2px 6px 2px rgba(60, 64, 67, .15), 0 1px 2px rgba(60, 64, 67, .30);
-  --ring: 0 0 0 3px rgba(26, 115, 232, .15);
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+
+  /* Restrained elevation · enterprise levels 0–3, never heavy */
+  --shadow: 0 1px 2px rgba(16, 24, 40, .04), 0 1px 3px rgba(16, 24, 40, .06);
+  --shadow-hover: 0 2px 4px rgba(16, 24, 40, .06), 0 6px 12px -4px rgba(16, 24, 40, .10);
+  --shadow-lg: 0 12px 32px -8px rgba(16, 24, 40, .16), 0 4px 12px -4px rgba(16, 24, 40, .06);
+  --ring: 0 0 0 3px rgba(37, 99, 235, .15);
 }
 
 * { box-sizing: border-box; }
@@ -39,7 +67,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: 'Roboto', 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: 'Inter', 'Roboto', 'Segoe UI', system-ui, -apple-system, sans-serif;
   font-size: 14px;
   line-height: 1.5;
   letter-spacing: 0;
@@ -51,7 +79,7 @@ a { color: var(--primary); text-decoration: none; }
 a:hover { text-decoration: underline; }
 code { background: var(--bg-3); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
 h1, h2, h3, h4 { margin: 0 0 10px; font-weight: 500; line-height: 1.4; }
-h1, h2, h3 { font-family: 'Roboto', 'Inter', system-ui, sans-serif; letter-spacing: 0; color: var(--text); }
+h1, h2, h3 { font-family: 'Inter', 'Roboto', system-ui, sans-serif; letter-spacing: 0; color: var(--text); }
 strong { font-weight: 600; }
 ::selection { background: rgba(26, 115, 232, .16); }
 
