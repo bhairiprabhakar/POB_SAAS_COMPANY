@@ -36,6 +36,61 @@ const INDIAN_STATES = [
   'Jammu and Kashmir', 'Ladakh', 'Lakshadweep', 'Puducherry',
 ];
 
+function StatePicker({ value = [], onChange, options = [] }) {
+  const [open, setOpen] = useState(false);
+  const [srch, setSrch] = useState('');
+  const ref = useRef(null);
+  useEffect(() => {
+    const onClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, []);
+  const shown = options.filter((s) => !srch || s.toLowerCase().includes(srch.toLowerCase()));
+  const allSelected = shown.length > 0 && shown.every((s) => value.includes(s));
+  const toggleAll = () => {
+    if (allSelected) onChange(value.filter((s) => !shown.includes(s)));
+    else onChange([...new Set([...value, ...shown])]);
+  };
+  return (
+    <div className="role-picker" style={{ position: 'relative' }} ref={ref}>
+      <button type="button" className="seg span-2" style={{ justifyContent: 'space-between' }}
+        onClick={() => setOpen((o) => !o)}>
+        <span>{value.length ? `${value.length} state(s) selected` : 'Select states'}</span>
+        <span className="muted">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 20,
+          background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+          boxShadow: '0 2px 8px rgba(0,0,0,.2)', marginTop: 4, padding: 8, maxHeight: 300, overflow: 'auto' }}>
+          <div className="role-picker">
+            <input className="input" placeholder="Search states…" value={srch}
+              onChange={(e) => setSrch(e.target.value)} />
+            <div className="seg">
+              <button type="button" className={`seg${allSelected ? ' active' : ''}`} onClick={toggleAll}>
+                {allSelected ? 'Clear all' : 'Select all'}
+              </button>
+              <button type="button" className="seg" onClick={() => { onChange([]); setSrch(''); }}>
+                Clear
+              </button>
+            </div>
+            {shown.map((s) => {
+              const sel = value.includes(s);
+              return (
+                <label key={s} className="check">
+                  <input type="checkbox" checked={sel}
+                    onChange={() => onChange(sel ? value.filter((x) => x !== s) : [...value, s])} />
+                  {s}
+                </label>
+              );
+            })}
+            {shown.length === 0 && <span className="muted">No states match</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ConfigChecklist({ data, compact }) {
   if (!data) return null;
   const { ready, complete, items } = data;
