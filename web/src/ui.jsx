@@ -364,7 +364,7 @@ function SuperSidebar({ onNavigate, open, collapsed, onToggleCollapse }) {
     { to: '/superadmin/analytics', label: 'Analytics', icon: '📈', group: 'Analytics', tone: 'primary', roles: ['owner', 'full', 'campaign_admin'] },
     { to: '/superadmin/costing', label: 'ROI', icon: '₹', group: 'Analytics', tone: 'green', roles: ['owner', 'full'] },
 
-    { to: '/superadmin/admins', label: 'Platform Admins', icon: '🔐', group: 'Access', tone: 'primary', roles: ['owner'] },
+    { to: '/superadmin/admins', label: 'Platform Admins', icon: '🔐', group: 'Platform', tone: 'primary', roles: ['owner'] },
     { to: '/superadmin/audit', label: 'Audit Logs', icon: '✎', group: 'Platform', tone: 'gray', roles: ['owner', 'full'] },
     { to: '/superadmin/platform-settings', label: 'Platform Settings', icon: '⚙', group: 'Platform', tone: 'gray', roles: ['owner', 'full'] },
   ];
