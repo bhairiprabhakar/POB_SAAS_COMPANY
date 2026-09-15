@@ -267,8 +267,8 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
                 <small>{company.code || ''}</small>
               </div>
             </>}
+        <SideCollapse collapsed={collapsed} onToggle={onToggleCollapse} />
       </div>
-      <SideCollapse collapsed={collapsed} onToggle={onToggleCollapse} />
       <SideNav items={items.filter(canSee)} badges={badges} onNavigate={onNavigate} />
     </aside>
   );
@@ -405,8 +405,8 @@ function SuperSidebar({ onNavigate, open, collapsed, onToggleCollapse }) {
           ? <img src="/api/v1/auth/platform-logo" alt="" className="brand-logo" />
           : <span className="brand-mark">C</span>}
         <div><strong>{brand.platform_name}</strong><small>Platform Console</small></div>
+        <SideCollapse collapsed={collapsed} onToggle={onToggleCollapse} />
       </div>
-      <SideCollapse collapsed={collapsed} onToggle={onToggleCollapse} />
       <SideNav items={visible} badges={badges} onNavigate={onNavigate} />
     </aside>
   );
