@@ -538,6 +538,9 @@ export function AppShell({ children, kind }) {
                     <span className="ver-chip-dot" /> {stats.pending} pending
                   </Link>
                 )}
+                {session.user?.data_entry && (
+                  <Link to="/app/visits" className="topbar-qitem" title="Chemist Visits">📅</Link>
+                )}
                 <Link to="/app/notifications" className="bell" title="Notifications">
                   🔔{unread > 0 && <span className="bell-dot">{unread > 99 ? '99+' : unread}</span>}
                 </Link>

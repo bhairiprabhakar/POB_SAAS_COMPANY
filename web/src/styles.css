@@ -2252,10 +2252,19 @@ body {
 }
 .side-link.active:hover { background: var(--primary-tint); color: var(--primary-2); }
 
+.topbar-qitem {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; margin: 0 0 0 8px; padding: 0; flex: none;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface); color: var(--muted); cursor: pointer;
+  font: inherit; font-size: 15px; line-height: 1; text-align: center; text-decoration: none;
+  transition: background .12s ease, color .12s ease, border-color .12s ease;
+}
+.topbar-qitem:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface-alt); }
 .side-collapse {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px; margin: 0 0 0 6px; padding: 0; flex: none;
-  border: 1px solid var(--border); border-radius: 8px;
+  width: 34px; height: 34px; margin: 0; padding: 0; flex: none;
+  border: 1px solid var(--border); border-radius: 10px;
   background: var(--surface); color: var(--muted); cursor: pointer;
   font: inherit; font-size: 14px; line-height: 1; text-align: center;
   transition: background .12s ease, color .12s ease, border-color .12s ease;
