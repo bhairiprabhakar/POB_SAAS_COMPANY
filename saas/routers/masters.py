@@ -182,7 +182,7 @@ def campaign_tracking(ctx: TenantContext = Depends(require_permission("campaign.
     conn = ctx.conn
     c = conn.cursor()
     visible = visible_user_ids(conn, ctx)
-    div = division_scope(conn, ctx)
+    div = user_division_id(conn, ctx)
 
     user_sql = """SELECT u.id, u.full_name, u.parent_id, u.region, u.state,
                          h.name AS level_name, h.rank, r.name AS role_name

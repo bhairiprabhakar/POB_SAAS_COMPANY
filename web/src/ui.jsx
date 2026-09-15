@@ -244,6 +244,7 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
     // ── Campaign Users (PSR / ASM / RSM / SM / MR / etc.) ──
     { to: '/app', label: 'Dashboard', icon: '▦', perm: 'dashboard.view', end: true, group: 'Core Modules', tone: 'primary' },
     { to: '/app/chemists/register', label: 'Register Chemist', icon: '✚', perm: 'chemist.manage', entry: true, group: 'Core Modules', tone: 'green' },
+    { to: '/app/campaigns', label: 'Campaigns', icon: '◎', perm: 'campaign.view', group: 'Core Modules', tone: 'teal' },
     { to: '/app/pob/submit', label: 'Submit POB', icon: '📋', perm: 'pob.submit', group: 'Core Modules', tone: 'blue' },
     { to: '/app/pob/invoice', label: 'Submit Invoice', icon: '🧾', perm: 'pob.submit', group: 'Core Modules', tone: 'green' },
     { to: '/app/pob/mine', label: 'My Submissions', icon: '≣', perm: 'pob.submit', group: 'Core Modules', tone: 'teal' },
