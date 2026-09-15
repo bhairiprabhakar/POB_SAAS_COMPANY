@@ -209,23 +209,23 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
   // `group` drives the section headers, `tone` the coloured icon tile.
   const items = isVerifier ? [
     // ── Verification Agent ──
-    { to: '/app', label: 'Dashboard', icon: '▦', perm: 'dashboard.view', end: true, group: 'Core modules', tone: 'primary' },
-    { to: '/app/verification', label: 'Verification Queue', icon: '✓', perm: 'verification.view', group: 'Core modules', tone: 'blue' },
-    { to: '/app/pob', label: 'All POB Records', icon: '≣', perm: 'pob.view', group: 'Core modules', tone: 'teal' },
-    { to: '/app/analytics', label: 'Analytics', icon: '📈', perm: 'dashboard.view', group: 'Core modules', tone: 'green' },
-    { to: '/app/notifications', label: 'Notifications', icon: '🔔', perm: 'notification.view', group: 'Quick access', tone: 'amber' },
-    { to: '/app/profile', label: 'My Profile', icon: '👤', group: 'Quick access', tone: 'gray' },
+    { to: '/app', label: 'Dashboard', icon: '▦', perm: 'dashboard.view', end: true, group: 'Core Modules', tone: 'primary' },
+    { to: '/app/verification', label: 'Verification Queue', icon: '✓', perm: 'verification.view', group: 'Core Modules', tone: 'blue' },
+    { to: '/app/pob', label: 'All POB Records', icon: '≣', perm: 'pob.view', group: 'Core Modules', tone: 'teal' },
+    { to: '/app/analytics', label: 'Analytics', icon: '📈', perm: 'dashboard.view', group: 'Core Modules', tone: 'green' },
+    { to: '/app/notifications', label: 'Notifications', icon: '🔔', perm: 'notification.view', group: 'Quick Access', tone: 'amber' },
+    { to: '/app/profile', label: 'My Profile', icon: '👤', group: 'Quick Access', tone: 'gray' },
   ] : isAdmin ? [
     // ── Division Admin / HO ──
-    { to: '/app/admin', label: 'Dashboard', icon: '▦', perm: 'dashboard.view', end: true, group: 'Core modules', tone: 'primary' },
-    { to: '/app/my-division', label: 'My Division', icon: '▣', perm: 'dashboard.view', group: 'Core modules', tone: 'teal' },
+    { to: '/app/admin', label: 'Dashboard', icon: '▦', perm: 'dashboard.view', end: true, group: 'Core Modules', tone: 'primary' },
+    { to: '/app/my-division', label: 'My Division', icon: '▣', perm: 'dashboard.view', group: 'Core Modules', tone: 'teal' },
 
     { to: '/app/user-management', label: 'Employees', icon: '👥', perm: 'user.view', group: 'Employees', tone: 'blue' },
 
-    { to: '/app/catalog', label: 'Catalog', icon: '◉', perm: 'brand.view', group: 'Masters', tone: 'amber' },
-    { to: '/app/chemists', label: 'Chemists', icon: '◨', perm: 'chemist.view', group: 'Masters', tone: 'blue' },
-    { to: '/app/regions', label: 'Coverage', icon: '⌗', perm: 'user.view', group: 'Masters', tone: 'green' },
-    { to: '/app/gifts', label: 'Gifts', icon: '🎁', perm: 'gratification.manage', group: 'Masters', tone: 'purple' },
+    { to: '/app/catalog', label: 'Catalog', icon: '◉', perm: 'brand.view', group: 'Master Data', tone: 'amber' },
+    { to: '/app/chemists', label: 'Chemists', icon: '◨', perm: 'chemist.view', group: 'Master Data', tone: 'blue' },
+    { to: '/app/regions', label: 'Coverage', icon: '⌗', perm: 'user.view', group: 'Master Data', tone: 'green' },
+    { to: '/app/gifts', label: 'Gifts', icon: '🎁', perm: 'gratification.manage', group: 'Master Data', tone: 'purple' },
 
     { to: '/app/campaigns', label: 'All Campaigns', icon: '◎', perm: 'campaign.view', group: 'Campaigns', tone: 'teal' },
 
@@ -236,23 +236,23 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
     { to: '/app/analytics', label: 'Analytics', icon: '📈', perm: 'dashboard.view', group: 'Operations', tone: 'red' },
     { to: '/app/reports', label: 'Reports', icon: '🗎', perm: 'report.view', group: 'Operations', tone: 'teal' },
 
-    { to: '/app/notifications', label: 'Notifications', icon: '🔔', perm: 'notification.view', group: 'Quick access', tone: 'amber' },
-    { to: '/app/audit', label: 'Audit', icon: '✎', perm: 'audit.view', group: 'Quick access', tone: 'gray' },
-    { to: '/app/security', label: 'Security', icon: '🔐', perm: 'apikey.view', group: 'Quick access', tone: 'green' },
-    { to: '/app/jobs', label: 'Background Jobs', icon: '⚙', perm: 'job.view', group: 'Quick access', tone: 'amber' },
+    { to: '/app/notifications', label: 'Notifications', icon: '🔔', perm: 'notification.view', group: 'Quick Access', tone: 'amber' },
+    { to: '/app/audit', label: 'Audit', icon: '✎', perm: 'audit.view', group: 'Quick Access', tone: 'gray' },
+    { to: '/app/security', label: 'Security', icon: '🔐', perm: 'apikey.view', group: 'Quick Access', tone: 'green' },
+    { to: '/app/jobs', label: 'Background Jobs', icon: '⚙', perm: 'job.view', group: 'Quick Access', tone: 'amber' },
   ] : [
     // ── Campaign Users (PSR / ASM / RSM / SM / MR / etc.) ──
-    { to: '/app', label: 'Dashboard', icon: '▦', perm: 'dashboard.view', end: true, group: 'Core modules', tone: 'primary' },
-    { to: '/app/pob/submit', label: 'Submit POB', icon: '📋', perm: 'pob.submit', group: 'Core modules', tone: 'blue' },
-    { to: '/app/pob/invoice', label: 'Submit Invoice', icon: '🧾', perm: 'pob.submit', group: 'Core modules', tone: 'green' },
-    { to: '/app/pob/mine', label: 'My Submissions', icon: '≣', perm: 'pob.submit', group: 'Core modules', tone: 'teal' },
-    { to: '/app/chemists', label: 'Chemists', icon: '◉', perm: 'chemist.view', group: 'Core modules', tone: 'amber' },
-    { to: '/app/gratification', label: 'Gratification', icon: '🎁', perm: 'gratification.view', group: 'Core modules', tone: 'red' },
-    { to: '/app/analytics', label: 'Analytics', icon: '📈', perm: 'dashboard.view', group: 'Core modules', tone: 'green' },
-    { to: '/app/chemists/register', label: 'Register Chemist', icon: '✚', perm: 'chemist.manage', entry: true, group: 'Quick access', tone: 'green' },
-    { to: '/app/visits', label: 'Chemist Visits', icon: '📅', perm: 'visit.view', entry: true, group: 'Quick access', tone: 'blue' },
-    { to: '/app/notifications', label: 'Notifications', icon: '🔔', perm: 'notification.view', group: 'Quick access', tone: 'amber' },
-    { to: '/app/profile', label: 'My Profile', icon: '👤', group: 'Quick access', tone: 'gray' },
+    { to: '/app', label: 'Dashboard', icon: '▦', perm: 'dashboard.view', end: true, group: 'Core Modules', tone: 'primary' },
+    { to: '/app/pob/submit', label: 'Submit POB', icon: '📋', perm: 'pob.submit', group: 'Core Modules', tone: 'blue' },
+    { to: '/app/pob/invoice', label: 'Submit Invoice', icon: '🧾', perm: 'pob.submit', group: 'Core Modules', tone: 'green' },
+    { to: '/app/pob/mine', label: 'My Submissions', icon: '≣', perm: 'pob.submit', group: 'Core Modules', tone: 'teal' },
+    { to: '/app/chemists', label: 'Chemists', icon: '◉', perm: 'chemist.view', group: 'Core Modules', tone: 'amber' },
+    { to: '/app/gratification', label: 'Gratification', icon: '🎁', perm: 'gratification.view', group: 'Core Modules', tone: 'red' },
+    { to: '/app/analytics', label: 'Analytics', icon: '📈', perm: 'dashboard.view', group: 'Core Modules', tone: 'green' },
+    { to: '/app/chemists/register', label: 'Register Chemist', icon: '✚', perm: 'chemist.manage', entry: true, group: 'Quick Access', tone: 'green' },
+    { to: '/app/visits', label: 'Chemist Visits', icon: '📅', perm: 'visit.view', entry: true, group: 'Quick Access', tone: 'blue' },
+    { to: '/app/notifications', label: 'Notifications', icon: '🔔', perm: 'notification.view', group: 'Quick Access', tone: 'amber' },
+    { to: '/app/profile', label: 'My Profile', icon: '👤', group: 'Quick Access', tone: 'gray' },
   ];
   return (
     <aside className={`sidebar${open ? ' open' : ''}${collapsed ? ' collapsed' : ''}`}>
@@ -351,7 +351,7 @@ function SuperSidebar({ onNavigate, open, collapsed, onToggleCollapse }) {
 
     { to: '/superadmin/divisions', label: 'All Divisions', icon: '▣', group: 'Divisions', tone: 'blue', roles: ['owner', 'full', 'division_admin'] },
 
-    { to: '/superadmin/users', label: 'All Employees', icon: '👥', group: 'Users & Hierarchy', tone: 'blue', roles: ['owner', 'full'] },
+    { to: '/superadmin/users', label: 'All Employees', icon: '👥', group: 'Employees & Hierarchy', tone: 'blue', roles: ['owner', 'full'] },
 
     { to: '/superadmin/campaigns', label: 'Campaigns', icon: '◎', group: 'Campaigns', tone: 'teal', roles: ['campaign_admin'] },
 
