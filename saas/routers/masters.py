@@ -10,6 +10,7 @@ Chemist management remains a tenant capability (field teams own the retail
 network), and a read-only product list is exposed for POB submission flows.
 """
 import io
+import re
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -998,6 +999,10 @@ def _registrant_lineage(conn, user_id):
 
 @router.post("/chemists")
 def create_chemist(body: dict, ctx: TenantContext = Depends(require_permission("chemist.manage"))):
+    if body.get("mobile"):
+        body["mobile"] = re.sub(r"\D", "", str(body["mobile"]))[:10]
+    if body.get("alternate_mobile"):
+        body["alternate_mobile"] = re.sub(r"\D", "", str(body["alternate_mobile"]))[:10]
     name = (body.get("name") or "").strip()
     if not name:
         raise HTTPException(400, "chemist name required")

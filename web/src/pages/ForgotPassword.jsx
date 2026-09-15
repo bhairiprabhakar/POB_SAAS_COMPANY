@@ -200,12 +200,12 @@ function ResultView({ purpose, result, contact }) {
           <>
             <label className="field">
               <span className="field-label">New password</span>
-              <input className="input" type="password" value={newPassword}
+              <TextInput className="input" type="password" value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)} minLength={6} required />
             </label>
             <label className="field">
               <span className="field-label">Confirm password</span>
-              <input className="input" type="password" value={confirm}
+              <TextInput className="input" type="password" value={confirm}
                 onChange={(e) => setConfirm(e.target.value)} minLength={6} required />
             </label>
             <button className="btn btn-primary btn-block" disabled={busy} onClick={reset}>

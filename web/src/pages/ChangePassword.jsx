@@ -78,17 +78,17 @@ export default function ChangePassword() {
         {error && <div className="error-box">{error}</div>}
         <label className="field">
           <span className="field-label">Temporary password</span>
-          <input className="input" type="password" value={currentPassword}
+          <TextInput className="input" type="password" value={currentPassword}
             onChange={(e) => setCurrentPassword(e.target.value)} autoFocus required />
         </label>
         <label className="field">
           <span className="field-label">New password</span>
-          <input className="input" type="password" value={newPassword}
+          <TextInput className="input" type="password" value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)} minLength={6} required />
         </label>
         <label className="field">
           <span className="field-label">Confirm new password</span>
-          <input className="input" type="password" value={confirm}
+          <TextInput className="input" type="password" value={confirm}
             onChange={(e) => setConfirm(e.target.value)} minLength={6} required />
         </label>
         <button className="btn btn-primary btn-block" disabled={busy}>

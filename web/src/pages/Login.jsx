@@ -7,6 +7,7 @@ export default function Login() {
   const { divisionSlug: urlSlug } = useParams();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
   const [code, setCode] = useState('');
   const [mfaToken, setMfaToken] = useState(null);
   const [error, setError] = useState('');
@@ -139,8 +140,16 @@ export default function Login() {
             </label>
             <label className="field">
               <span className="field-label">Password</span>
-              <input className="input" type="password" value={password}
-                onChange={(e) => setPassword(e.target.value)} required />
+              <div className="pw-wrap">
+                <input className="input" type={showPw ? 'text' : 'password'} value={password}
+                  onChange={(e) => setPassword(e.target.value)} required />
+                <button type="button" className="pw-eye" tabIndex={-1}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => setShowPw((v) => !v)}
+                  aria-label={showPw ? 'Hide password' : 'Show password'}>
+                  {showPw ? '🙈' : '👁'}
+                </button>
+              </div>
             </label>
             <button className="btn btn-primary btn-block" disabled={busy}>
               {busy ? 'Signing in…' : 'Sign in'}

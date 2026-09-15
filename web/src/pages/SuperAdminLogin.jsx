@@ -6,6 +6,7 @@ export default function SuperAdminLogin() {
   const nav = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [brand, setBrand] = useState({ platform_name: 'CampaignOS', has_logo: false });
@@ -59,8 +60,12 @@ export default function SuperAdminLogin() {
         </label>
         <label className="field">
           <span className="field-label">Password</span>
-          <input className="input" type="password" value={password}
-            onChange={(e) => setPassword(e.target.value)} required />
+          <div className="pw-wrap">
+            <input className="input" type={showPw ? 'text' : 'password'} value={password}
+              onChange={(e) => setPassword(e.target.value)} required />
+            <button type="button" className="pw-eye" tabIndex={-1} aria-label={showPw ? 'Hide password' : 'Show password'}
+              onClick={() => setShowPw((v) => !v)}>{showPw ? '🙈' : '👁'}</button>
+          </div>
         </label>
         <button className="btn btn-primary btn-block" disabled={busy}>
           {busy ? 'Signing in…' : 'Sign in'}

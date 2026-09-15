@@ -232,6 +232,16 @@ a.user-chip:hover { border-color: var(--primary); text-decoration: none; }
 }
 .input:focus { outline: none; border-color: var(--primary); box-shadow: var(--ring); }
 
+.pw-wrap { position: relative; display: flex; align-items: center; }
+.pw-wrap .input { padding-right: 38px; }
+.pw-eye {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  border: none; background: none; cursor: pointer; font-size: 15px;
+  padding: 2px 6px; border-radius: 6px; color: var(--muted);
+}
+.pw-eye:hover { background: var(--bg-3); color: var(--text); }
+.pw-eye:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+
 .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
 .field-label { font-size: 12px; font-weight: 500; color: var(--text-2); }
 .field-label em { color: var(--red); font-style: normal; margin-left: 2px; }

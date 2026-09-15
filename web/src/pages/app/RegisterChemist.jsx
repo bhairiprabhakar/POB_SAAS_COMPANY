@@ -81,7 +81,11 @@ export default function RegisterChemist({ demo }) {
   const [dups, setDups] = useState(null);
   const [masters, setMasters] = useState({ attachment_types: [], potential_categories: [] });
   const [guide, setGuide] = useState([]);
-  const set = (k) => (e) => setF((p) => ({ ...p, [k]: e.target.value }));
+  const set = (k) => (e) => {
+    let v = e.target.value;
+    if (k === 'mobile' || k === 'alternate_mobile') v = v.replace(/\D/g, '').slice(0, 10);
+    setF((p) => ({ ...p, [k]: v }));
+  };
 
   useEffect(() => {
     api('/api/v1/chemist-masters').then(setMasters).catch(() => {});

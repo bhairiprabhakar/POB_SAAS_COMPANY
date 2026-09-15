@@ -1051,6 +1051,20 @@ export function Field({ label, required, hint, children, ...rest }) {
 }
 
 export function TextInput(props) {
+  const [showPw, setShowPw] = useState(false);
+  if (props.type === 'password') {
+    const { type, ...rest } = props;
+    return (
+      <div className="pw-wrap">
+        <input {...rest} type={showPw ? 'text' : 'password'}
+          className={`input ${props.className || ''}`} />
+        <button type="button" className="pw-eye" tabIndex={-1}
+          aria-label={showPw ? 'Hide password' : 'Show password'}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => setShowPw((v) => !v)}>{showPw ? '🙈' : '👁'}</button>
+      </div>
+    );
+  }
   return <input {...props} className={`input ${props.className || ''}`} />;
 }
 

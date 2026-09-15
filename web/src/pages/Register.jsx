@@ -187,7 +187,7 @@ export default function Register() {
           </label>
           <label className="field">
             <span className="field-label">Password *</span>
-            <input className="input" type="password" value={owner.password || ''}
+            <TextInput className="input" type="password" value={owner.password || ''}
               onChange={set(owner, 'password')} required minLength={6} autoComplete="new-password" />
           </label>
           <p className="field-hint">The owner is the first super admin. You can add more super admins later.</p>
