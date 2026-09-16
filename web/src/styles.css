@@ -1,51 +1,79 @@
 :root {
-  /* ══ Premium Enterprise tokens · Inter type · restrained #2563EB blue ══
-     Single source of truth — same variable names across the whole app so a
-     value change here re-skins every surface consistently from one place. */
+  /* ══ PRECISION COBALT · light-only enterprise surface · single source of truth ══
+     Change a token here and the whole app re-skins from one place.
+     Neutral ≈85% · Cobalt ≈8% · Semantic ≈5% · Intelligence ≈2% */
 
-  /* Neutral canvas */
-  --bg: #F8FAFC  ;
+  /* Level 0–3 surfaces · app canvas → secondary → hover → selected */
+  --bg: #F6F8FB;
   --bg-1: var(--bg);
 
   /* Surfaces (white → slate-50 → slate-100) */
   --bg-2: #FFFFFF;
-  --bg-3: #F1F5F9  ;
+  --bg-3: #F8FAFC;
 
   --surface: var(--bg-2);
   --surface-alt: var(--bg-3);
   --surface-strong: var(--bg-3);
+  --surface-hover: #F1F5F9;
+  --surface-selected: #EEF3FF;
   /* Aliases used by shared surfaces & JSX-inline styles (must exist for tonal fills) */
   --text-secondary: var(--text-2);
   --text-muted: var(--muted);
   --bg-secondary: var(--bg-3);
   --bg-tertiary: var(--bg-3);
 
-  /* Hairlines & ink */
-  --border: #E5E7EB;
-  --text: #111827;
-  --text-2: #667085;
-  --muted: #98A2B3;
+  /* Hairlines & ink · #E4E8F0 / #D0D5DD · #172033/#475467/#667085/#98A2B3 */
+  --border: #E4E8F0;
+  --border-strong: #D0D5DD;
+  --text: #172033;
+  --text-2: #475467;
+  --muted: #667085;
+  --text-disabled: #98A2B3;
 
-  /* Brand / interactive (enterprise blue #2563EB, restrained tonal fills) */
-  --primary: #2563EB;
-  --primary-2: #1D4ED8;
-  --primary-tint: rgba(37, 99, 235, .08);
+  /* Cobalt · the single brand primary · hover / pressed / soft / border */
+  --primary: #3157E8;
+  --primary-2: #2648C7;
+  --primary-pressed: #1F3FAE;
+  --primary-tint: rgba(49, 87, 232, .08);
+  --primary-soft: #EEF3FF;
+  --primary-border: #C7D2FE;
 
-  /* Semantic status · verified / warning / error / info · soft tonal only */
-  --green: #16A34A;
-  --green-tint: rgba(22, 163, 74, .10);
-  --amber: #D97706;
-  --amber-tint: rgba(217, 119, 6, .10);
-  --red: #DC2626;
-  --red-tint: rgba(220, 38, 38, .10);
-  --blue: #2563EB;
-  --blue-tint: rgba(37, 99, 235, .10);
+  /* Indigo · secondary analytics / comparison only (never the UI wash) */
+  --indigo: #5B6FE8;
+  --indigo-soft: #F0F2FF;
+
+  /* Intelligence Violet · AI insights ONLY · never ordinary UI */
+  --violet: #7656D6;
+  --violet-soft: #F4F0FF;
+  --violet-border: #DDD6FE;
+
+  /* Semantic status · verified/approved/completed · pending/attention · rejected/failed */
+  --green: #168A5B;
+  --green-tint: rgba(22, 138, 91, .10);
+  --green-soft: #ECFDF3;
+  --green-border: #ABEFC6;
+  --green-text: #067647;
+  --amber: #C78316;
+  --amber-tint: rgba(199, 131, 22, .10);
+  --amber-soft: #FFFAEB;
+  --amber-border: #FEDF89;
+  --amber-text: #B54708;
+  --red: #D64545;
+  --red-tint: rgba(214, 69, 69, .10);
+  --red-soft: #FEF3F2;
+  --red-border: #FECDCA;
+  --red-text: #B42318;
+  --blue: #2784C6;
+  --blue-tint: rgba(39, 132, 198, .10);
+  --blue-soft: #EFF8FF;
+  --blue-border: #B9E6FE;
+  --blue-text: #175CD3;
   --teal: #0F766E;
   --teal-tint: rgba(15, 118, 110, .10);
   --gray: #64748B;
   --gray-tint: rgba(100, 116, 139, .10);
-  --info: #0284C7;
-  --info-tint: rgba(2, 132, 199, .10);
+  --info: #2784C6;
+  --info-tint: rgba(39, 132, 198, .10);
 
   /* Radius tiers · badges 8 · buttons/inputs 8 · cards 12 · modals 16 · auth 24 */
   --radius-sm: 8px;
