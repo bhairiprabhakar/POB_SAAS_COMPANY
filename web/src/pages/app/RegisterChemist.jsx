@@ -316,7 +316,7 @@ export default function RegisterChemist({ demo }) {
                 <button type="button" className="btn" onClick={detectLocation}>📍 Use my location</button>
               </div>
               {lookup === 'error' && !posts && (
-                <p className="field-hint" style={{ marginTop: 8, color: '#b91c1c' }}>No location found for this PIN. Fill the fields manually.</p>
+                <p className="field-hint" style={{ marginTop: 8, color: 'var(--red-text)' }}>No location found for this PIN. Fill the fields manually.</p>
               )}
               {posts && posts.length > 1 && (
                 <p className="field-hint" style={{ marginTop: 8 }}>{posts.length} post offices found for PIN {looking}. Pick the right one above.</p>

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, getSession } from '../../api';
 import {
-  DashHero, DonutChart, DonutLegend, ErrorBox, InsightList, LineChart, MetricTile,
+  DashHero, DonutChart, DonutLegend, ErrorBox, Icon, InsightList, LineChart, MetricTile,
   PanelCard, PeriodSelect, ProgressBar, Spinner, Table, useAsync,
 } from '../../ui';
 
@@ -162,7 +162,7 @@ export default function AdminDashboard() {
         <MetricTile label="POB value" value={fmtShort(d.pob_amount)} icon="₹" tone="green"
           delta={pctDelta(team.amount, teamPrev.amount, days)}
           sub={`Invoice value ${fmtShort(d.pob_invoice_value)}`} />
-        <MetricTile label="Active users" value={fmtNum(d.active_users)} icon="👥" tone="blue"
+        <MetricTile label="Active users" value={fmtNum(d.active_users)} icon={<Icon name="users" size={19} />} tone="blue"
           sub={`${fmtNum(d.users)} total accounts`} />
         <MetricTile label="Active campaigns" value={fmtNum(d.active_campaigns)} icon="◎" tone="teal"
           sub={`${fmtNum(d.campaigns)} campaigns · ${fmtNum(d.products)} products`} />
@@ -175,7 +175,7 @@ export default function AdminDashboard() {
           sub={v.avg_tat_hours ? `${Number(v.avg_tat_hours).toFixed(1)}h average turnaround` : 'No turnaround yet'} />
         <MetricTile label="Approval rate" value={approvalRate == null ? '—' : approvalRate + '%'} icon="✓" tone="green"
           sub={`${fmtNum(verStats.approved)} approved · ${fmtNum(verStats.rejected)} rejected`} />
-        <MetricTile label="Gratification paid" value={fmtShort(f.paid)} icon="🎁" tone="red"
+        <MetricTile label="Gratification paid" value={fmtShort(f.paid)} icon={<Icon name="gift" size={19} />} tone="indigo"
           sub={`${fmtShort(f.pending)} still pending`} />
       </div>
 
@@ -212,7 +212,8 @@ export default function AdminDashboard() {
           />
         </PanelCard>
 
-        <PanelCard title="Top insights" span="2" sub="What needs attention right now">
+        <PanelCard title={<span><span className="ai-dot">✦</span>Top insights</span>} span="2"
+          sub="What needs attention right now">
           <InsightList items={insights} empty="Everything looks healthy" />
         </PanelCard>
       </div>

@@ -163,7 +163,7 @@ function ResultView({ purpose, result, contact }) {
   if (done) {
     return (
       <>
-        <div className="error-box" style={{ background: 'var(--bg)', border: '1px solid #34a853', color: '#1a7f37' }}>Password updated successfully.</div>
+        <div className="error-box" style={{ background: 'var(--green-tint)', border: '1px solid var(--green-border)', color: 'var(--green-text)' }}>Password updated successfully.</div>
         <Link className="btn btn-primary btn-block" to="/login">Sign in with new password</Link>
       </>
     );

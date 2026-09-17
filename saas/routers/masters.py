@@ -168,7 +168,40 @@ def list_campaigns(q: str = "", status: str = "", active: bool = None, brand_id:
     div = user_division_id(ctx.conn, ctx)
     if div:
         division_id = div  # scope to user's division
+    can_manage = "campaign.manage" in ctx.perms
+    if not can_manage:
+        # Field roles (MR/ASM and similar, holding only campaign.view) execute
+        # against live schemes — drafts, pending-approval and rejected
+        # campaigns are a division admin's working state, not something a
+        # field employee should see or be tempted to act on. Restrict to the
+        # only statuses relevant to execution regardless of what the client
+        # requests.
+        allowed_statuses = {"active", "completed"}
+        if status and status not in allowed_statuses:
+            status = "__none__"  # no campaign has this status; yields an empty result
+        items = campaign_service.list_campaigns(ctx.conn, q, status if status != "__none__" else "",
+                                                 active, brand_id, division_id)
+        if status == "__none__":
+            items = []
+        else:
+            items = [c for c in items if c.get("status") in allowed_statuses]
+        return {"items": items}
     return {"items": campaign_service.list_campaigns(ctx.conn, q, status, active, brand_id, division_id)}
+
+
+@router.get("/campaigns/{cid}")
+def get_campaign(cid: int, ctx: TenantContext = Depends(require_permission("campaign.view"))):
+    row = campaign_service.get_campaign(ctx.conn, cid)
+    if not row:
+        raise HTTPException(404, "campaign not found")
+    div = division_scope(ctx.conn, ctx)
+    if div and row.get("division_id") != div:
+        raise HTTPException(404, "campaign not found")
+    if "campaign.manage" not in ctx.perms and row.get("status") not in ("active", "completed"):
+        # Same execution-only boundary as the list endpoint — a direct-by-ID
+        # request shouldn't leak a draft/pending/rejected campaign either.
+        raise HTTPException(404, "campaign not found")
+    return row
 
 
 @router.get("/campaigns/tracking")
@@ -254,17 +287,6 @@ def campaign_tracking(ctx: TenantContext = Depends(require_permission("campaign.
     if unassigned["campaigns"]:
         groups.append(unassigned)
     return {"items": groups, "users_total": len(users), "campaign_total": len(campaigns)}
-
-
-@router.get("/campaigns/{cid}")
-def get_campaign(cid: int, ctx: TenantContext = Depends(require_permission("campaign.view"))):
-    row = campaign_service.get_campaign(ctx.conn, cid)
-    if not row:
-        raise HTTPException(404, "campaign not found")
-    div = division_scope(ctx.conn, ctx)
-    if div and row.get("division_id") != div:
-        raise HTTPException(404, "campaign not found")
-    return row
 
 
 @router.post("/campaigns")

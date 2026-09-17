@@ -731,7 +731,7 @@ function InlineInvoiceForm({ chemist, campaignId, campaigns, onDone }) {
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
         onClick={() => inputRef.current?.click()}
-        style={{ cursor: 'pointer', padding: 32, border: '2px dashed #d1d5db', borderRadius: 8, textAlign: 'center', marginBottom: 12 }}>
+        style={{ cursor: 'pointer', padding: 32, border: '2px dashed var(--border-strong)', borderRadius: 8, textAlign: 'center', marginBottom: 12 }}>
         <input ref={inputRef} type="file" accept="application/pdf,image/*" hidden
           onChange={(e) => setFileFrom(e.target.files?.[0])} />
         {file ? (

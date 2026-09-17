@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmtDate, getSession } from '../../api';
 import {
-  DashHero, DonutChart, DonutLegend, ErrorBox, InsightList, LineChart, MetricTile,
+  DashHero, DonutChart, DonutLegend, ErrorBox, Icon, InsightList, LineChart, MetricTile,
   PanelCard, PeriodSelect, ProgressBar, Spinner, StatusBadge, Table, useAsync,
 } from '../../ui';
 import HomeAdmin from './AdminDashboard';
@@ -184,9 +184,9 @@ function PersonalDashboard() {
           sub="With the verification team" />
         <MetricTile label="Approval rate" value={(own.approval_rate ?? 0) + '%'} icon="◎" tone="green"
           sub={`${fmtNum(own.verified)} of ${fmtNum((own.verified || 0) + (own.rejected || 0))} decided`} />
-        <MetricTile label="Chemist visits" value={fmtNum(own.visits)} icon="📅" tone="blue"
+        <MetricTile label="Chemist visits" value={fmtNum(own.visits)} icon={<Icon name="calendar" size={19} />} tone="blue"
           sub="Logged this period" />
-        <MetricTile label="Gratifications" value={fmtNum(own.gratifications)} icon="🎁" tone="red"
+        <MetricTile label="Gratifications" value={fmtNum(own.gratifications)} icon={<Icon name="gift" size={19} />} tone="indigo"
           sub={`${fmtNum(own.gratifications_pending)} pending · ${fmtNum(own.gratifications_completed)} completed`} />
       </div>
 
@@ -243,7 +243,8 @@ function PersonalDashboard() {
           </PanelCard>
         )}
 
-        <PanelCard title="Top insights" span="2" sub="What to act on next">
+        <PanelCard title={<span><span className="ai-dot">✦</span>Top insights</span>} span="2"
+          sub="What to act on next">
           <InsightList items={insights} empty="Nothing needs your attention" />
         </PanelCard>
       </div>

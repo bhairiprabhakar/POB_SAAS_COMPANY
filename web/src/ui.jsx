@@ -115,6 +115,99 @@ export function EmptyState({ text = 'Nothing here yet' }) {
 
 // ── Badges ─────────────────────────────────────────────────────────────────
 
+// ── Icon system ──────────────────────────────────────────────────────────
+// A small, self-contained set of outline icons (Lucide-style: 24x24, 1.8px
+// stroke, round caps/joins) so nav/metric/insight chips render a consistent
+// monochrome mark that inherits the tone color via currentColor — instead
+// of color emoji, which renders inconsistently across OSes and breaks the
+// flat, tinted icon-chip system everywhere else in the UI.
+const ICON_PATHS = {
+  users: <>
+    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+  </>,
+  user: <>
+    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+    <circle cx="12" cy="7" r="4" />
+  </>,
+  gift: <>
+    <rect x="3" y="8" width="18" height="4" rx="1" />
+    <path d="M12 8v13" />
+    <path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7" />
+    <path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8" />
+    <path d="M16.5 8a2.5 2.5 0 0 0 0-5C13 3 12 8 12 8" />
+  </>,
+  'trending-up': <>
+    <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
+    <polyline points="16 7 22 7 22 13" />
+  </>,
+  'file-text': <>
+    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+    <polyline points="14 2 14 8 20 8" />
+    <line x1="16" y1="13" x2="8" y2="13" />
+    <line x1="16" y1="17" x2="8" y2="17" />
+    <line x1="10" y1="9" x2="8" y2="9" />
+  </>,
+  bell: <>
+    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+    <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+  </>,
+  lock: <>
+    <rect x="3" y="11" width="18" height="11" rx="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </>,
+  settings: <>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+  </>,
+  clipboard: <>
+    <rect x="8" y="2" width="8" height="4" rx="1" />
+    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+  </>,
+  receipt: <>
+    <path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z" />
+    <path d="M8 7h8" /><path d="M8 11h8" /><path d="M8 15h5" />
+  </>,
+  calendar: <>
+    <rect x="3" y="4" width="18" height="18" rx="2" />
+    <line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
+  </>,
+  wallet: <>
+    <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
+    <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
+    <path d="M18 12a2 2 0 0 0 0 4h4v-4Z" />
+  </>,
+  mail: <>
+    <rect x="2" y="4" width="20" height="16" rx="2" />
+    <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+  </>,
+  'map-pin': <>
+    <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+    <circle cx="12" cy="10" r="3" />
+  </>,
+  building: <>
+    <rect x="4" y="2" width="16" height="20" rx="1" />
+    <path d="M9 22v-4h6v4" />
+    <path d="M8 6h.01" /><path d="M12 6h.01" /><path d="M16 6h.01" />
+    <path d="M8 10h.01" /><path d="M12 10h.01" /><path d="M16 10h.01" />
+    <path d="M8 14h.01" /><path d="M12 14h.01" /><path d="M16 14h.01" />
+  </>,
+};
+
+export function Icon({ name, size = 16, className = '' }) {
+  const body = ICON_PATHS[name];
+  if (!body) return null;
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+      className={className} style={{ display: 'block' }}>
+      {body}
+    </svg>
+  );
+}
+
 const TONES = {
   active: 'green', approved: 'green', verified: 'green', delivered: 'green',
   completed: 'green', paid: 'green', redeemed: 'green', sent: 'blue',
@@ -124,6 +217,10 @@ const TONES = {
   draft: 'gray', paused: 'gray', provisioning: 'amber', trial: 'amber',
   submitted: 'amber', default: 'gray', green: 'green',
   pending_approval: 'amber', scheduled: 'blue',
+  // Identity entries so Badge/StatusBadge can also be called directly with
+  // a color name (tone="indigo", tone="ai") rather than a status keyword.
+  amber: 'amber', red: 'red', blue: 'blue', gray: 'gray',
+  indigo: 'indigo', ai: 'ai',
 };
 
 export function Badge({ children, tone }) {
@@ -174,6 +271,20 @@ function saRoleLabel(role) {
   return SA_ROLE_LABELS[role] || 'Admin';
 }
 
+// Tenant role/designation labels are open-ended (each company can rename its
+// hierarchy — README notes HO→NSM→ZSM→RSM→ASM→MR is only the default), so
+// rather than a fixed lookup this formats on shape: short bare-letter slugs
+// (mr, asm, rsm…) are field designations → uppercase as an acronym; longer
+// or underscored slugs (company_admin, verification_agent) are role
+// names → humanized to Title Case. Exported so any page rendering a raw
+// role/designation string formats it the same way instead of showing the
+// lowercase DB slug as-is.
+export function roleLabel(role) {
+  if (!role) return '—';
+  if (/^[a-z]+$/.test(role) && role.length <= 4) return role.toUpperCase();
+  return role.split('_').map((w) => w ? w[0].toUpperCase() + w.slice(1) : w).join(' ');
+}
+
 // ── Verification status badge (nav bar) ─────────────────────────────────────
 export function useMyPobStats() {
   const session = getSession();
@@ -212,48 +323,48 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
     { to: '/app', label: 'Dashboard', icon: '▦', perm: 'dashboard.view', end: true, group: 'Core Modules', tone: 'primary' },
     { to: '/app/verification', label: 'Verification Queue', icon: '✓', perm: 'verification.view', group: 'Core Modules', tone: 'blue' },
     { to: '/app/pob', label: 'All POB Records', icon: '≣', perm: 'pob.view', group: 'Core Modules', tone: 'teal' },
-    { to: '/app/analytics', label: 'Analytics', icon: '📈', perm: 'dashboard.view', group: 'Core Modules', tone: 'green' },
-    { to: '/app/notifications', label: 'Notifications', icon: '🔔', perm: 'notification.view', group: 'Quick Access', tone: 'amber' },
-    { to: '/app/profile', label: 'My Profile', icon: '👤', group: 'Quick Access', tone: 'gray' },
+    { to: '/app/analytics', label: 'Analytics', icon: <Icon name="trending-up" />, perm: 'dashboard.view', group: 'Core Modules', tone: 'green' },
+    { to: '/app/notifications', label: 'Notifications', icon: <Icon name="bell" />, perm: 'notification.view', group: 'Quick Access', tone: 'amber' },
+    { to: '/app/profile', label: 'My Profile', icon: <Icon name="user" />, group: 'Quick Access', tone: 'gray' },
   ] : isAdmin ? [
     // ── Division Admin / HO ──
     { to: '/app/admin', label: 'Dashboard', icon: '▦', perm: 'dashboard.view', end: true, group: 'Core Modules', tone: 'primary' },
     { to: '/app/my-division', label: 'My Division', icon: '▣', perm: 'dashboard.view', group: 'Core Modules', tone: 'teal' },
 
-    { to: '/app/user-management', label: 'Employees', icon: '👥', perm: 'user.view', group: 'Employees', tone: 'blue' },
+    { to: '/app/user-management', label: 'Employees', icon: <Icon name="users" />, perm: 'user.view', group: 'Employees', tone: 'blue' },
 
     { to: '/app/catalog', label: 'Catalog', icon: '◉', perm: 'brand.view', group: 'Master Data', tone: 'amber' },
     { to: '/app/chemists', label: 'Chemists', icon: '◨', perm: 'chemist.view', group: 'Master Data', tone: 'blue' },
     { to: '/app/regions', label: 'Coverage', icon: '⌗', perm: 'user.view', group: 'Master Data', tone: 'green' },
-    { to: '/app/gifts', label: 'Gifts', icon: '🎁', perm: 'gratification.manage', group: 'Master Data', tone: 'purple' },
+    { to: '/app/gifts', label: 'Gifts', icon: <Icon name="gift" />, perm: 'gratification.manage', group: 'Master Data', tone: 'indigo' },
 
     { to: '/app/campaigns', label: 'All Campaigns', icon: '◎', perm: 'campaign.view', group: 'Campaigns', tone: 'teal' },
 
     { to: '/app/pob', label: 'All POB', icon: '≣', perm: 'pob.view', group: 'POB', tone: 'blue' },
 
     { to: '/app/verification', label: 'Verification', icon: '✔', perm: 'verification.view', group: 'Operations', tone: 'green' },
-    { to: '/app/gratification', label: 'Gratification', icon: '🎁', perm: 'gratification.view', group: 'Operations', tone: 'purple' },
-    { to: '/app/analytics', label: 'Analytics', icon: '📈', perm: 'dashboard.view', group: 'Operations', tone: 'red' },
-    { to: '/app/reports', label: 'Reports', icon: '🗎', perm: 'report.view', group: 'Operations', tone: 'teal' },
+    { to: '/app/gratification', label: 'Gratification', icon: <Icon name="gift" />, perm: 'gratification.view', group: 'Operations', tone: 'indigo' },
+    { to: '/app/analytics', label: 'Analytics', icon: <Icon name="trending-up" />, perm: 'dashboard.view', group: 'Operations', tone: 'red' },
+    { to: '/app/reports', label: 'Reports', icon: <Icon name="file-text" />, perm: 'report.view', group: 'Operations', tone: 'teal' },
 
-    { to: '/app/notifications', label: 'Notifications', icon: '🔔', perm: 'notification.view', group: 'Quick Access', tone: 'amber' },
+    { to: '/app/notifications', label: 'Notifications', icon: <Icon name="bell" />, perm: 'notification.view', group: 'Quick Access', tone: 'amber' },
     { to: '/app/audit', label: 'Audit', icon: '✎', perm: 'audit.view', group: 'Quick Access', tone: 'gray' },
-    { to: '/app/security', label: 'Security', icon: '🔐', perm: 'apikey.view', group: 'Quick Access', tone: 'green' },
-    { to: '/app/jobs', label: 'Background Jobs', icon: '⚙', perm: 'job.view', group: 'Quick Access', tone: 'amber' },
+    { to: '/app/security', label: 'Security', icon: <Icon name="lock" />, perm: 'apikey.view', group: 'Quick Access', tone: 'green' },
+    { to: '/app/jobs', label: 'Background Jobs', icon: <Icon name="settings" />, perm: 'job.view', group: 'Quick Access', tone: 'amber' },
   ] : [
     // ── Campaign Users (PSR / ASM / RSM / SM / MR / etc.) ──
     { to: '/app', label: 'Dashboard', icon: '▦', perm: 'dashboard.view', end: true, group: 'Core Modules', tone: 'primary' },
     { to: '/app/chemists/register', label: 'Register Chemist', icon: '✚', perm: 'chemist.manage', entry: true, group: 'Core Modules', tone: 'green' },
     { to: '/app/campaigns', label: 'Campaigns', icon: '◎', perm: 'campaign.view', group: 'Core Modules', tone: 'teal' },
-    { to: '/app/pob/submit', label: 'Submit POB', icon: '📋', perm: 'pob.submit', group: 'Core Modules', tone: 'blue' },
-    { to: '/app/pob/invoice', label: 'Submit Invoice', icon: '🧾', perm: 'pob.submit', group: 'Core Modules', tone: 'green' },
+    { to: '/app/pob/submit', label: 'Submit POB', icon: <Icon name="clipboard" />, perm: 'pob.submit', group: 'Core Modules', tone: 'blue' },
+    { to: '/app/pob/invoice', label: 'Submit Invoice', icon: <Icon name="receipt" />, perm: 'pob.submit', group: 'Core Modules', tone: 'green' },
     { to: '/app/pob/mine', label: 'My Submissions', icon: '≣', perm: 'pob.submit', group: 'Core Modules', tone: 'teal' },
     { to: '/app/chemists', label: 'Chemists', icon: '◉', perm: 'chemist.view', group: 'Core Modules', tone: 'amber' },
-    { to: '/app/gratification', label: 'Gratification', icon: '🎁', perm: 'gratification.view', group: 'Core Modules', tone: 'red' },
-    { to: '/app/analytics', label: 'Analytics', icon: '📈', perm: 'dashboard.view', group: 'Core Modules', tone: 'green' },
-    { to: '/app/visits', label: 'Chemist Visits', icon: '📅', perm: 'visit.view', entry: true, group: 'Quick Access', tone: 'blue' },
-    { to: '/app/notifications', label: 'Notifications', icon: '🔔', perm: 'notification.view', group: 'Quick Access', tone: 'amber' },
-    { to: '/app/profile', label: 'My Profile', icon: '👤', group: 'Quick Access', tone: 'gray' },
+    { to: '/app/gratification', label: 'Gratification', icon: <Icon name="gift" />, perm: 'gratification.view', group: 'Core Modules', tone: 'indigo' },
+    { to: '/app/analytics', label: 'Analytics', icon: <Icon name="trending-up" />, perm: 'dashboard.view', group: 'Core Modules', tone: 'green' },
+    { to: '/app/visits', label: 'Chemist Visits', icon: <Icon name="calendar" />, perm: 'visit.view', entry: true, group: 'Quick Access', tone: 'blue' },
+    { to: '/app/notifications', label: 'Notifications', icon: <Icon name="bell" />, perm: 'notification.view', group: 'Quick Access', tone: 'amber' },
+    { to: '/app/profile', label: 'My Profile', icon: <Icon name="user" />, group: 'Quick Access', tone: 'gray' },
   ];
   return (
     <aside className={`sidebar${open ? ' open' : ''}${collapsed ? ' collapsed' : ''}`}>
@@ -351,22 +462,22 @@ function SuperSidebar({ onNavigate, open, collapsed, onToggleCollapse }) {
 
     { to: '/superadmin/divisions', label: 'All Divisions', icon: '▣', group: 'Divisions', tone: 'blue', roles: ['owner', 'full', 'division_admin'] },
 
-    { to: '/superadmin/users', label: 'All Employees', icon: '👥', group: 'Employees & Hierarchy', tone: 'blue', roles: ['owner', 'full'] },
+    { to: '/superadmin/users', label: 'All Employees', icon: <Icon name="users" />, group: 'Employees & Hierarchy', tone: 'blue', roles: ['owner', 'full'] },
 
     { to: '/superadmin/campaigns', label: 'Campaigns', icon: '◎', group: 'Campaigns', tone: 'teal', roles: ['campaign_admin'] },
 
     { to: '/superadmin/pob', label: 'POB Operations', icon: '≣', group: 'POB Operations', tone: 'blue', roles: ['verification_admin'] },
 
-    { to: '/superadmin/gratification', label: 'Gratification', icon: '🎯', group: 'Gratification', tone: 'amber', roles: ['owner', 'full', 'finance_admin'] },
+    { to: '/superadmin/gratification', label: 'Gratification', icon: <Icon name="gift" />, group: 'Gratification', tone: 'amber', roles: ['owner', 'full', 'finance_admin'] },
 
-    { to: '/superadmin/finance', label: 'Finance & Payouts', icon: '💰', group: 'Gratification', tone: 'green', roles: ['owner', 'full', 'finance_admin'] },
+    { to: '/superadmin/finance', label: 'Finance & Payouts', icon: <Icon name="wallet" />, group: 'Gratification', tone: 'green', roles: ['owner', 'full', 'finance_admin'] },
 
-    { to: '/superadmin/analytics', label: 'Analytics', icon: '📈', group: 'Analytics', tone: 'primary', roles: ['owner', 'full', 'campaign_admin'] },
+    { to: '/superadmin/analytics', label: 'Analytics', icon: <Icon name="trending-up" />, group: 'Analytics', tone: 'primary', roles: ['owner', 'full', 'campaign_admin'] },
     { to: '/superadmin/costing', label: 'ROI', icon: '₹', group: 'Analytics', tone: 'green', roles: ['owner', 'full'] },
 
-    { to: '/superadmin/admins', label: 'Platform Admins', icon: '🔐', group: 'Platform', tone: 'primary', roles: ['owner'] },
+    { to: '/superadmin/admins', label: 'Platform Admins', icon: <Icon name="lock" />, group: 'Platform', tone: 'primary', roles: ['owner'] },
     { to: '/superadmin/audit', label: 'Audit Logs', icon: '✎', group: 'Platform', tone: 'gray', roles: ['owner', 'full'] },
-    { to: '/superadmin/platform-settings', label: 'Platform Settings', icon: '⚙', group: 'Platform', tone: 'gray', roles: ['owner', 'full'] },
+    { to: '/superadmin/platform-settings', label: 'Platform Settings', icon: <Icon name="settings" />, group: 'Platform', tone: 'gray', roles: ['owner', 'full'] },
   ];
   const role = saRole();
   const visible = items.filter((i) => !i.roles || i.roles.includes(role));
@@ -440,7 +551,7 @@ function SaBell({ unread, onDrained }) {
   return (
     <div className="sa-bell" ref={ref}>
       <button className="bell" onClick={openAsync} title="Notifications" aria-label="Notifications">
-        🔔{unread > 0 && <span className="bell-dot">{unread > 99 ? '99+' : unread}</span>}
+        <Icon name="bell" size={17} />{unread > 0 && <span className="bell-dot">{unread > 99 ? '99+' : unread}</span>}
       </button>
       {open && (
         <div className="sa-bell-panel">
@@ -528,7 +639,7 @@ export function AppShell({ children, kind }) {
           <div className="topbar-left">
             <button className="menu-btn" onClick={() => setMenu((v) => !v)} aria-label="Toggle navigation">☰</button>
             <div className="topbar-title">
-              {kind === 'sa' ? `Platform Console · ${saRoleLabel(session?.user?.role)}` : `${session?.division?.code || ''} · ${session?.user?.role || ''}`}
+              {kind === 'sa' ? `Platform Console · ${saRoleLabel(session?.user?.role)}` : `${session?.division?.code || ''} · ${roleLabel(session?.user?.role)}`}
             </div>
           </div>
           <div className="topbar-right">
@@ -540,10 +651,10 @@ export function AppShell({ children, kind }) {
                   </Link>
                 )}
                 {session.user?.data_entry && (
-                  <Link to="/app/visits" className="topbar-qitem" title="Chemist Visits">📅</Link>
+                  <Link to="/app/visits" className="topbar-qitem" title="Chemist Visits"><Icon name="calendar" size={16} /></Link>
                 )}
                 <Link to="/app/notifications" className="bell" title="Notifications">
-                  🔔{unread > 0 && <span className="bell-dot">{unread > 99 ? '99+' : unread}</span>}
+                  <Icon name="bell" size={17} />{unread > 0 && <span className="bell-dot">{unread > 99 ? '99+' : unread}</span>}
                 </Link>
               </>
             )}

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { api, fmtDate } from '../../api';
+import { api, fmtDate, getSession } from '../../api';
 import {
-  ErrorBox, Field, Modal, PageHeader, SearchBox, Select, Spinner, StatusBadge,
+  Badge, ErrorBox, Field, Modal, PageHeader, SearchBox, Select, Spinner, StatusBadge,
   Table, TextArea, TextInput, toast, useAsync, useFileUrl,
 } from '../../ui';
 import Users from './Users';
@@ -152,6 +152,7 @@ export default function ManagementWorkspace({ base, title, subtitle, back }) {
 }
 
 export function CampaignsTab({ base }) {
+  const canManage = (getSession()?.permissions || []).includes('campaign.manage');
   const { data, loading, error, run } = useAsync(() => api(`${base}/campaigns`));
   const readiness = useAsync(() => api(`${base}/campaigns/readiness`));
   const brands = useAsync(() => api(`${base}/brands`));
@@ -161,11 +162,17 @@ export function CampaignsTab({ base }) {
   const [q, setQ] = useState('');
   const [manualEdit, setManualEdit] = useState(null);
   const [ext, setExt] = useState(null);
-  const editing = manualEdit !== null ? manualEdit : (params.get('new') === '1' ? {} : null);
+  const editing = canManage ? (manualEdit !== null ? manualEdit : (params.get('new') === '1' ? {} : null)) : null;
 
-  const STATUS_TABS = [
+  // Field roles (MR/ASM and similar) only hold campaign.view — they execute
+  // against live schemes, they don't run the campaign's approval workflow.
+  // Division/company admins (campaign.manage) still see and drive the full
+  // draft → pending approval → scheduled → active → completed/rejected flow.
+  const STATUS_TABS = canManage ? [
     ['', 'All'], ['draft', 'Draft'], ['pending_approval', 'Pending Approval'],
     ['scheduled', 'Scheduled'], ['active', 'Active'], ['completed', 'Completed'], ['rejected', 'Rejected'],
+  ] : [
+    ['', 'All'], ['active', 'Active'], ['completed', 'Completed'],
   ];
   const setStatusFilter = (s) => {
     const next = new URLSearchParams(params);
@@ -190,6 +197,7 @@ export function CampaignsTab({ base }) {
   if (error) return <ErrorBox error={error} onRetry={run} />;
 
   const rows = (data?.items || []).filter((r) => {
+    if (!canManage && r.status !== 'active' && r.status !== 'completed') return false;
     if (statusFilter && r.status !== statusFilter) return false;
     return !q || (r.name || '').toLowerCase().includes(q.toLowerCase());
   });
@@ -265,14 +273,16 @@ export function CampaignsTab({ base }) {
         )}
       </span>
     ) },
-    { key: 'active', label: 'Active', render: (r) => (
+    canManage ? { key: 'active', label: 'Active', render: (r) => (
       <button className={`btn btn-sm ${r.active ? 'btn-primary' : ''}`}
         style={{ minWidth: 64, fontSize: 12 }}
         onClick={() => toggleActive(r)}>
         {r.active ? 'ON' : 'OFF'}
       </button>
+    ) } : { key: 'active', label: 'Active', render: (r) => (
+      <Badge tone={r.active ? 'green' : 'gray'}>{r.active ? 'Yes' : 'No'}</Badge>
     ) },
-    { key: '_a', label: '', thClass: 'actions-th', render: (r) => (
+    ...(canManage ? [{ key: '_a', label: '', thClass: 'actions-th', render: (r) => (
       <span className="row-actions">
         {r.status === 'draft' || r.status === 'rejected' ? (
           <button className="btn-link" onClick={() => submitForApproval(r)}>{r.status === 'rejected' ? 'Resubmit' : 'Submit'}</button>
@@ -284,18 +294,19 @@ export function CampaignsTab({ base }) {
         <button className="btn-link" onClick={() => openEdit(r)}>Edit</button>
         <button className="btn-link danger" onClick={() => del(r)}>Delete</button>
       </span>
-    ) },
+    ) }] : []),
   ];
 
   return (
     <div>
-      {readiness.data && !readiness.data.ready && (
+      {canManage && readiness.data && !readiness.data.ready && (
         <ConfigChecklist data={readiness.data} />
       )}
-      <PageHeader title="Campaigns" subtitle="Create and manage the division's POB schemes"
+      <PageHeader title="Campaigns"
+        subtitle={canManage ? "Create and manage the division's POB schemes" : 'Active and completed schemes available for execution'}
         actions={<>
           <SearchBox value={q} onChange={setQ} />
-          <button className="btn btn-primary" onClick={openCreate}>+ New campaign</button>
+          {canManage && <button className="btn btn-primary" onClick={openCreate}>+ New campaign</button>}
         </>} />
       <div className="tabs">
         {STATUS_TABS.map(([id, label]) => (
