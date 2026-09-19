@@ -273,13 +273,17 @@ export function CampaignsTab({ base }) {
         )}
       </span>
     ) },
-    canManage ? { key: 'active', label: 'Active', render: (r) => (
-      <button className={`btn btn-sm ${r.active ? 'btn-primary' : ''}`}
-        style={{ minWidth: 64, fontSize: 12 }}
-        onClick={() => toggleActive(r)}>
-        {r.active ? 'ON' : 'OFF'}
-      </button>
-    ) } : { key: 'active', label: 'Active', render: (r) => (
+    canManage ? { key: 'active', label: 'Active', render: (r) => {
+      const isLive = r.status === 'active' || r.status === 'scheduled' || r.status === 'completed';
+      return (
+        <button className={`btn btn-sm ${r.active && isLive ? 'btn-primary' : ''}`}
+          style={{ minWidth: 64, fontSize: 12 }}
+          title={isLive ? undefined : "Takes effect once this campaign is approved and live — it's still a draft/pending, so nobody can execute against it yet regardless of this setting"}
+          onClick={() => toggleActive(r)}>
+          {r.active ? 'ON' : 'OFF'}
+        </button>
+      );
+    } } : { key: 'active', label: 'Active', render: (r) => (
       <Badge tone={r.active ? 'green' : 'gray'}>{r.active ? 'Yes' : 'No'}</Badge>
     ) },
     ...(canManage ? [{ key: '_a', label: '', thClass: 'actions-th', render: (r) => (

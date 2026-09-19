@@ -64,6 +64,17 @@ export default function PlatformAdmins() {
     finally { setBusy(false); }
   };
 
+  const toggleStatus = async (r) => {
+    const next = r.status === 'active' ? 'suspended' : 'active';
+    const verb = next === 'suspended' ? 'Suspend' : 'Reactivate';
+    if (!window.confirm(`${verb} ${r.full_name || r.username}?`)) return;
+    try {
+      await api(`/api/v1/superadmin/platform-admins/${r.id}`, { method: 'PUT', body: { status: next } });
+      toast(`${r.full_name || r.username} ${next === 'suspended' ? 'suspended' : 'reactivated'}`, 'success');
+      run();
+    } catch (e) { toast(e.message, 'error'); }
+  };
+
   const rows = useMemo(() => {
     const items = data?.items || [];
     if (!q) return items;
@@ -87,7 +98,12 @@ export default function PlatformAdmins() {
       key: '_actions', label: '', render: (r) => r.role === 'owner' ? (
         <span className="muted">—</span>
       ) : (
-        <button className="btn btn-sm" onClick={() => startEdit(r)}>Edit</button>
+        <span className="row-actions">
+          <button className="btn btn-sm" onClick={() => startEdit(r)}>Edit</button>
+          <button className={`btn btn-sm ${r.status === 'active' ? 'btn-danger' : ''}`} onClick={() => toggleStatus(r)}>
+            {r.status === 'active' ? 'Suspend' : 'Reactivate'}
+          </button>
+        </span>
       ),
     },
   ];

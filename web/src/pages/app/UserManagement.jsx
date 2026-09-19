@@ -4,12 +4,13 @@ import Users from './Users';
 import Hierarchy from './Hierarchy';
 import Teams from './Teams';
 import Roles from './Roles';
+import { Icon } from '../../ui';
 
 const TABS = [
-  ['users', '👥', 'Users'],
-  ['hierarchy', '☰', 'Hierarchy'],
-  ['teams', '◪', 'Teams'],
-  ['roles', '⚖', 'Roles & Permissions'],
+  ['users', 'users', 'Users'],
+  ['hierarchy', 'building', 'Hierarchy'],
+  ['teams', 'users', 'Teams'],
+  ['roles', 'lock', 'Roles & Permissions'],
 ];
 
 export default function UserManagement({ base = '/api/v1' }) {
@@ -23,7 +24,7 @@ export default function UserManagement({ base = '/api/v1' }) {
       <div className="tabs">
         {TABS.map(([k, icon, label]) => (
           <button key={k} className={`tab${tab === k ? ' active' : ''}`} onClick={() => setTab(k)}>
-            {icon} {label}
+            <Icon name={icon} size={14} /> {label}
           </button>
         ))}
       </div>

@@ -510,6 +510,59 @@ def delete_user(uid: int, ctx: TenantContext = Depends(require_permission("user.
     return {"ok": True}
 
 
+@router.post("/users/{uid}/offboard")
+def offboard_user(uid: int, body: dict = None,
+                  ctx: TenantContext = Depends(require_permission("user.manage"))):
+    """Deactivate a user, optionally moving their direct reports to a new
+    manager first. Offboarding a manager previously left their reports'
+    parent_id pointing at a now-inactive account with no UI path to fix it
+    in bulk — this closes that gap. `reassign_to` moves every active direct
+    report to the given manager; `force` skips reassignment and leaves any
+    reports pointing at the deactivated user (matches the old DELETE
+    behaviour, for callers who explicitly want that)."""
+    if uid == ctx.user["id"]:
+        raise HTTPException(409, "cannot deactivate your own account")
+    body = body or {}
+    reassign_to = body.get("reassign_to")
+    force = bool(body.get("force"))
+    conn = ctx.conn
+    c = conn.cursor()
+    div = division_scope(conn, ctx)
+    if div:
+        c.execute("SELECT 1 FROM users WHERE id=%s AND division_id=%s", (uid, div))
+        if not c.fetchone():
+            raise HTTPException(404, "user not found")
+    c.execute("SELECT count(*) FROM users WHERE parent_id=%s AND status='active'", (uid,))
+    report_count = c.fetchone()[0]
+    if report_count and not reassign_to and not force:
+        raise HTTPException(409, f"This user manages {report_count} active report(s) — "
+                                  "choose someone to reassign them to, or deactivate anyway")
+    reassigned = 0
+    if reassign_to:
+        reassign_to = int(reassign_to)
+        if reassign_to == uid:
+            raise HTTPException(400, "cannot reassign a team to the person being offboarded")
+        c.execute("SELECT id, status, division_id FROM users WHERE id=%s", (reassign_to,))
+        target = c.fetchone()
+        if not target:
+            raise HTTPException(400, "invalid reassign_to user")
+        if div and target[2] != div:
+            raise HTTPException(403, "the new manager must be in your division")
+        if target[1] != "active":
+            raise HTTPException(400, "the new manager must be an active user")
+        # Excludes reassign_to itself: if the promoted person was one of the
+        # offboarded user's own direct reports, this must not re-point them
+        # to themselves.
+        c.execute("UPDATE users SET parent_id=%s WHERE parent_id=%s AND id != %s",
+                  (reassign_to, uid, reassign_to))
+        reassigned = c.rowcount
+    c.execute("UPDATE users SET status='inactive' WHERE id=%s", (uid,))
+    conn.commit()
+    log_action(conn, ctx.user["id"], "user.offboard", "user", uid,
+              {"reassigned_reports": reassigned, "reassigned_to": reassign_to})
+    return {"ok": True, "reassigned": reassigned}
+
+
 @router.post("/users/bulk-upload")
 async def bulk_upload_users(file: UploadFile = File(...),
                             ctx: TenantContext = Depends(require_permission("user.manage"))):

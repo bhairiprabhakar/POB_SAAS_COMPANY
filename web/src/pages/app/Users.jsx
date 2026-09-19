@@ -95,9 +95,12 @@ function UserModal({ editing, base, roles, levels, divisions, allUsers, isEdit, 
   const [busy, setBusy] = useState(false);
   const [resetResult, setResetResult] = useState(null);
   const [resetBusy, setResetBusy] = useState(false);
+  const [reassignTo, setReassignTo] = useState('');
+  const [showReassign, setShowReassign] = useState(false);
   const singleDivision = divisions.length <= 1;
   const set = (k) => (e) => setF((p) => ({ ...p, [k]: e.target.value }));
   const assignableRoles = (!f.role_id ? roles : roles.filter((r) => !r.global || r.id === f.role_id));
+  const directReports = isEdit ? allUsers.filter((u) => u.parent_id === editing.id && u.status === 'active') : [];
 
   const resetPassword = async () => {
     if (!window.confirm(`Reset ${editing.full_name}'s password? They'll get a temporary password and must change it at next sign-in.`)) return;
@@ -137,20 +140,56 @@ function UserModal({ editing, base, roles, levels, divisions, allUsers, isEdit, 
     } finally { setBusy(false); }
   };
 
-  const deactivate = async () => {
-    if (!window.confirm(`Deactivate ${editing.full_name}?`)) return;
-    try { await api(`${base}/users/${editing.id}`, { method: 'DELETE' }); toast('User deactivated', 'success'); onDone(); }
-    catch (err) { toast(err.message, 'error'); }
+  const deactivate = async (opts = {}) => {
+    if (directReports.length > 0 && !opts.force && !opts.reassign_to) {
+      // First click: don't deactivate yet — surface the team so it isn't
+      // silently left pointing at a now-inactive manager.
+      setShowReassign(true);
+      return;
+    }
+    const msg = opts.reassign_to
+      ? `Deactivate ${editing.full_name} and move their ${directReports.length} direct report(s) to the selected manager?`
+      : `Deactivate ${editing.full_name}? Their ${directReports.length ? `${directReports.length} direct report(s) will keep reporting to a now-inactive account until reassigned.` : 'account will be disabled.'}`;
+    if (!window.confirm(msg)) return;
+    try {
+      const r = await api(`${base}/users/${editing.id}/offboard`, { method: 'POST', body: opts });
+      toast(r.reassigned ? `User deactivated — ${r.reassigned} report(s) reassigned` : 'User deactivated', 'success');
+      onDone();
+    } catch (err) { toast(err.message, 'error'); }
   };
 
   return (
     <Modal open wide title={isEdit ? `Edit ${editing.full_name}` : 'New user'} onClose={onClose}
       footer={<>
-        {isEdit && <button className="btn btn-danger" onClick={deactivate}>Deactivate</button>}
+        {isEdit && <button className="btn btn-danger" onClick={() => deactivate()}>Deactivate</button>}
         {isEdit && <button className="btn" onClick={resetPassword} disabled={resetBusy || busy}>{resetBusy ? 'Resetting…' : 'Reset password'}</button>}
         <button className="btn" onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" form="user-form" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
       </>}>
+      {showReassign && (
+        <div className="card" style={{ marginBottom: 12, borderColor: 'var(--red-border)' }}>
+          <h5 className="form-section">Reassign {editing.full_name}'s team first</h5>
+          <p className="muted">{directReports.length} direct report{directReports.length > 1 ? 's' : ''} currently
+            report to {editing.full_name}. Choose who takes over their team, or deactivate anyway and reassign
+            each person individually later.</p>
+          <Field label="Move direct reports to">
+            <Select value={reassignTo} onChange={(e) => setReassignTo(e.target.value)}
+              placeholder="Select a new manager…"
+              options={allUsers.filter((u) => u.id !== editing.id && u.status === 'active')
+                .map((u) => ({ value: u.id, label: u.full_name }))} />
+          </Field>
+          <div className="row" style={{ gap: 8, marginTop: 10 }}>
+            <button className="btn btn-primary" disabled={!reassignTo}
+              onClick={() => deactivate({ reassign_to: reassignTo })}>
+              Reassign & deactivate
+            </button>
+            <button className="btn btn-danger" onClick={() => deactivate({ force: true })}>
+              Deactivate anyway (leave team unassigned)
+            </button>
+            <button className="btn" onClick={() => setShowReassign(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
       <form id="user-form" className="grid-2" onSubmit={submit}>
         {error && <div className="span-2"><ErrorBox error={error} /></div>}
         {resetResult && (

@@ -701,8 +701,13 @@ def sa_create_campaign(did: int, body: dict, request: Request = None,
 @router.post("/divisions/{did}/campaigns/{cid}/approve")
 def sa_approve_campaign(did: int, cid: int, request: Request = None,
                         claims=Depends(require_superadmin)):
-    """pending_approval -> scheduled. The campaign becomes executable once its
-    start window opens; the daily sweep flips scheduled -> active."""
+    """pending_approval -> scheduled -> active. The daily sweep is what
+    normally flips scheduled campaigns to active once their start window
+    opens, but that sweep only runs once per calendar day — an approval
+    that lands after today's sweep has already fired would otherwise sit
+    at 'scheduled' and be invisible to field users until tomorrow, even
+    though the campaign's start date has already arrived. So: activate
+    immediately here too, whenever the start date is already due."""
     conn = platform_db.get_db()
     tconn = None
     try:
@@ -714,14 +719,17 @@ def sa_approve_campaign(did: int, cid: int, request: Request = None,
             raise HTTPException(404, "campaign not found")
         if row[1] != "pending_approval":
             raise HTTPException(409, f"Only pending campaigns can be approved (current: {row[1]})")
-        c.execute("UPDATE campaigns SET status='scheduled', approved_at=CURRENT_TIMESTAMP, "
+        start_date = row[3]
+        new_status = "active" if (start_date and start_date <= dt.date.today()) else "scheduled"
+        c.execute("UPDATE campaigns SET status=%s, approved_at=CURRENT_TIMESTAMP, "
                   "approved_by=%s, rejected_at=NULL, rejected_by=NULL, rejection_note=NULL "
-                  "WHERE id=%s", (claims.get("sub"), cid))
+                  "WHERE id=%s", (new_status, claims.get("sub"), cid))
         tconn.commit()
         from ..notify import notify_admins
         notify_admins(tconn, "campaign.approved", "Campaign approved",
-                      f"'{row[2]}' was approved and scheduled.", "campaign", cid)
-        return {"ok": True, "status": "scheduled"}
+                      f"'{row[2]}' was approved" + (" and is now active." if new_status == "active" else " and scheduled."),
+                      "campaign", cid)
+        return {"ok": True, "status": new_status}
     finally:
         if tconn:
             tconn.close()
