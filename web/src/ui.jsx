@@ -194,6 +194,46 @@ const ICON_PATHS = {
     <path d="M8 10h.01" /><path d="M12 10h.01" /><path d="M16 10h.01" />
     <path d="M8 14h.01" /><path d="M12 14h.01" /><path d="M16 14h.01" />
   </>,
+  home: <>
+    <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    <polyline points="9 22 9 12 15 12 15 22" />
+  </>,
+  'user-plus': <>
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <line x1="19" y1="8" x2="19" y2="14" />
+    <line x1="22" y1="11" x2="16" y2="11" />
+  </>,
+  megaphone: <>
+    <path d="m3 11 18-5v12L3 14v-3z" />
+    <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+  </>,
+  'shield-check': <>
+    <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+    <path d="m9 12 2 2 4-4" />
+  </>,
+  layers: <>
+    <path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z" />
+    <path d="m22 12-9.17 4.16a2 2 0 0 1-1.66 0L2 12" />
+    <path d="m22 17.5-9.17 4.16a2 2 0 0 1-1.66 0L2 17.5" />
+  </>,
+  package: <>
+    <path d="M16.5 9.4 7.55 4.24" />
+    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+    <path d="M3.3 7 12 12l8.7-5" />
+    <path d="M12 22V12" />
+  </>,
+  percent: <>
+    <line x1="19" y1="5" x2="5" y2="19" />
+    <circle cx="6.5" cy="6.5" r="2.5" />
+    <circle cx="17.5" cy="17.5" r="2.5" />
+  </>,
+  grid: <>
+    <rect x="3" y="3" width="7" height="7" />
+    <rect x="14" y="3" width="7" height="7" />
+    <rect x="14" y="14" width="7" height="7" />
+    <rect x="3" y="14" width="7" height="7" />
+  </>,
 };
 
 export function Icon({ name, size = 16, className = '' }) {
@@ -320,46 +360,46 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
   // `group` drives the section headers, `tone` the coloured icon tile.
   const items = isVerifier ? [
     // ── Verification Agent ──
-    { to: '/app', label: 'Dashboard', icon: '▦', perm: 'dashboard.view', end: true, group: 'Core Modules', tone: 'primary' },
-    { to: '/app/verification', label: 'Verification Queue', icon: '✓', perm: 'verification.view', group: 'Core Modules', tone: 'blue' },
-    { to: '/app/pob', label: 'All POB Records', icon: '≣', perm: 'pob.view', group: 'Core Modules', tone: 'teal' },
+    { to: '/app', label: 'Dashboard', icon: <Icon name="grid" />, perm: 'dashboard.view', end: true, group: 'Core Modules', tone: 'primary' },
+    { to: '/app/verification', label: 'Verification Queue', icon: <Icon name="shield-check" />, perm: 'verification.view', group: 'Core Modules', tone: 'blue' },
+    { to: '/app/pob', label: 'All POB Records', icon: <Icon name="layers" />, perm: 'pob.view', group: 'Core Modules', tone: 'teal' },
     { to: '/app/analytics', label: 'Analytics', icon: <Icon name="trending-up" />, perm: 'dashboard.view', group: 'Core Modules', tone: 'green' },
     { to: '/app/notifications', label: 'Notifications', icon: <Icon name="bell" />, perm: 'notification.view', group: 'Quick Access', tone: 'amber' },
     { to: '/app/profile', label: 'My Profile', icon: <Icon name="user" />, group: 'Quick Access', tone: 'gray' },
   ] : isAdmin ? [
     // ── Division Admin / HO ──
-    { to: '/app/admin', label: 'Dashboard', icon: '▦', perm: 'dashboard.view', end: true, group: 'Core Modules', tone: 'primary' },
-    { to: '/app/my-division', label: 'My Division', icon: '▣', perm: 'dashboard.view', group: 'Core Modules', tone: 'teal' },
+    { to: '/app/admin', label: 'Dashboard', icon: <Icon name="grid" />, perm: 'dashboard.view', end: true, group: 'Core Modules', tone: 'primary' },
+    { to: '/app/my-division', label: 'My Division', icon: <Icon name="layers" />, perm: 'dashboard.view', group: 'Core Modules', tone: 'teal' },
 
     { to: '/app/user-management', label: 'Employees', icon: <Icon name="users" />, perm: 'user.view', group: 'Employees', tone: 'blue' },
 
-    { to: '/app/catalog', label: 'Catalog', icon: '◉', perm: 'brand.view', group: 'Master Data', tone: 'amber' },
-    { to: '/app/chemists', label: 'Chemists', icon: '◨', perm: 'chemist.view', group: 'Master Data', tone: 'blue' },
-    { to: '/app/regions', label: 'Coverage', icon: '⌗', perm: 'user.view', group: 'Master Data', tone: 'green' },
+    { to: '/app/catalog', label: 'Catalog', icon: <Icon name="package" />, perm: 'brand.view', group: 'Master Data', tone: 'amber' },
+    { to: '/app/chemists', label: 'Chemists', icon: <Icon name="users" />, perm: 'chemist.view', group: 'Master Data', tone: 'blue' },
+    { to: '/app/regions', label: 'Coverage', icon: <Icon name="map-pin" />, perm: 'user.view', group: 'Master Data', tone: 'green' },
     { to: '/app/gifts', label: 'Gifts', icon: <Icon name="gift" />, perm: 'gratification.manage', group: 'Master Data', tone: 'indigo' },
 
-    { to: '/app/campaigns', label: 'All Campaigns', icon: '◎', perm: 'campaign.view', group: 'Campaigns', tone: 'teal' },
+    { to: '/app/campaigns', label: 'All Campaigns', icon: <Icon name="megaphone" />, perm: 'campaign.view', group: 'Campaigns', tone: 'teal' },
 
-    { to: '/app/pob', label: 'All POB', icon: '≣', perm: 'pob.view', group: 'POB', tone: 'blue' },
+    { to: '/app/pob', label: 'All POB', icon: <Icon name="layers" />, perm: 'pob.view', group: 'POB', tone: 'blue' },
 
-    { to: '/app/verification', label: 'Verification', icon: '✔', perm: 'verification.view', group: 'Operations', tone: 'green' },
+    { to: '/app/verification', label: 'Verification', icon: <Icon name="shield-check" />, perm: 'verification.view', group: 'Operations', tone: 'green' },
     { to: '/app/gratification', label: 'Gratification', icon: <Icon name="gift" />, perm: 'gratification.view', group: 'Operations', tone: 'indigo' },
     { to: '/app/analytics', label: 'Analytics', icon: <Icon name="trending-up" />, perm: 'dashboard.view', group: 'Operations', tone: 'red' },
     { to: '/app/reports', label: 'Reports', icon: <Icon name="file-text" />, perm: 'report.view', group: 'Operations', tone: 'teal' },
 
     { to: '/app/notifications', label: 'Notifications', icon: <Icon name="bell" />, perm: 'notification.view', group: 'Quick Access', tone: 'amber' },
-    { to: '/app/audit', label: 'Audit', icon: '✎', perm: 'audit.view', group: 'Quick Access', tone: 'gray' },
+    { to: '/app/audit', label: 'Audit', icon: <Icon name="file-text" />, perm: 'audit.view', group: 'Quick Access', tone: 'gray' },
     { to: '/app/security', label: 'Security', icon: <Icon name="lock" />, perm: 'apikey.view', group: 'Quick Access', tone: 'green' },
     { to: '/app/jobs', label: 'Background Jobs', icon: <Icon name="settings" />, perm: 'job.view', group: 'Quick Access', tone: 'amber' },
   ] : [
     // ── Campaign Users (PSR / ASM / RSM / SM / MR / etc.) ──
-    { to: '/app', label: 'Dashboard', icon: '▦', perm: 'dashboard.view', end: true, group: 'Core Modules', tone: 'primary' },
-    { to: '/app/chemists/register', label: 'Register Chemist', icon: '✚', perm: 'chemist.manage', entry: true, group: 'Core Modules', tone: 'green' },
-    { to: '/app/campaigns', label: 'Campaigns', icon: '◎', perm: 'campaign.view', group: 'Core Modules', tone: 'teal' },
+    { to: '/app', label: 'Dashboard', icon: <Icon name="grid" />, perm: 'dashboard.view', end: true, group: 'Core Modules', tone: 'primary' },
+    { to: '/app/chemists/register', label: 'Register Chemist', icon: <Icon name="user-plus" />, perm: 'chemist.manage', entry: true, group: 'Core Modules', tone: 'green' },
+    { to: '/app/campaigns', label: 'Campaigns', icon: <Icon name="megaphone" />, perm: 'campaign.view', group: 'Core Modules', tone: 'teal' },
     { to: '/app/pob/submit', label: 'Submit POB', icon: <Icon name="clipboard" />, perm: 'pob.submit', group: 'Core Modules', tone: 'blue' },
     { to: '/app/pob/invoice', label: 'Submit Invoice', icon: <Icon name="receipt" />, perm: 'pob.submit', group: 'Core Modules', tone: 'green' },
-    { to: '/app/pob/mine', label: 'My Submissions', icon: '≣', perm: 'pob.submit', group: 'Core Modules', tone: 'teal' },
-    { to: '/app/chemists', label: 'Chemists', icon: '◉', perm: 'chemist.view', group: 'Core Modules', tone: 'amber' },
+    { to: '/app/pob/mine', label: 'My Submissions', icon: <Icon name="clipboard" />, perm: 'pob.submit', group: 'Core Modules', tone: 'teal' },
+    { to: '/app/chemists', label: 'Chemists', icon: <Icon name="users" />, perm: 'chemist.view', group: 'Core Modules', tone: 'amber' },
     { to: '/app/gratification', label: 'Gratification', icon: <Icon name="gift" />, perm: 'gratification.view', group: 'Core Modules', tone: 'indigo' },
     { to: '/app/analytics', label: 'Analytics', icon: <Icon name="trending-up" />, perm: 'dashboard.view', group: 'Core Modules', tone: 'green' },
     { to: '/app/visits', label: 'Chemist Visits', icon: <Icon name="calendar" />, perm: 'visit.view', entry: true, group: 'Quick Access', tone: 'blue' },
@@ -456,27 +496,27 @@ function SideCollapse({ collapsed, onToggle }) {
 
 function SuperSidebar({ onNavigate, open, collapsed, onToggleCollapse }) {
   const items = [
-    { to: '/superadmin', label: 'Dashboard', icon: '▦', end: true, group: 'Overview', tone: 'primary', roles: ['owner', 'full', 'campaign_admin', 'finance_admin', 'verification_admin', 'division_admin'] },
+    { to: '/superadmin', label: 'Dashboard', icon: <Icon name="grid" />, end: true, group: 'Overview', tone: 'primary', roles: ['owner', 'full', 'campaign_admin', 'finance_admin', 'verification_admin', 'division_admin'] },
 
-    { to: '/superadmin/company', label: 'Company Profile', icon: '◈', group: 'Company', tone: 'blue', roles: ['owner', 'full'] },
+    { to: '/superadmin/company', label: 'Company Profile', icon: <Icon name="building" />, group: 'Company', tone: 'blue', roles: ['owner', 'full'] },
 
-    { to: '/superadmin/divisions', label: 'All Divisions', icon: '▣', group: 'Divisions', tone: 'blue', roles: ['owner', 'full', 'division_admin'] },
+    { to: '/superadmin/divisions', label: 'All Divisions', icon: <Icon name="layers" />, group: 'Divisions', tone: 'blue', roles: ['owner', 'full', 'division_admin'] },
 
     { to: '/superadmin/users', label: 'All Employees', icon: <Icon name="users" />, group: 'Employees & Hierarchy', tone: 'blue', roles: ['owner', 'full'] },
 
-    { to: '/superadmin/campaigns', label: 'Campaigns', icon: '◎', group: 'Campaigns', tone: 'teal', roles: ['campaign_admin'] },
+    { to: '/superadmin/campaigns', label: 'Campaigns', icon: <Icon name="megaphone" />, group: 'Campaigns', tone: 'teal', roles: ['campaign_admin'] },
 
-    { to: '/superadmin/pob', label: 'POB Operations', icon: '≣', group: 'POB Operations', tone: 'blue', roles: ['verification_admin'] },
+    { to: '/superadmin/pob', label: 'POB Operations', icon: <Icon name="clipboard" />, group: 'POB Operations', tone: 'blue', roles: ['verification_admin'] },
 
     { to: '/superadmin/gratification', label: 'Gratification', icon: <Icon name="gift" />, group: 'Gratification', tone: 'amber', roles: ['owner', 'full', 'finance_admin'] },
 
     { to: '/superadmin/finance', label: 'Finance & Payouts', icon: <Icon name="wallet" />, group: 'Gratification', tone: 'green', roles: ['owner', 'full', 'finance_admin'] },
 
     { to: '/superadmin/analytics', label: 'Analytics', icon: <Icon name="trending-up" />, group: 'Analytics', tone: 'primary', roles: ['owner', 'full', 'campaign_admin'] },
-    { to: '/superadmin/costing', label: 'ROI', icon: '₹', group: 'Analytics', tone: 'green', roles: ['owner', 'full'] },
+    { to: '/superadmin/costing', label: 'ROI', icon: <Icon name="percent" />, group: 'Analytics', tone: 'green', roles: ['owner', 'full'] },
 
     { to: '/superadmin/admins', label: 'Platform Admins', icon: <Icon name="lock" />, group: 'Platform', tone: 'primary', roles: ['owner'] },
-    { to: '/superadmin/audit', label: 'Audit Logs', icon: '✎', group: 'Platform', tone: 'gray', roles: ['owner', 'full'] },
+    { to: '/superadmin/audit', label: 'Audit Logs', icon: <Icon name="file-text" />, group: 'Platform', tone: 'gray', roles: ['owner', 'full'] },
     { to: '/superadmin/platform-settings', label: 'Platform Settings', icon: <Icon name="settings" />, group: 'Platform', tone: 'gray', roles: ['owner', 'full'] },
   ];
   const role = saRole();
@@ -661,7 +701,7 @@ export function AppShell({ children, kind }) {
             {kind === 'sa' && (
               <SaBell unread={unread} onDrained={loadUnread} />
             )}
-            <Link to={kind === 'sa' ? '/superadmin' : '/app/profile'} className="user-chip" title="View profile">
+            <Link to={kind === 'sa' ? '/superadmin/profile' : '/app/profile'} className="user-chip" title="View profile">
               <span className="user-avatar">{(session?.user?.full_name || session?.user?.username || '?')[0]?.toUpperCase()}</span>
               <span className="user-chip-name">{session?.user?.full_name || session?.user?.username}</span>
             </Link>

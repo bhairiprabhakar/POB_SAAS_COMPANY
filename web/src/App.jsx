@@ -202,6 +202,9 @@ export default function App() {
         <Route path="/superadmin/platform-settings" element={
           <ProtectedSuper><AppShell kind="sa"><PlatformSettings /></AppShell></ProtectedSuper>
         } />
+        <Route path="/superadmin/profile" element={
+          <ProtectedSuper><AppShell kind="sa"><Profile /></AppShell></ProtectedSuper>
+        } />
 
         <Route path="/app/onboarding/:step" element={
           <ProtectedTenant><AppShell kind="tenant"><Onboarding /></AppShell></ProtectedTenant>
