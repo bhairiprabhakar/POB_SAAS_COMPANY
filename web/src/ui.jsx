@@ -427,8 +427,8 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
 }
 
 /* Grouped navigation list: renders a collapsible section header for every
-   group that has more than one page; single-page groups are shown as plain
-   links. Sections start collapsed except the one containing the active page. */
+   group, so even single-page sections stay titled and tidy. Sections start
+   collapsed except the one containing the active page. */
 function SideNav({ items, badges = {}, onNavigate }) {
   const { pathname } = useLocation();
   const groups = [];
@@ -442,16 +442,11 @@ function SideNav({ items, badges = {}, onNavigate }) {
     (i.end ? pathname === i.to : pathname === i.to || (i.to.endsWith('/') && pathname.startsWith(i.to)) || pathname.startsWith(i.to + '/'));
   return (
     <nav>
-      {groups.map((g) =>
-        g.items.length === 1 ? (
-          <SideLink key={g.items[0].to} item={g.items[0]}
-            badge={badges[g.items[0].to]} onNavigate={onNavigate} />
-        ) : (
-          <SideGroup key={g.label} label={g.label} items={g.items}
-            badges={badges} onNavigate={onNavigate}
-            defaultOpen={g.items.some(matchActive)} />
-        )
-      )}
+      {groups.map((g) => (
+        <SideGroup key={g.label} label={g.label} items={g.items}
+          badges={badges} onNavigate={onNavigate}
+          defaultOpen={g.items.some(matchActive)} />
+      ))}
     </nav>
   );
 }
