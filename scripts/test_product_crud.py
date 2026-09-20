@@ -115,20 +115,20 @@ def main():
     me = client.get("/api/v1/auth/me", headers=T)
     perms = (j(me).get("permissions") or []) if ok(me) else []
     check("division admin has campaign.manage", "campaign.manage" in perms, perms)
+    check("division admin has product.manage", "product.manage" in perms, perms)
     check("division admin has product.view", "product.view" in perms, perms)
 
-    section("3. Product create")
+    section("3. Product create (brand REQUIRED)")
     r = client.post("/api/v1/products", headers=T, json={"name": "  "})
     check("product with blank name -> 400", r.status_code == 400, f"{r.status_code} {j(r)}")
 
     r = client.post("/api/v1/products", headers=T, json={
-        "name": "Master Panadol Solo", "sku": "PAN-SOLO-1", "composition": "Paracetamol",
-        "strength": "500 mg", "dosage_form": "Tablet", "pack": "10×10",
-        "ptr": 32.5, "pts": 30.0, "mrp": 40.0, "gst": 12,
+        "name": "Unbranded Product", "sku": "NOBRAND-1", "composition": "None",
+        "strength": "", "dosage_form": "Tablet", "pack": "10×10",
+        "ptr": 10, "pts": 9, "mrp": 12, "gst": 12,
     })
-    check("product can be created without a campaign (master)", ok(r, 200, 201), f"{r.status_code} {j(r)}")
-    master_id = j(r).get("id")
-    check("create returns product id", bool(master_id), j(r))
+    check("product without a brand -> 400 (Brand REQUIRED stored in product master)",
+          r.status_code == 400 and "brand" in j(r).get("detail", "").lower(), f"{r.status_code} {j(r)}")
 
     # Put a campaign in place directly so the endpoint can reference it, and
     # bind it to the admin's tenant division so the division-scoped listing
@@ -155,6 +155,15 @@ def main():
     conn.close()
 
     r = client.post("/api/v1/products", headers=T, json={
+        "name": "Master Panadol Solo", "brand_id": brand_id, "sku": "PAN-SOLO-1",
+        "composition": "Paracetamol", "strength": "500 mg", "dosage_form": "Tablet",
+        "pack": "10×10", "ptr": 32.5, "pts": 30.0, "mrp": 40.0, "gst": 12,
+    })
+    check("product can be created without a campaign (master)", ok(r, 200, 201), f"{r.status_code} {j(r)}")
+    master_id = j(r).get("id")
+    check("create returns product id", bool(master_id), j(r))
+
+    r = client.post("/api/v1/products", headers=T, json={
         "campaign_id": campaign_id, "brand_id": brand_id,
         "name": "Allegra 120mg Strip", "sku": "ALG-120-1", "composition": "Fexofenadine HCl",
         "strength": "120 mg", "dosage_form": "Tablet", "pack": "10×10",
@@ -164,7 +173,7 @@ def main():
     pid = j(r).get("id")
 
     r = client.post("/api/v1/products", headers=T, json={
-        "campaign_id": 999999, "name": "Ghost",
+        "campaign_id": 999999, "brand_id": brand_id, "name": "Ghost",
     })
     check("product on non-existent campaign -> 404", r.status_code == 404, f"{r.status_code}")
 
@@ -188,26 +197,35 @@ def main():
 
     section("5. Product update (name mismatch fix)")
     r = client.put(f"/api/v1/products/{pid}", headers=T, json={
-        "name": "Allegra 120mg Strip (New)", "brand_id": None,
+        "name": "Allegra 120mg Strip (New)",
     })
     check("update product", ok(r), f"{r.status_code} {j(r)}")
     r = client.get("/api/v1/products", headers=T)
     mine = [p for p in j(r).get("items", []) if p["id"] == pid]
-    check("rename persisted + brand cleared", mine and mine[0]["name"] == "Allegra 120mg Strip (New)"
-          and mine[0]["brand_id"] is None, mine)
+    check("rename persisted + brand kept",
+          mine and mine[0]["name"] == "Allegra 120mg Strip (New)" and mine[0]["brand_id"] == brand_id, mine)
+
+    r = client.put(f"/api/v1/products/{pid}", headers=T, json={"brand_id": None})
+    check("clearing a product's brand blocked -> 400",
+          r.status_code == 400 and "brand" in j(r).get("detail", "").lower(), f"{r.status_code} {j(r)}")
 
     r = client.put(f"/api/v1/products/{pid}", headers=T, json={"name": ""})
     check("blank name on update -> 400", r.status_code == 400, f"{r.status_code}")
 
-    section("6. Product delete")
+    section("6. Product delete protection")
     r = client.delete(f"/api/v1/products/{pid}", headers=T)
-    check("delete product", ok(r), f"{r.status_code} {j(r)}")
+    check("campaign-linked product cannot be deleted -> 409 + deactivate message",
+          r.status_code == 409 and "Deactivate it instead" in j(r).get("detail", ""), f"{r.status_code} {j(r)}")
+    r = client.put(f"/api/v1/products/{pid}", headers=T, json={"status": "inactive"})
+    check("deactivate product instead", ok(r), f"{r.status_code} {j(r)}")
     r = client.get("/api/v1/products", headers=T)
-    check("deleted product gone", not [p for p in j(r).get("items", []) if p["id"] == pid], j(r))
-    r = client.delete(f"/api/v1/products/{pid}", headers=T)
-    check("re-delete -> 404", r.status_code == 404, f"{r.status_code}")
+    mine = [p for p in j(r).get("items", []) if p["id"] == pid]
+    check("deactivated product still listed as inactive",
+          mine and mine[0]["status"] == "inactive", mine)
     r = client.delete(f"/api/v1/products/{master_id}", headers=T)
-    check("delete master product (no campaign)", ok(r), f"{r.status_code} {j(r)}")
+    check("unreferenced master product deletion ok", ok(r), f"{r.status_code} {j(r)}")
+    r = client.delete(f"/api/v1/products/{master_id}", headers=T)
+    check("re-delete deleted master -> 404", r.status_code == 404, f"{r.status_code}")
 
     section("7. _sync_products via campaign builder links masters")
     from saas import campaign_service
@@ -260,14 +278,13 @@ def main():
                                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     check("bulk upload ok", r.status_code == 200, f"{r.status_code} {j(r)}")
     res = j(r)
-    check("upload created valid rows, skipped bad rows",
-          res.get("created") == 2 and len(res.get("errors", [])) == 2, res)
+    check("upload created only branded rows; skipped brand-less / nameless / unknown-brand rows",
+          res.get("created") == 1 and len(res.get("errors", [])) == 3, res)
     r = client.get("/api/v1/products", headers=T)
     items = j(r).get("items", [])
     blk = [p for p in items if p["sku"] in ("BLK-1", "BLK-2")]
-    check("bulk rows persisted (brand resolved for div, none left blank)",
-          len(blk) == 2 and all(p["brand_id"] == brand_id if p["sku"] == "BLK-1" else p["brand_id"] is None for p in blk),
-          blk)
+    check("branded bulk row persisted with its brand; brand-less row rejected",
+          len(blk) == 1 and blk[0]["sku"] == "BLK-1" and blk[0]["brand_id"] == brand_id, blk)
     return finish(keep)
 
 

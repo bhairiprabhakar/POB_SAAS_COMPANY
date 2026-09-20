@@ -92,16 +92,10 @@ function AgentWorkspace({ vid, onBack, onDone }) {
 
   const [rejecting, setRejecting] = useState(false);
   const [reOpening, setReOpening] = useState(false);
-  const [correcting, setCorrecting] = useState(null);
-  const [correctionField, setCorrectionField] = useState('');
-  const [correctionValue, setCorrectionValue] = useState('');
-  const [correctionReason, setCorrectionReason] = useState('');
   const [reason, setReason] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState('');
-  const [reExtractConfirm, setReExtractConfirm] = useState(false);
-  const [reExtractFile, setReExtractFile] = useState(null);
   const invoiceUrl = useFileUrl(data?.invoice_path);
 
   const act = async (fn, label) => {
@@ -148,63 +142,6 @@ function AgentWorkspace({ vid, onBack, onDone }) {
 
   const canAct = ['pending', 'pending_verification', 'needs_review', 'manual_review'].includes(d.v_status)
     || (d.v_status === 'approved' && d.auto_verified);
-
-  const handleCorrection = async () => {
-    if (!correctionField || !correctionReason.trim()) {
-      toast('Field and reason are required', 'error');
-      return;
-    }
-    setBusy(true);
-    setBusyLabel('Saving correction…');
-    try {
-      await api(`/api/v1/verification/${vid}/correct`, {
-        method: 'POST',
-        body: { field_name: correctionField, corrected_value: correctionValue, reason: correctionReason },
-      });
-      toast('Correction saved', 'success');
-      setCorrecting(null);
-      setCorrectionField('');
-      setCorrectionValue('');
-      setCorrectionReason('');
-      run();
-      corrections.run();
-    } catch (e) { toast(e.message, 'error'); }
-    finally { setBusy(false); setBusyLabel(''); }
-  };
-
-  const handleReExtract = async () => {
-    setReExtractConfirm(false);
-    setBusy(true);
-    setBusyLabel('AI extraction in progress…');
-    try {
-      let r;
-      if (reExtractFile) {
-        const fd = new FormData();
-        fd.append('file', reExtractFile);
-        r = await api(`/api/v1/pob/${d.pob_id}/re-extract`, { method: 'POST', body: fd });
-      } else {
-        r = await api(`/api/v1/pob/${d.pob_id}/re-extract`, { method: 'POST' });
-      }
-      toast(`Invoice re-extracted — status ${r.status}${r.auto_verified ? ' (auto-verified)' : ''}`, 'success');
-      setReExtractFile(null);
-      run();
-    } catch (e) { toast(e.message, 'error'); }
-    finally { setBusy(false); setBusyLabel(''); }
-  };
-
-  const handleRunPipeline = async () => {
-    setBusy(true);
-    setBusyLabel('Running verification pipeline…');
-    try {
-      const r = await api('/api/v1/verification/run-pipeline', {
-        method: 'POST', body: { verification_id: vid },
-      });
-      toast(`Pipeline: ${r.decision} (${Math.round(r.confidence * 100)}%)`, 'success');
-      run();
-      pipeline.run();
-    } catch (e) { toast(e.message, 'error'); }
-    finally { setBusy(false); setBusyLabel(''); }
-  };
 
   return (
     <div className="vd-workspace">
@@ -376,48 +313,20 @@ function AgentWorkspace({ vid, onBack, onDone }) {
                 </div>
               )}
 
-              {/* 4. Correction Form — spec §10 */}
-              {canAct && (
+              {/* 4. Correction history — read-only. Corrections are made by
+                  operations management (verification.manage), never by
+                  verification agents on this screen. */}
+              {correctionList.length > 0 && (
                 <div className="vd-section">
-                  <h4 className="vd-section-title">Agent Corrections</h4>
-                  {correctionList.length > 0 && (
-                    <div className="correction-history" style={{ marginBottom: 12 }}>
-                      {correctionList.map((c) => (
-                        <div key={c.id} style={{ fontSize: 13, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
-                          <strong>{c.field_name}</strong>: <span className="muted">{c.original_value}</span> → <strong>{c.corrected_value}</strong>
-                          <span className="muted"> — {c.reason} ({c.agent_name}, {fmtDateTime(c.created_at)})</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {correcting ? (
-                    <div style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 6 }}>
-                      <Field label="Field to correct" required>
-                        <select className="input" value={correctionField} onChange={(e) => setCorrectionField(e.target.value)}>
-                          <option value="">Select field…</option>
-                          <option value="invoice_number">Invoice Number</option>
-                          <option value="invoice_amount">Invoice Amount</option>
-                          <option value="invoice_date">Invoice Date</option>
-                          <option value="quantity">Quantity</option>
-                          <option value="product_id">Product</option>
-                        </select>
-                      </Field>
-                      <Field label="Corrected value" required>
-                        <TextInput value={correctionValue} onChange={(e) => setCorrectionValue(e.target.value)} placeholder="New value" />
-                      </Field>
-                      <Field label="Reason" required>
-                        <TextArea rows={2} value={correctionReason} onChange={(e) => setCorrectionReason(e.target.value)} placeholder="Why this correction is needed" />
-                      </Field>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <button className="btn" onClick={() => setCorrecting(null)}>Cancel</button>
-                        <button className="btn btn-primary" disabled={busy || !correctionField || !correctionReason.trim()} onClick={handleCorrection}>
-                          {busy ? 'Saving…' : 'Save Correction'}
-                        </button>
+                  <h4 className="vd-section-title">Correction History</h4>
+                  <div className="correction-history">
+                    {correctionList.map((c) => (
+                      <div key={c.id} style={{ fontSize: 13, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                        <strong>{c.field_name}</strong>: <span className="muted">{c.original_value}</span> → <strong>{c.corrected_value}</strong>
+                        <span className="muted"> — {c.reason} ({c.agent_name}, {fmtDateTime(c.created_at)})</span>
                       </div>
-                    </div>
-                  ) : (
-                    <button className="btn btn-sm" onClick={() => setCorrecting(true)}>+ Add Correction</button>
-                  )}
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -483,14 +392,6 @@ function AgentWorkspace({ vid, onBack, onDone }) {
               </>
             ) : (
               <>
-                {d.invoice_verification_required && (
-                  <button className="btn" disabled={busy} onClick={() => setReExtractConfirm(true)}>
-                    Re-extract Invoice
-                  </button>
-                )}
-                <button className="btn btn-secondary" disabled={busy} onClick={handleRunPipeline}>
-                  Run Pipeline
-                </button>
                 {canAct && (
                   <Field label="" style={{ marginBottom: 0 }}>
                     <TextInput value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional note" className="vd-action-note" />
@@ -560,24 +461,6 @@ function AgentWorkspace({ vid, onBack, onDone }) {
           <TextArea rows={3} value={reason} onChange={(e) => setReason(e.target.value)}
             placeholder="e.g. Client reported discrepancy, need to re-verify details" />
         </Field>
-      </Modal>
-
-      {/* Re-extract confirmation */}
-      <Modal open={reExtractConfirm} title="Replace current invoice?" onClose={() => { setReExtractConfirm(false); setReExtractFile(null); }}
-        footer={<>
-          <button className="btn" onClick={() => { setReExtractConfirm(false); setReExtractFile(null); }}>Cancel</button>
-          <button className="btn btn-primary" disabled={busy} onClick={handleReExtract}>
-            {busy ? 'Re-extracting…' : 'Replace & Re-extract'}
-          </button>
-        </>}>
-        <p>Current extraction data will be replaced with data extracted from the {reExtractFile ? 'new document' : 'current invoice'}.</p>
-        <p className="muted" style={{ marginTop: 8 }}>All verification rules will be automatically rerun after extraction.</p>
-        <div style={{ marginTop: 12 }}>
-          <Field label="Upload new invoice (optional — leave empty to re-extract current)">
-            <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif"
-              onChange={(e) => setReExtractFile(e.target.files?.[0] || null)} />
-          </Field>
-        </div>
       </Modal>
     </div>
   );

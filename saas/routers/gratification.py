@@ -33,6 +33,8 @@ def _mask_payment_fields(ctx: TenantContext, rows: list[dict]) -> list[dict]:
     for r in rows:
         if r.get("upi_id"):
             r["upi_id"] = mask_upi_id(r["upi_id"])
+        if r.get("chemist_upi_id"):
+            r["chemist_upi_id"] = mask_upi_id(r["chemist_upi_id"])
     return rows
 
 
@@ -154,6 +156,7 @@ def _grat_query(extra="", params=()):
     sql = f"""
       SELECT g.*, pa.user_id AS mr_id, u.full_name AS mr_name,
              cmp.name AS campaign_name, ch.name AS chemist_name, ch.shop_name,
+             ch.id AS chemist_id, ch.upi_id AS chemist_upi_id,
              gift.name AS gift_name, gift.image_path AS gift_image
       FROM gratifications g
       JOIN pob_activities pa ON pa.id=g.pob_id
@@ -337,10 +340,22 @@ def approve_cashback(gid: int, body: dict, ctx: TenantContext = Depends(require_
     conn = ctx.conn
     g = _scoped_gratification(conn, ctx, gid)
     c = conn.cursor()
-    if g["type_code"] not in ("cashback", "upi"):
-        raise HTTPException(400, "only cashback/upi gratifications can be cashback-approved")
-    c.execute("UPDATE gratifications SET status='approved', upi_id=%s WHERE id=%s",
-              (body.get("upi_id") or g.get("upi_id"), gid))
+    if g["type_code"] not in ("cashback", "upi", "reward_points"):
+        raise HTTPException(400, "only cashback/upi/reward-points gratifications can be approved")
+    upi_id = body.get("upi_id") or g.get("upi_id")
+    if g["type_code"] in ("cashback", "upi") and not upi_id:
+        # Fall back to the chemist's confirmed UPI captured via the QR flow,
+        # so approval carries the same verified address payout will use.
+        c.execute("SELECT ch.upi_id FROM pob_activities pa "
+                  "JOIN chemists ch ON ch.id=pa.chemist_id "
+                  "WHERE pa.id=%s AND ch.upi_id IS NOT NULL AND ch.upi_confirmed", (g["pob_id"],))
+        row = c.fetchone()
+        upi_id = (row[0] if row else None) or upi_id
+    if upi_id:
+        c.execute("UPDATE gratifications SET status='approved', upi_id=%s WHERE id=%s",
+                  (upi_id, gid))
+    else:
+        c.execute("UPDATE gratifications SET status='approved' WHERE id=%s", (gid,))
     c.execute("INSERT INTO gratification_events (gratification_id, event, detail, actor_id) "
               "VALUES (%s,'approved',%s,%s)", (gid, body.get("note") or "Cashback approved", ctx.user["id"]))
     conn.commit()
@@ -354,8 +369,8 @@ def pay_cashback(gid: int, body: dict, ctx: TenantContext = Depends(require_perm
     conn = ctx.conn
     g = _scoped_gratification(conn, ctx, gid)
     c = conn.cursor()
-    if g["type_code"] not in ("cashback", "upi"):
-        raise HTTPException(400, "only cashback/upi gratifications can be paid")
+    if g["type_code"] not in ("cashback", "upi", "reward_points"):
+        raise HTTPException(400, "only cashback/upi/reward-points gratifications can be paid")
     if g["status"] != "approved":
         raise HTTPException(409, "approve before paying")
     c.execute("UPDATE gratifications SET status='completed', payment_ref=%s, paid_at=CURRENT_TIMESTAMP, "
@@ -382,8 +397,8 @@ def generate_voucher(gid: int, body: dict, ctx: TenantContext = Depends(require_
     conn = ctx.conn
     g = _scoped_gratification(conn, ctx, gid)
     c = conn.cursor()
-    if g["type_code"] != "voucher":
-        raise HTTPException(400, "only voucher gratifications can generate vouchers")
+    if g["type_code"] not in ("voucher", "e_voucher"):
+        raise HTTPException(400, "only voucher/e-voucher gratifications can generate vouchers")
     c.execute("UPDATE gratifications SET status='generated', voucher_code=%s, voucher_status='generated' "
               "WHERE id=%s", (code, gid))
     c.execute("INSERT INTO gratification_events (gratification_id, event, detail, actor_id) "
@@ -413,8 +428,8 @@ def redeem_voucher(gid: int, body: dict, ctx: TenantContext = Depends(require_pe
     conn = ctx.conn
     g = _scoped_gratification(conn, ctx, gid)
     c = conn.cursor()
-    if g["type_code"] != "voucher":
-        raise HTTPException(400, "only vouchers can be redeemed")
+    if g["type_code"] not in ("voucher", "e_voucher"):
+        raise HTTPException(400, "only vouchers/e-vouchers can be redeemed")
     c.execute("UPDATE gratifications SET status='completed', voucher_status='redeemed', "
               "completed_at=CURRENT_TIMESTAMP WHERE id=%s", (gid,))
     c.execute("INSERT INTO gratification_events (gratification_id, event, detail, actor_id) "

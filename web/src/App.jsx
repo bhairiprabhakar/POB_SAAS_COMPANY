@@ -72,16 +72,11 @@ function ProtectedTenant({ children }) {
   if (!onboarding && loc.pathname.startsWith('/app/onboarding')) {
     return <Navigate to="/app" replace />;
   }
-  // Masters (divisions/brands/campaigns/products/gifts/gratification types)
-  // are super-admin-managed; division admins don't get them. The Chemists page
-  // is a first-class nav item (scoped per division), so it stays accessible.
-  // Campaign tracking + the campaign detail page (banner/logo) are read-only
-  // views, so those stay open to division admins too.
+  // Masters (brands/products/chemists/gifts/gratification types) are
+  // division-scoped surfaces: division admins manage them, field staff view
+  // them read-only. The Masters page gates create/edit affordances on the
+  // caller's permissions, so no path-level redirect is needed here.
   const role = (s.user?.role || '').toLowerCase();
-  if (role === 'division_admin' && loc.pathname.startsWith('/app/masters') &&
-      !loc.pathname.startsWith('/app/masters/campaigns')) {
-    return <Navigate to="/app" replace />;
-  }
   // Organization (hierarchy / users / roles & permissions) is managed by the
   // super admin from the platform console, so tenant users can't open it.
   if (loc.pathname.startsWith('/app/org')) {

@@ -366,6 +366,7 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
   const users = useAsync(() => api(`${base}/users`), [base]);
   const readiness = useAsync(() => api(`${base}/campaigns/readiness`), [isEdit, base]);
   const chemistMasters = useAsync(() => api('/api/v1/chemist-masters'), [isEdit, base]);
+  const gratTypes = useAsync(() => api('/api/v1/gratification/types'), [isEdit, base]);
   const [f, setF] = useState({
     active: true, invoice_verification_required: true, status: 'draft', scheme_type: 'others',
     assignment: { mode: 'all', regions: [], employee_ids: [], manager_id: '' }, ...editing,
@@ -594,7 +595,9 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
               <Field label="Division"><Select value={f.division_id || ''} onChange={set('division_id')} options={divOpts} /></Field>
             )}
             <Field label="Scheme type"><Select value={f.scheme_type || 'others'} onChange={set('scheme_type')}
-              options={['cashback', 'upi', 'voucher', 'gift', 'coupon', 'points', 'physical_gift', 'others'].map((o) => ({ value: o, label: o }))} /></Field>
+              options={(gratTypes.data?.items || []).length
+                ? gratTypes.data.items.map((t) => ({ value: t.code, label: t.name }))
+                : ['cashback', 'upi', 'voucher', 'gift', 'coupon', 'points', 'physical_gift', 'others'].map((o) => ({ value: o, label: o }))} /></Field>
             {isCreate ? (
               <div className="span-2">
                 <p className="ai-note">

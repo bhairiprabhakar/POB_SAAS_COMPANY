@@ -553,10 +553,13 @@ def verification_pipeline_detail(vid: int,
 
 @router.post("/{vid}/correct")
 def correct_verification(vid: int, body: dict, request: Request = None,
-                         ctx: TenantContext = Depends(require_permission("verification.approve"))):
-    """Agent correction: update a field on the POB after manual review.
+                         ctx: TenantContext = Depends(require_permission("verification.manage"))):
+    """Operations correction: update a field on the POB after manual review.
 
-    body: {"field_name": str, "corrected_value": str, "reason": str}
+    Restricted to operations management (verification.manage). Verification
+    agents review and decide; they do not edit PTR / MRP / products / OCR
+    extraction output. body: {"field_name": str, "corrected_value": str,
+    "reason": str}
     """
     field_name = (body.get("field_name") or "").strip()
     corrected_value = body.get("corrected_value")
@@ -653,8 +656,12 @@ def verification_corrections(vid: int,
 
 @router.post("/run-pipeline")
 def run_verification_pipeline(body: dict, request: Request = None,
-                              ctx: TenantContext = Depends(require_permission("verification.approve"))):
+                              ctx: TenantContext = Depends(require_permission("verification.manage"))):
     """Manually trigger the verification pipeline for a verification.
+
+    Restricted to operations management (verification.manage): verification
+    agents never run the AI pipeline manually -- automation owns OCR/extraction;
+    agents only review and take queue decisions.
 
     body: {"verification_id": int}
     """

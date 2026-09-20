@@ -89,16 +89,22 @@ def save_upi_details(cid: int, body: dict,
 
     body: upi_id (VPA), source ('qr'|'manual', default 'qr'), raw_payload,
           payee_name, merchant_name, confirmed (default True), name_score.
-    Records the scan for audit and updates chemists.upi_id. Duplicate
+    Records the scan (including QR type / raw payload) for audit, updates
+    chemists.upi_id plus the confirmation provenance columns, and marks the
+    chemist UPI as confirmed for the gratification pipeline. Duplicate
     submissions for the same VPA update the confirmation, not re-insert.
     """
     conn = ctx.conn
     chem = _resolve_chemist(conn, ctx, cid)
     raw_vpa = extract_upi_id(body.get("upi_id") or "")
+    raw_payload = (body.get("raw_payload") or "").strip()
     source = "manual" if (body.get("source") or "").startswith("manual") else "qr"
     if not is_valid_vpa(raw_vpa):
         raise HTTPException(400, "Invalid UPI address (expected something like name@bank)")
     confirmed = bool(body.get("confirmed", True))
+    parsed = parse_upi_payload(raw_payload)
+    qr_type = (body.get("qr_type") or parsed.get("qr_type") or None)
+    merchant_name = (body.get("merchant_name") or parsed.get("payee_name") or None)
     c = conn.cursor()
     name_score = body.get("name_score")
     if name_score is None and body.get("payee_name"):
@@ -109,11 +115,11 @@ def save_upi_details(cid: int, body: dict,
     existing = c.fetchone()
     if existing:
         c.execute(
-            "UPDATE upi_scans SET source=%s, payee_name=%s, merchant_name=%s, raw_payload=%s, "
-            "name_score=%s, confirmed=%s, confirmed_by=%s, confirmed_at=CURRENT_TIMESTAMP "
+            "UPDATE upi_scans SET source=%s, payee_name=%s, merchant_name=%s, qr_type=%s, "
+            "raw_payload=%s, name_score=%s, confirmed=%s, confirmed_by=%s, confirmed_at=CURRENT_TIMESTAMP "
             "WHERE id=%s",
-            (source, body.get("payee_name"), body.get("merchant_name"),
-             (body.get("raw_payload") or "")[:2000], name_score,
+            (source, body.get("payee_name"), merchant_name, qr_type,
+             (raw_payload or "")[:2000], name_score,
              confirmed, ctx.user["id"] if confirmed else None, existing[0]),
         )
         scan_id = existing[0]
@@ -122,15 +128,22 @@ def save_upi_details(cid: int, body: dict,
     else:
         c.execute(
             """INSERT INTO upi_scans (chemist_id, upi_id, payee_name, merchant_name,
-               raw_payload, source, name_score, confirmed, confirmed_by, confirmed_at, created_by)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,CURRENT_TIMESTAMP,%s) RETURNING id""",
-            (cid, raw_vpa, body.get("payee_name"), body.get("merchant_name"),
-             (body.get("raw_payload") or "")[:2000], source, name_score,
+               qr_type, raw_payload, source, name_score, confirmed, confirmed_by, confirmed_at, created_by)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,CURRENT_TIMESTAMP,%s) RETURNING id""",
+            (cid, raw_vpa, body.get("payee_name"), merchant_name, qr_type,
+             (raw_payload or "")[:2000], source, name_score,
              confirmed, ctx.user["id"] if confirmed else None, ctx.user["id"]),
         )
         scan_id = c.fetchone()[0]
         log_action(conn, ctx.user["id"], "chemist.upi_scanned", "chemist", cid,
                    {"upi_id": mask_upi_id(raw_vpa), "source": source})
-    c.execute("UPDATE chemists SET upi_id=%s WHERE id=%s", (raw_vpa, cid))
+    c.execute(
+        """UPDATE chemists
+           SET upi_id=%s, upi_payee_name=%s, upi_scan_source=%s,
+               upi_confirmed=%s, upi_confirmed_by=CASE WHEN %s THEN %s ELSE upi_confirmed_by END,
+               upi_confirmed_at=CASE WHEN %s THEN CURRENT_TIMESTAMP ELSE upi_confirmed_at END
+           WHERE id=%s""",
+        (raw_vpa, body.get("payee_name") or merchant_name, source, confirmed,
+         confirmed, ctx.user["id"], confirmed, cid))
     conn.commit()
     return {"ok": True, "id": scan_id, "masked_upi_id": mask_upi_id(raw_vpa)}

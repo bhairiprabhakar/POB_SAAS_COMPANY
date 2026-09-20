@@ -1961,6 +1961,14 @@ async def re_extract_pob(
     pob = fetchone_dict(c)
     if not pob:
         raise HTTPException(404, "POB not found")
+    # Verification agents review and decide; they never re-extract / replace an
+    # invoice or re-run OCR -- automation owns extraction. Only the submitting
+    # end user (retry their own document) or operations management (pob.view
+    # holders outside the verification roles) may re-extract.
+    _actor_role = (ctx.user.get("role_name") or "").lower()
+    if _actor_role in ("verifier", "verification_agent"):
+        raise HTTPException(403, "Verification agents cannot re-extract or replace invoices; "
+                                 "re-extraction is handled by the automated pipeline")
     # Same permission model as get_pob: verifier/admin (pob.view, scoped) or
     # the POB's own submitter (pob.submit).
     if ctx.has("pob.view"):

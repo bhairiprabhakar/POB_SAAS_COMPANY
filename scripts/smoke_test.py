@@ -343,7 +343,7 @@ def main():
         r = client.post(f"{BASE}/superadmin/divisions/{division['id']}/campaigns/{gift_campaign}/approve",
                         headers=SA, json={})
         r = client.post(f"{BASE}/products", headers=ADM, json={
-            "campaign_id": gift_campaign, "name": "Celevida 100g", "ptr": 500, "mrp": 550})
+            "campaign_id": gift_campaign, "brand_id": brand_id, "name": "Celevida 100g", "ptr": 500, "mrp": 550})
         gift_product = r.json()["id"]
 
         r = client.post(f"{BASE}/pob/submit", headers=MR,
@@ -382,7 +382,7 @@ def main():
         r = client.post(f"{BASE}/superadmin/divisions/{division['id']}/campaigns/{vch_campaign}/approve",
                         headers=SA, json={})
         r = client.post(f"{BASE}/products", headers=ADM, json={
-            "campaign_id": vch_campaign, "name": "Nise 100", "ptr": 300, "mrp": 340})
+            "campaign_id": vch_campaign, "brand_id": brand_id, "name": "Nise 100", "ptr": 300, "mrp": 340})
         vch_product = r.json()["id"]
         r = client.post(f"{BASE}/pob/submit", headers=MR,
                         data={"campaign_id": vch_campaign, "product_id": vch_product, "chemist_id": chemist_id,

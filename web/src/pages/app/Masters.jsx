@@ -29,10 +29,9 @@ const CONFIGS = {
     ],
   },
   brands: {
-    title: 'Brands', subtitle: 'Pharma brands used across campaigns',
+    title: 'Brands', subtitle: 'Pharma brands across your division — managed by the division admin',
     endpoint: '/api/v1/brands',
-    perm: 'brand.view',
-    readonly: true,
+    perm: 'brand.manage',
     search: (r, q) => (r.name + r.code + r.description || '').toLowerCase().includes(q),
     cols: [
       { key: 'id', label: 'ID', render: (r) => <strong>#{r.id}</strong> },
@@ -64,7 +63,7 @@ const CONFIGS = {
     ],
     fields: [
       { name: 'name', label: 'Name', required: true },
-      { name: 'brand_id', label: 'Brand', type: 'select', ref: '/api/v1/brands' },
+      { name: 'brand_id', label: 'Brand', type: 'select', ref: '/api/v1/brands', required: true },
       { name: 'sku', label: 'SKU' },
       { name: 'composition', label: 'Composition' },
       { name: 'strength', label: 'Strength' },
@@ -166,6 +165,8 @@ function CrudPage({ cfg }) {
 
   const submit = async (e) => {
     e.preventDefault();
+    const missing = cfg.fields.filter((f) => f.required && !editing[f.name]);
+    if (missing.length) { toast(`${missing[0].label} is required`, 'error'); return; }
     setBusy(true);
     try {
       if (editing.id) {

@@ -55,12 +55,12 @@ export default function Gratification() {
     {
       key: '_actions', label: '', render: (r) => (
         <div className="row" style={{ gap: 6 }}>
-          {canOps && ['cashback', 'upi'].includes(r.type_code) && r.status === 'eligible' && (
+          {canOps && ['cashback', 'upi', 'reward_points'].includes(r.type_code) && r.status === 'eligible' && (
             <button className="btn btn-sm btn-primary" onClick={() => act(
               `/api/v1/superadmin/divisions/${r.division_id}/gratification/${r.id}/approve`,
               `Grant G#${r.id} approved`)}>Approve</button>
           )}
-          {canOps && ['cashback', 'upi'].includes(r.type_code) && r.status === 'approved' && (
+          {canOps && ['cashback', 'upi', 'reward_points'].includes(r.type_code) && r.status === 'approved' && (
             <button className="btn btn-sm btn-primary" onClick={() => act(
               `/api/v1/superadmin/divisions/${r.division_id}/gratification/${r.id}/pay`,
               `Grant G#${r.id} marked paid`)}>Pay</button>

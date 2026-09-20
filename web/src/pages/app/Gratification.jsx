@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { api, fmtDateTime, fmtMoney, getSession } from '../../api';
+import QrScanner from '../../QrScanner';
 import {
   Badge, ErrorBox, Field, Modal, PageHeader, ProofPane, Select, Spinner, SplitDetail,
   StatusBadge, Table, TextInput, toast, useAsync, useFileUrl,
@@ -61,6 +62,7 @@ function GratificationDetail({ gid, onClose, onDone }) {
   const gifts = useAsync(() => api('/api/v1/gifts'));
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState(null);
+  const [upiOpen, setUpiOpen] = useState(false);
   const photoUrl = useFileUrl(data?.photo_path);
   const perms = new Set(getSession()?.permissions || []);
 
@@ -110,22 +112,46 @@ function GratificationDetail({ gid, onClose, onDone }) {
               {perms.has('gratification.dispatch') && g.type_code === 'physical_gift' && g.status === 'delivered' && (
                 <button className="btn" onClick={() => setModal('ack')}>Acknowledge &amp; complete</button>
               )}
-              {perms.has('gratification.approve') && ['cashback', 'upi'].includes(g.type_code) && g.status === 'eligible' && (
+              {perms.has('gratification.approve') && ['cashback', 'upi', 'reward_points'].includes(g.type_code) && g.status === 'eligible' && (
                 <button className="btn btn-primary" onClick={() => setModal('approve')}>Approve cashback</button>
               )}
-              {perms.has('gratification.pay') && ['cashback', 'upi'].includes(g.type_code) && g.status === 'approved' && (
+              {perms.has('gratification.pay') && ['cashback', 'upi', 'reward_points'].includes(g.type_code) && g.status === 'approved' && (
                 <button className="btn btn-primary" onClick={() => setModal('pay')}>Mark paid</button>
               )}
-              {perms.has('gratification.manage') && g.type_code === 'voucher' && g.status === 'eligible' && (
+              {perms.has('gratification.manage') && ['voucher', 'e_voucher'].includes(g.type_code) && g.status === 'eligible' && (
                 <button className="btn btn-primary" onClick={() => setModal('generate')}>Generate voucher</button>
               )}
-              {perms.has('gratification.manage') && g.type_code === 'voucher' && g.status === 'generated' && (
+              {perms.has('gratification.manage') && ['voucher', 'e_voucher'].includes(g.type_code) && g.status === 'generated' && (
                 <button className="btn btn-primary" onClick={() => setModal('send')}>Send voucher</button>
               )}
-              {perms.has('gratification.manage') && g.type_code === 'voucher' && g.status === 'sent' && (
+              {perms.has('gratification.manage') && ['voucher', 'e_voucher'].includes(g.type_code) && g.status === 'sent' && (
                 <button className="btn btn-primary" onClick={() => setModal('redeem')}>Redeem voucher</button>
               )}
             </div>
+
+            {['cashback', 'upi'].includes(g.type_code) && (
+              <div className="card" style={{ marginTop: 12 }}>
+                <h4 style={{ marginBottom: 6 }}>Chemist UPI (for payout)</h4>
+                <p className="muted" style={{ marginBottom: 8 }}>
+                  Existing verified UPI: <strong>{g.chemist_upi_id || 'None saved yet'}</strong>
+                </p>
+                {perms.has('chemist.manage') && (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button className="btn" title="Payout will use this confirmed address"
+                      disabled={!g.chemist_upi_id}
+                      onClick={() => toast('Use existing UPI: payout will run against this confirmed address', 'success')}>
+                      Use existing UPI
+                    </button>
+                    <button className="btn btn-primary" onClick={() => setUpiOpen(true)}>
+                      Scan new UPI QR
+                    </button>
+                  </div>
+                )}
+                {!perms.has('chemist.manage') && (
+                  <p className="muted" style={{ fontSize: 12 }}>Only field / admin staff can update the chemist UPI.</p>
+                )}
+              </div>
+            )}
 
             {g.events?.length > 0 && (
               <div className="timeline">
@@ -209,6 +235,13 @@ function GratificationDetail({ gid, onClose, onDone }) {
             onSubmit={(body) => act(() => api(`/api/v1/gratification/${gid}/redeem-voucher`, { method: 'POST', body }), 'Voucher redeemed')} />
         </Modal>
       )}
+      {upiOpen && (
+        <Modal open title="Chemist UPI — scan & confirm" onClose={() => setUpiOpen(false)}>
+          <GratUpiScan chemistId={g.chemist_id} chemistName={g.chemist_name}
+            existing={g.chemist_upi_id}
+            onDone={() => { setUpiOpen(false); run(); }} />
+        </Modal>
+      )}
     </Modal>
   );
 }
@@ -264,6 +297,98 @@ function SimpleForm({ id, fields, onSubmit }) {
             onChange={(e) => setVals((p) => ({ ...p, [k]: e.target.value }))} />
         </Field>
       ))}
+    </form>
+  );
+}
+
+/**
+ * GratUpiScan
+ *
+ * In-flow UPI capture for a cashback/upi gratification: scan the QR with the
+ * camera (paste fallback), decode, name-match against the chemist, and save a
+ * confirmed UPI against the chemist. Replacing an existing UPI is the explicit
+ * confirmation step. The approve step then carries this confirmed address to
+ * payout.
+ */
+function GratUpiScan({ chemistId, chemistName, existing, onDone }) {
+  const [payload, setPayload] = useState('');
+  const [decoded, setDecoded] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [scanning, setScanning] = useState(false);
+
+  const decodePayload = async () => {
+    if (!payload.trim()) { toast('Scan or paste the UPI QR payload', 'error'); return; }
+    setBusy(true);
+    try {
+      const r = await api(`/api/v1/chemists/${chemistId}/upi/decode`, { method: 'POST', body: { payload } });
+      setDecoded(r.details);
+      if (r.details.valid) toast('QR decoded — confirm the payee name', 'success');
+      else toast(r.details.error || 'Not a valid UPI payload', 'error');
+    } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
+  };
+
+  const onScanned = (text) => { setScanning(false); setPayload(text); setDecoded(null); decodePayload(); };
+
+  const confirm = async () => {
+    setSaving(true);
+    try {
+      const d = decoded;
+      await api(`/api/v1/chemists/${chemistId}/upi`, {
+        method: 'POST',
+        body: {
+          upi_id: d.upi_id, source: 'qr', raw_payload: payload,
+          payee_name: d.payee_name, name_score: d.name_score, confirmed: true,
+        },
+      });
+      toast('Chemist UPI saved & confirmed', 'success');
+      onDone();
+    } catch (err) { toast(err.message, 'error'); } finally { setSaving(false); }
+  };
+
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); decodePayload(); }}>
+      <p className="muted" style={{ marginBottom: 10 }}>
+        <strong>{chemistName}</strong>
+        {existing ? ` — existing UPI: ${existing}` : ' — no saved UPI yet'}
+      </p>
+      {scanning ? (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <QrScanner onScan={onScanned} onError={() => {}} onClose={() => setScanning(false)} />
+        </div>
+      ) : (
+        <button type="button" className="btn" style={{ marginBottom: 12 }} onClick={() => setScanning(true)}>
+          📷 Scan with camera
+        </button>
+      )}
+      <Field label="Or paste the UPI payload / VPA" hint="Manual entry fallback">
+        <TextInput value={payload} onChange={(e) => setPayload(e.target.value)}
+          placeholder="upi://pay?pa=chemist@bank&pn=... or vpa@bank" />
+      </Field>
+      {!decoded && (
+        <button type="submit" className="btn btn-primary" disabled={busy}>
+          {busy ? 'Decoding…' : 'Decode'}
+        </button>
+      )}
+      {decoded && (
+        <div style={{ marginTop: 12 }}>
+          <div className="kv-grid">
+            <span>VPA <strong>{decoded.masked_upi_id}</strong></span>
+            <span>Payee <strong>{decoded.payee_name || '—'}</strong></span>
+            <span>Name match {decoded.name_score != null ? <strong>{Math.round(decoded.name_score * 100)}%</strong> : <strong>—</strong>}</span>
+          </div>
+          {decoded.valid ? (
+            <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button type="button" className="btn btn-primary" onClick={confirm} disabled={saving}>
+                {saving ? 'Saving…' : (existing ? 'Confirm & replace existing UPI' : 'Confirm & save UPI')}
+              </button>
+              <button type="button" className="btn" onClick={() => setDecoded(null)}>Scan again</button>
+            </div>
+          ) : (
+            <p className="muted" style={{ marginTop: 8 }}>{decoded.error}</p>
+          )}
+        </div>
+      )}
     </form>
   );
 }

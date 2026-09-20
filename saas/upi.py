@@ -66,7 +66,10 @@ def parse_upi_payload(raw: str) -> dict:
     scheme, _, rest = raw.partition("://")
     netloc, _, path = rest.partition("?")
     values = dict(parse_qsl(path, keep_blank_values=True))
-    qr_type = path.split("/")[0] if path else "pay"
+    # The QR type is the network-authority segment of a UPI QR URL
+    # (upi://pay?... -> 'pay'); fall back to a best-effort label when the
+    # payload has no segment but still carries a query.
+    qr_type = netloc.split("/")[0] if netloc else ("pay" if path else "manual")
     return {
         "upi_id": (values.get("pa") or "").strip(),
         "payee_name": (values.get("pn") or "").strip() or None,

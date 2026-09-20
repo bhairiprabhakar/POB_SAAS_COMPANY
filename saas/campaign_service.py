@@ -339,7 +339,7 @@ def _assert_brand_unique(conn, name: str, code: str = None, division_id: int = N
     c = conn.cursor()
     if name:
         if division_id:
-            c.execute("SELECT id FROM brands WHERE lower(name)=lower(%s) AND (division_id=%s OR division_id IS NULL) AND id<>%s",
+            c.execute("SELECT id FROM brands WHERE lower(name)=lower(%s) AND division_id=%s AND id<>%s",
                       (name, division_id, exclude_id if exclude_id else 0))
         else:
             c.execute("SELECT id FROM brands WHERE lower(name)=lower(%s) AND division_id IS NULL AND id<>%s",
@@ -348,7 +348,7 @@ def _assert_brand_unique(conn, name: str, code: str = None, division_id: int = N
             raise HTTPException(409, "a brand with this name already exists in your division")
     if code:
         if division_id:
-            c.execute("SELECT id FROM brands WHERE lower(code)=lower(%s) AND (division_id=%s OR division_id IS NULL) AND id<>%s",
+            c.execute("SELECT id FROM brands WHERE lower(code)=lower(%s) AND division_id=%s AND id<>%s",
                       (code, division_id, exclude_id if exclude_id else 0))
         else:
             c.execute("SELECT id FROM brands WHERE lower(code)=lower(%s) AND division_id IS NULL AND id<>%s",
@@ -399,7 +399,10 @@ def delete_brand(conn, actor: dict, bid: int) -> None:
     c = conn.cursor()
     c.execute("SELECT id FROM campaigns WHERE brand_id=%s LIMIT 1", (bid,))
     if c.fetchone():
-        raise HTTPException(409, "brand is used by campaigns")
+        raise HTTPException(409, "Brand has historical/campaign usage and cannot be deleted. Deactivate it instead.")
+    c.execute("SELECT id FROM products WHERE brand_id=%s LIMIT 1", (bid,))
+    if c.fetchone():
+        raise HTTPException(409, "Brand has products attached. Deactivate the brand instead of deleting it.")
     c.execute("DELETE FROM brands WHERE id=%s", (bid,))
     conn.commit()
     log_action(conn, actor.get("id"), "brand.delete", "brand", bid, actor=actor.get("name"))

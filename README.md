@@ -139,6 +139,7 @@ venv\Scripts\python.exe scripts\verify_batch2.py           # statements/credits/
 venv\Scripts\python.exe scripts\test_ai_models.py          # AI model routing + pricing
 venv\Scripts\python.exe scripts\test_platform_roles.py     # role/permission matrix
 venv\Scripts\python.exe scripts\test_product_crud.py       # products/campaign-products CRUD
+venv\Scripts\python.exe scripts\test_business_alignment.py  # division-company model gate (brand REQUIRED, delete-protection, verifier restrictions, UPI flow)
 venv\Scripts\python.exe scripts\test_pages_load.py         # SPA/API surface loads per role
 venv\Scripts\python.exe scripts\test_dashboards_period.py  # dashboard/analytics days filter + prev deltas
 venv\Scripts\python.exe scripts\test_scoping.py            # hierarchy scoping (analytics/dashboards)

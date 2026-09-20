@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, downloadFile, fmtMoney, fmtDate, uploadFile, getSession } from '../../api';
+import QrScanner from '../../QrScanner';
 import {
   Badge, ErrorBox, Field, Modal, PageHeader, SearchBox, Select, Spinner,
   StatusBadge, TextArea, TextInput, toast, useAsync,
@@ -430,10 +431,11 @@ function UpiScanForm({ chemist, onDone }) {
   const [decoded, setDecoded] = useState(null);
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState('');
   const cid = chemist.id;
 
-  const decode = async (e) => {
-    e.preventDefault();
+  const decodePayload = async () => {
     if (!payload.trim()) { toast('Paste the scanned UPI QR payload or the VPA', 'error'); return; }
     setBusy(true);
     try {
@@ -442,6 +444,19 @@ function UpiScanForm({ chemist, onDone }) {
       if (r.details.valid) toast('QR decoded — verify the payee name', 'success');
       else toast(r.details.error || 'Not a valid UPI payload', 'error');
     } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
+  };
+
+  const decode = async (e) => {
+    if (e) e.preventDefault();
+    await decodePayload();
+  };
+
+  const onScanned = (text) => {
+    setScanning(false);
+    setPayload(text);
+    setDecoded(null);
+    // Auto-decode the freshly scanned QR payload.
+    decodePayload();
   };
 
   const confirm = async () => {
@@ -466,7 +481,31 @@ function UpiScanForm({ chemist, onDone }) {
       <p style={{ marginBottom: 12 }}>
         <strong>{chemist.name}</strong>{chemist.shop_name ? ` — ${chemist.shop_name}` : ''}
       </p>
-      <Field label="Scanned UPI payload / VPA" required
+      {chemist.upi_id && (
+        <p className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+          Existing UPI: <strong>{chemist.upi_id}</strong> — scanning/replacing will require your confirmation below.
+        </p>
+      )}
+      {scanning ? (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <QrScanner
+            onScan={onScanned}
+            onError={(msg) => setScanError(msg)}
+            onClose={() => setScanning(false)}
+          />
+          {scanError && (
+            <button type="button" className="btn btn-sm" style={{ marginTop: 8 }}
+              onClick={() => setScanning(false)}>Use manual entry instead</button>
+          )}
+        </div>
+      ) : (
+        <button type="button" className="btn" onClick={() => { setScanning(true); setScanError(''); }}
+          style={{ marginBottom: 14 }}>
+          📷 Scan UPI QR with camera
+        </button>
+      )}
+
+      <Field label="Or paste the UPI QR payload / VPA (manual fallback)"
         hint="Paste the UPI QR text (e.g. upi://pay?pa=shop@upi&pn=Shop Name) or a bare VPA">
         <TextArea rows={3} value={payload} onChange={(e) => setPayload(e.target.value)}
           placeholder="upi://pay?pa=chemist@bank&pn=Chemist Name&am=100.00" />
@@ -486,7 +525,9 @@ function UpiScanForm({ chemist, onDone }) {
           {decoded.valid ? (
             <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <button type="button" className="btn btn-primary" onClick={confirm} disabled={saving}>
-                {saving ? 'Saving…' : (decoded.name_score ?? 0) < 0.6 ? 'Save anyway' : 'Confirm & save'}
+                {saving ? 'Saving…' : (decoded.name_score ?? 0) < 0.6 ? 'Save anyway' : (chemist.upi_id && chemist.upi_id !== decoded.masked_upi_id && chemist.upi_id !== decoded.upi_id)
+                  ? 'Confirm & replace existing UPI'
+                  : 'Confirm & save'}
               </button>
               {(decoded.name_score ?? 0) < 0.6 && (
                 <span className="muted" style={{ fontSize: 12 }}>Payee name doesn't strongly match — only save if you verified it with the shop.</span>

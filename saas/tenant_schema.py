@@ -545,7 +545,7 @@ PERMISSION_CATALOG = [
     ("user",         [("user.view", "View users"), ("user.manage", "Create/edit/delete users")]),
     ("brand",        [("brand.view", "View brands"), ("brand.manage", "Create/edit/delete brands")]),
     ("campaign",     [("campaign.view", "View campaigns"), ("campaign.manage", "Create/edit/delete campaigns")]),
-    ("product",      [("product.view", "View products")]),
+    ("product",      [("product.view", "View products"), ("product.manage", "Create/edit/delete products")]),
     ("chemist",      [("chemist.view", "View chemists"), ("chemist.manage", "Manage chemists"),
                       ("chemist.classification.view", "View chemist classification masters"),
                       ("chemist.classification.manage", "Manage chemist classification masters")]),
@@ -613,12 +613,12 @@ DEFAULT_ROLES = {
             "brand.view", "chemist.view", "chemist.manage", "pob.view", "verification.view",
             "verification.approve", "report.view", "notification.view", "statement.view",
             "statement.upload", "statement.verify", "statement.credits"],
-    "mr":  ["dashboard.view", "pob.submit", "campaign.view", "product.view", "chemist.view",
-            "chemist.manage", "chemist.classification.view", "gratification.view",
+    "mr":  ["dashboard.view", "pob.submit", "campaign.view", "product.view", "brand.view",
+            "chemist.view", "chemist.manage", "chemist.classification.view", "gratification.view",
             "notification.view", "visit.view", "visit.manage", "statement.upload",
             "statement.view", "statement.credits"],
-    "psr": ["dashboard.view", "pob.submit", "campaign.view", "product.view", "chemist.view",
-            "chemist.manage", "chemist.classification.view", "gratification.view",
+    "psr": ["dashboard.view", "pob.submit", "campaign.view", "product.view", "brand.view",
+            "chemist.view", "chemist.manage", "chemist.classification.view", "gratification.view",
             "notification.view", "visit.view", "visit.manage", "statement.upload",
             "statement.view", "statement.credits"],
     "verifier": ["dashboard.view", "verification.view", "verification.approve", "verification.reject",
@@ -645,9 +645,11 @@ DEFAULT_GRATIFICATION_TYPES = [
     ("cashback", "Cashback"),
     ("upi", "UPI"),
     ("voucher", "Voucher"),
+    ("e_voucher", "E-Voucher"),
     ("gift", "Gift"),
     ("coupon", "Coupon"),
     ("points", "Points"),
+    ("reward_points", "Reward Points"),
     ("physical_gift", "Physical Gift"),
     ("others", "Others"),
 ]
@@ -1271,10 +1273,10 @@ ON CONFLICT DO NOTHING;
 -- ── Product pricing: PTS (Price to Stockist) alongside PTR ────────────────
 ALTER TABLE products ADD COLUMN IF NOT EXISTS pts REAL DEFAULT 0;
 
--- ── POB submitters (MR/PSR) need to see active campaigns & products ────────
+-- ── POB submitters (MR/PSR) need to see active campaigns, products & brands ─
 INSERT INTO role_permissions (role_id, permission_code)
 SELECT r.id, p.code FROM roles r, permissions p
-WHERE r.name IN ('mr','psr') AND p.code IN ('campaign.view','product.view')
+WHERE r.name IN ('mr','psr') AND p.code IN ('campaign.view','product.view','brand.view')
 ON CONFLICT DO NOTHING;
 
 -- ── Two-phase POB: visit submission (no invoice) then invoice proof ────────
@@ -1567,27 +1569,24 @@ CREATE TABLE IF NOT EXISTS chemist_potential_categories (
     sort_order INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+-- Final classification defaults (division-company model): seven attachment
+-- types + five potential bands. Configurable via /chemist-masters; rows are
+-- idempotent so existing tenants converge without destroying legacy codes.
 INSERT INTO chemist_attachment_types (code, name, description, sort_order) VALUES
-    ('hospital', 'Hospital / Clinic', 'Doctor-owned hospital or clinic', 10),
-    ('nursing_home', 'Nursing Home', 'Nursing home / elder care facility', 20),
-    ('dispensary', 'Dispensary', 'Institution dispensary', 30),
-    ('polyclinic', 'Polyclinic', 'Multi-doctor polyclinic', 40),
-    ('pathology_lab', 'Pathology Lab', 'Diagnostic / pathology laboratory', 50),
-    ('multi_speciality_hospital', 'Multi-Speciality Hospital', 'Multi-department hospital', 60),
-    ('super_speciality_hospital', 'Super-Speciality Hospital', 'Single-speciality super hospital', 70),
-    ('gated_community', 'Gated Community', 'Pharmacy inside a gated community', 80),
-    ('standalone_retail', 'Standalone Retail', 'Standalone retail chemist', 90),
-    ('chain_retail', 'Chain Retail', 'Part of a retail pharmacy chain', 100),
-    ('online_pharmacy', 'Online Pharmacy', 'Online / delivery pharmacy', 110),
-    ('others', 'Others', 'Any other attachment type', 999)
+    ('individual', 'Individual Chemist', 'Standalone independent retail chemist', 10),
+    ('hospital_attached', 'Hospital Attached', 'Pharmacy attached to a hospital', 20),
+    ('clinic_attached', 'Clinic Attached', 'Pharmacy attached to a clinic', 30),
+    ('nursing_home_attached', 'Nursing Home Attached', 'Pharmacy attached to a nursing home', 40),
+    ('institutional_pharmacy', 'Institutional Pharmacy', 'Institutional / in-patient pharmacy', 50),
+    ('chain_pharmacy', 'Chain Pharmacy', 'Part of a pharmacy chain', 60),
+    ('others', 'Other', 'Any other attachment type', 999)
 ON CONFLICT (code) DO NOTHING;
 INSERT INTO chemist_potential_categories (code, name, description, sort_order) VALUES
-    ('low', 'Low', 'Low monthly business potential', 10),
-    ('medium', 'Medium', 'Medium monthly business potential', 20),
-    ('high', 'High', 'High monthly business potential', 30),
-    ('very_high', 'Very High', 'Very high monthly business potential', 40),
-    ('key_account', 'Key Account', 'Strategic key account (KA)', 50),
-    ('not_defined', 'Not Defined', 'Potential not yet assessed', 999)
+    ('a_plus', 'A+ - Very High Potential', 'Very high monthly business potential', 10),
+    ('a', 'A - High Potential', 'High monthly business potential', 20),
+    ('b', 'B - Medium Potential', 'Medium monthly business potential', 30),
+    ('c', 'C - Small / Low Potential', 'Small / low monthly business potential', 40),
+    ('new', 'New / Not Classified', 'Potential not yet assessed', 999)
 ON CONFLICT (code) DO NOTHING;
 ALTER TABLE chemists ADD COLUMN IF NOT EXISTS chemist_code TEXT;
 ALTER TABLE chemists ADD COLUMN IF NOT EXISTS attachment_type TEXT;
@@ -1816,6 +1815,39 @@ SELECT r.id, p.code FROM roles r, permissions p
 WHERE r.name='auditor'
   AND p.code IN ('statement.view','statement.credits')
 ON CONFLICT DO NOTHING;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Alignment with the FINAL business architecture (division-company model):
+-- product division ownership, agent-safe verification, UPI confirmation.
+
+-- product.manage: products are division-scoped masters owned by division
+-- admins (brand REQUIRED at creation). Mirrors PERMISSION_CATALOG so existing
+-- tenants converge; product create/edit/delete endpoints gate on this code.
+INSERT INTO permissions (code, label, module) VALUES
+    ('product.manage', 'Create/edit/delete products', 'product')
+ON CONFLICT (code) DO NOTHING;
+INSERT INTO role_permissions (role_id, permission_code)
+SELECT r.id, 'product.manage'
+FROM roles r WHERE r.name IN ('division_admin','campaignos_admin')
+ON CONFLICT DO NOTHING;
+
+-- Gratification types: FINAL default catalogue (UPI, Cashback, Physical Gift,
+-- Voucher, E-Voucher, Coupon, Reward Points, Other). New codes are added for
+-- existing tenants alongside the seed list in seed_tenant().
+INSERT INTO gratification_types (code, name, description) VALUES
+    ('e_voucher', 'E-Voucher', 'Digital / electronic voucher'),
+    ('reward_points', 'Reward Points', 'Loyalty / reward points wallet')
+ON CONFLICT (code) DO NOTHING;
+
+-- Chemist UPI confirmation state (UPI QR flow): the confirmed VPA lives on
+-- chemists.upi_id; these convenience columns carry the confirmation provenance
+-- so the gratification pipeline can show "existing verified UPI" and the audit
+-- trail stays on upi_scans.
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS upi_payee_name TEXT;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS upi_scan_source TEXT;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS upi_confirmed BOOLEAN DEFAULT FALSE;
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS upi_confirmed_by INTEGER REFERENCES users(id);
+ALTER TABLE chemists ADD COLUMN IF NOT EXISTS upi_confirmed_at TIMESTAMP;
 
 INSERT INTO role_permissions (role_id, permission_code)
 SELECT r.id, p.code FROM roles r, permissions p

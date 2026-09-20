@@ -112,6 +112,11 @@ export default function Products() {
     try {
       const payload = { ...editing };
       delete payload.campaign_id;
+      if (!editing.id && !payload.brand_id) {
+        toast('Brand is required', 'error');
+        setBusy(false);
+        return;
+      }
       if (editing.id) await api(`/api/v1/products/${editing.id}`, { method: 'PUT', body: payload });
       else await api('/api/v1/products', { method: 'POST', body: payload });
       toast(editing.id ? 'Product updated' : 'Product created', 'success');
@@ -201,8 +206,8 @@ export default function Products() {
           <form id="product-form" onSubmit={submit}>
             <h4 className="section-title">Product</h4>
             <div className="grid-2">
-              <Field label="Brand" hint="Optional — attaches the product to a brand so name changes stay in sync">
-                <Select value={editing.brand_id || ''} onChange={set('brand_id')} placeholder="No brand"
+              <Field label="Brand" required hint="Required — a product belongs to a brand in your division">
+                <Select value={editing.brand_id || ''} onChange={set('brand_id')} placeholder="Select brand…"
                   options={brandOpts} />
               </Field>
               <Field label="Product name" required><TextInput value={editing.name || ''} onChange={set('name')} required placeholder="e.g. Allegra 120mg Strip" /></Field>

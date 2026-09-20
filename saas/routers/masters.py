@@ -37,11 +37,13 @@ router = APIRouter(prefix="/api/v1", tags=["masters"])
 def list_brands(q: str = "", status: str = "",
                 ctx: TenantContext = Depends(require_permission("brand.view"))):
     """Brands visible to the caller, narrowed to their division when they have
-    one. Brands with no division stay visible so unmapped data still works."""
+    one. Brands are division-scoped master data (division_id is always set for
+    division-owned brands), so a division-scoped user never sees another
+    division's brands -- there is no NULL/global fallback."""
     div = user_division_id(ctx.conn, ctx)
     items = campaign_service.list_brands(ctx.conn, q, status)
     if div:
-        items = [b for b in items if b.get("division_id") in (None, div)]
+        items = [b for b in items if b.get("division_id") == div]
     return {"items": items}
 
 
@@ -52,7 +54,7 @@ def _actor(ctx: TenantContext) -> dict:
 
 def _assert_brand_in_div(conn, bid: int, div: int) -> None:
     c = conn.cursor()
-    c.execute("SELECT id FROM brands WHERE id=%s AND (division_id=%s OR division_id IS NULL)", (bid, div))
+    c.execute("SELECT id FROM brands WHERE id=%s AND division_id=%s", (bid, div))
     if not c.fetchone():
         raise HTTPException(404, "brand not found")
 
@@ -487,13 +489,13 @@ async def upload_campaign_asset(cid: int, kind: str = "logo", file: UploadFile =
 
 def _assert_product_in_div(conn, p: dict, div: int) -> None:
     """A product belongs to a division directly (division_id) or through its
-    brand (brand -> division). Mirror of brands scoping."""
+    brand (brand -> division). Mirror of brands scoping; no global fallback."""
     if p.get("division_id") == div:
         return
     bid = p.get("brand_id")
     if bid:
         c = conn.cursor()
-        c.execute("SELECT id FROM brands WHERE id=%s AND (division_id=%s OR division_id IS NULL)",
+        c.execute("SELECT id FROM brands WHERE id=%s AND division_id=%s",
                   (bid, div))
         if c.fetchone():
             return
@@ -533,7 +535,7 @@ def list_products(campaign_id: int = None, brand_id: int = None, status: str = "
         params.extend([f"%{q}%", f"%{q}%"])
     div = user_division_id(ctx.conn, ctx)
     if div:
-        where.append("(p.division_id IS NULL OR p.division_id=%s OR b.division_id IS NULL OR b.division_id=%s)")
+        where.append("(p.division_id=%s OR b.division_id=%s)")
         params.extend([div, div])
     if where:
         sql += " WHERE " + " AND ".join(where)
@@ -556,25 +558,26 @@ def _assert_product_unique(conn, name: str, brand_id=None, sku=None, division_id
                            exclude_id: int = None) -> None:
     """Product SKU must be unique within the division; the (name, brand) pair
     must be unique within the division too. Division admins are compared
-    against their own division only."""
+    against their own division only -- no NULL/global fallback. Callers
+    without a division (global masters) compare against global rows."""
     c = conn.cursor()
     exc = exclude_id if exclude_id else 0
     if name:
         if brand_id:
             c.execute(
-                "SELECT id FROM products p WHERE (p.division_id=%s OR p.division_id IS NULL) "
+                "SELECT id FROM products p WHERE (p.division_id IS NOT DISTINCT FROM %s) "
                 "AND lower(p.name)=lower(%s) AND p.brand_id=%s AND p.id<>%s",
                 (division_id, name, brand_id, exc))
         else:
             c.execute(
-                "SELECT id FROM products p WHERE (p.division_id=%s OR p.division_id IS NULL) "
+                "SELECT id FROM products p WHERE (p.division_id IS NOT DISTINCT FROM %s) "
                 "AND lower(p.name)=lower(%s) AND p.brand_id IS NULL AND p.id<>%s",
                 (division_id, name, exc))
         if c.fetchone():
             raise HTTPException(409, "a product with this name already exists for this brand in your division")
     if sku:
         c.execute(
-            "SELECT id FROM products p WHERE (p.division_id=%s OR p.division_id IS NULL) "
+            "SELECT id FROM products p WHERE (p.division_id IS NOT DISTINCT FROM %s) "
             "AND lower(p.sku)=lower(%s) AND p.id<>%s",
             (division_id, sku, exc))
         if c.fetchone():
@@ -582,15 +585,18 @@ def _assert_product_unique(conn, name: str, brand_id=None, sku=None, division_id
 
 
 @router.post("/products")
-def create_product(body: dict, ctx: TenantContext = Depends(require_permission("campaign.manage"))):
+def create_product(body: dict, ctx: TenantContext = Depends(require_permission("product.manage"))):
     name = str(body.get("name") or "").strip()
     if not name:
         raise HTTPException(400, "Product name is required")
-    div = division_scope(ctx.conn, ctx)
     bid = body.get("brand_id")
-    if bid is not None:
-        _assert_brand_for_div(ctx.conn, int(bid), div)
-    _assert_product_unique(ctx.conn, name=name, brand_id=int(bid) if bid is not None else None,
+    if bid is None:
+        # Product Master: brand is REQUIRED. A product belongs to its brand,
+        # and the brand belongs to a division (backend-enforced ownership).
+        raise HTTPException(400, "Product must belong to a brand")
+    div = division_scope(ctx.conn, ctx)
+    _assert_brand_for_div(ctx.conn, int(bid), div)
+    _assert_product_unique(ctx.conn, name=name, brand_id=int(bid),
                            sku=(body.get("sku") or "").strip() or None, division_id=div)
     cid = body.get("campaign_id")
     payload = {**body, "name": name}
@@ -612,7 +618,7 @@ def create_product(body: dict, ctx: TenantContext = Depends(require_permission("
 
 
 @router.put("/products/{pid}")
-def update_product(pid: int, body: dict, ctx: TenantContext = Depends(require_permission("campaign.manage"))):
+def update_product(pid: int, body: dict, ctx: TenantContext = Depends(require_permission("product.manage"))):
     p = _get_product(ctx.conn, pid)
     if not p:
         raise HTTPException(404, "product not found")
@@ -623,6 +629,12 @@ def update_product(pid: int, body: dict, ctx: TenantContext = Depends(require_pe
     if "name" in body and not new_name:
         raise HTTPException(400, "Product name cannot be empty")
     bid = body.get("brand_id")
+    if bid is None and "brand_id" in body and (body.get("brand_id") is None or body.get("brand_id") == ""):
+        # A branded product cannot lose its brand: it stays with the brand
+        # (and thus the division) it was created under. Only add/change brand.
+        if p.get("brand_id"):
+            raise HTTPException(400, "Product must keep its brand; you can change the brand but not remove it")
+        bid = None
     if bid is not None:
         _assert_brand_for_div(ctx.conn, int(bid), div)
     _assert_product_unique(ctx.conn, name=new_name,
@@ -636,7 +648,7 @@ def update_product(pid: int, body: dict, ctx: TenantContext = Depends(require_pe
 
 
 @router.delete("/products/{pid}")
-def delete_product(pid: int, ctx: TenantContext = Depends(require_permission("campaign.manage"))):
+def delete_product(pid: int, ctx: TenantContext = Depends(require_permission("product.manage"))):
     p = _get_product(ctx.conn, pid)
     if not p:
         raise HTTPException(404, "product not found")
@@ -644,10 +656,17 @@ def delete_product(pid: int, ctx: TenantContext = Depends(require_permission("ca
     if div:
         _assert_product_in_div(ctx.conn, p, div)
     c = ctx.conn.cursor()
+    # Referenced products (by campaigns, campaign_products, POBs, invoices,
+    # verification or derived gratification/reporting rows) cannot be
+    # hard-deleted -- the flow deactivates instead. campaign_products and
+    # pob_activities are the direct linkage tables; everything else (invoices,
+    # verification, gratifications, reports) hangs off the POB row.
+    c.execute("SELECT 1 FROM campaign_products WHERE product_id=%s LIMIT 1", (pid,))
+    if c.fetchone():
+        raise HTTPException(409, "Product has historical/campaign usage and cannot be deleted. Deactivate it instead.")
     c.execute("SELECT id FROM pob_activities WHERE product_id=%s LIMIT 1", (pid,))
     if c.fetchone():
-        raise HTTPException(409, "Product has POB activities and can't be deleted")
-    c.execute("DELETE FROM campaign_products WHERE product_id=%s", (pid,))
+        raise HTTPException(409, "Product has historical/campaign usage and cannot be deleted. Deactivate it instead.")
     c.execute("DELETE FROM products WHERE id=%s", (pid,))
     ctx.conn.commit()
     log_action(ctx.conn, _actor(ctx)["id"], "product.delete", "product", pid,
@@ -658,13 +677,17 @@ def delete_product(pid: int, ctx: TenantContext = Depends(require_permission("ca
 # ── Products bulk upload ───────────────────────────────────────────────────
 
 def _product_brand_id(conn, div: int | None, name: str) -> int | None:
-    """Resolve a brand by name within the caller's division (or globally)."""
+    """Resolve a brand by name within the caller's division (or globally).
+
+    Division-scoped callers only match brands that belong to their division --
+    there is no NULL/global fallback.
+    """
     name = str(name or "").strip()
     if not name:
         return None
     c = conn.cursor()
     if div:
-        c.execute("SELECT id FROM brands WHERE lower(name)=lower(%s) AND (division_id=%s OR division_id IS NULL) LIMIT 1",
+        c.execute("SELECT id FROM brands WHERE lower(name)=lower(%s) AND division_id=%s LIMIT 1",
                   (name, div))
     else:
         c.execute("SELECT id FROM brands WHERE lower(name)=lower(%s) LIMIT 1", (name,))
@@ -674,7 +697,7 @@ def _product_brand_id(conn, div: int | None, name: str) -> int | None:
 
 @router.post("/products/bulk-upload")
 async def bulk_upload_products(file: UploadFile = File(...),
-                               ctx: TenantContext = Depends(require_permission("campaign.manage"))):
+                               ctx: TenantContext = Depends(require_permission("product.manage"))):
     data = await file.read()
     try:
         validate_upload(data, filename=file.filename or "", allowed_kinds=SPREADSHEET_KINDS,
@@ -702,9 +725,13 @@ async def bulk_upload_products(file: UploadFile = File(...),
         if not name:
             errors.append(f"row {i}: name required")
             continue
-        brand_id = _product_brand_id(conn, div, d.get("brand"))
-        if d.get("brand") and not brand_id:
-            errors.append(f"row {i}: brand '{d.get('brand')}' not found")
+        brand_name = (d.get("brand") or "").strip()
+        if not brand_name:
+            errors.append(f"row {i}: brand required")
+            continue
+        brand_id = _product_brand_id(conn, div, brand_name)
+        if not brand_id:
+            errors.append(f"row {i}: brand '{brand_name}' not found")
             continue
         def _num(v, default=0):
             try:
@@ -749,7 +776,7 @@ async def bulk_upload_products(file: UploadFile = File(...),
 
 
 @router.get("/products/bulk-template")
-def product_template(ctx: TenantContext = Depends(require_permission("campaign.manage"))):
+def product_template(ctx: TenantContext = Depends(require_permission("product.manage"))):
     wb = Workbook()
     ws = wb.active
     ws.title = "Products"
@@ -1057,7 +1084,7 @@ def create_chemist(body: dict, ctx: TenantContext = Depends(require_permission("
     if dup_rules:
         matches, seen = [], set()
         for rule, cond, vals in dup_rules:
-            extra = " AND (division_id=%s OR division_id IS NULL)" if scoped_div else ""
+            extra = " AND division_id=%s" if scoped_div else ""
             params = list(vals) + ([scoped_div] if scoped_div else [])
             sql = (f"SELECT id, name, shop_name, city, mobile FROM chemists "
                    f"WHERE {cond}{extra} ORDER BY id")
