@@ -55,7 +55,7 @@ export default function PlatformSettings() {
   };
 
   const shown = pending || s.logo_url;
-  const displayName = (name.trim() || s.platform_name || 'CampaignOS');
+  const displayName = (name.trim() || s.platform_name || 'FieldNet');
 
   return (
     <div>
@@ -66,7 +66,7 @@ export default function PlatformSettings() {
         <p className="muted">Displayed on the super admin sign-in page and in the console sidebar.</p>
         <div className="grid-2" style={{ maxWidth: 520, marginTop: 6 }}>
           <TextInput label="Platform name" value={name}
-            placeholder={s.platform_name || 'CampaignOS'}
+            placeholder={s.platform_name || 'FieldNet'}
             onChange={(e) => setName(e.target.value)} />
           <div style={{ display: 'flex', alignItems: 'flex-end' }}>
             <button className="btn btn-primary" onClick={save} disabled={busy || !name.trim()}>

@@ -30,7 +30,7 @@ export default function Campaigns() {
 
   return (
     <div>
-      <PageHeader title="Campaigns" subtitle="Divisions, campaigns and the team hierarchy under each"
+      <PageHeader title="Campaign Tracking" subtitle="Divisions, campaigns and the team hierarchy under each"
         actions={<SearchBox value={q} onChange={setQ} />} />
       <div className="track-legend">
         <span className="lg-num"><b>#</b> POBs</span>

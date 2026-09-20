@@ -1,4 +1,4 @@
-// API client for the CampaignOS pharma campaign platform.
+// API client for the FieldNet pharma campaign platform.
 // Stores one active session (superadmin OR tenant) in localStorage, attaches
 // the JWT bearer header, and transparently rotates refresh tokens on 401.
 

@@ -13,12 +13,18 @@ export default function Login() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [division, setDivision] = useState(null);
+  const [brand, setBrand] = useState({ platform_name: 'FieldNet', has_logo: false });
 
   useEffect(() => {
     if (urlSlug) {
       api(`/api/v1/auth/login-context/${encodeURIComponent(urlSlug)}`)
         .then((d) => setDivision(d.division))
         .catch(() => setError('Division not found. Check the link or contact your administrator.'));
+    } else {
+      // No division slug yet (generic /login) -- show the platform's own
+      // brand instead of a hardcoded placeholder, same source as the
+      // superadmin sign-in / register pages.
+      api('/api/v1/auth/platform-branding').then(setBrand).catch(() => {});
     }
   }, [urlSlug]);
 
@@ -100,18 +106,20 @@ export default function Login() {
     }
   };
 
-  const logoUrl = division ? `/api/v1/auth/division-logo/${division.id}` : null;
+  const logoUrl = division
+    ? `/api/v1/auth/division-logo/${division.id}`
+    : (brand.has_logo ? '/api/v1/auth/platform-logo' : null);
 
   return (
     <div className="auth-page">
       <form className="auth-card" onSubmit={mfaToken ? submitCode : submit}>
         <div className="auth-brand">
           {logoUrl
-            ? <img src={logoUrl} alt={division.name} className="auth-logo"
+            ? <img src={logoUrl} alt={division ? division.name : brand.platform_name} className="auth-logo"
                 onError={(e) => { e.currentTarget.style.display = 'none'; }} />
             : <>
-                <span className="brand-mark lg">{division ? (division.name || 'D').charAt(0) : 'C'}</span>
-                <h1>{division ? division.name : 'CampaignOS'}</h1>
+                <span className="brand-mark lg">{(division ? division.name : brand.platform_name || 'F').charAt(0)}</span>
+                <h1>{division ? division.name : brand.platform_name}</h1>
               </>}
           <p className="muted">Sign in with your username &amp; password</p>
         </div>

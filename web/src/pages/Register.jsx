@@ -10,7 +10,7 @@ export default function Register() {
   const [regOpen, setRegOpen] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [brand, setBrand] = useState({ platform_name: 'CampaignOS', has_logo: false });
+  const [brand, setBrand] = useState({ platform_name: 'FieldNet', has_logo: false });
 
   const [company, setCompany] = useState({});
   const [owner, setOwner] = useState({ designation: 'Owner' });

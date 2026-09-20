@@ -44,13 +44,10 @@ import SuperGratification from './pages/superadmin/Gratification';
 import SuperUsers from './pages/superadmin/Users';
 import PlatformAdmins from './pages/superadmin/PlatformAdmins';
 import MyDivision from './pages/app/MyDivision';
-import Teams from './pages/app/Teams';
 import Regions from './pages/app/Regions';
-import Products from './pages/app/Products';
 import Gifts from './pages/app/Gifts';
 import ErrorBoundary from './ErrorBoundary';
 import ManageCampaigns from './pages/app/ManageCampaigns';
-import ManageBrands from './pages/app/ManageBrands';
 import Catalog from './pages/app/Catalog';
 import UserManagement from './pages/app/UserManagement';
 import Statements from './pages/app/Statements';
@@ -224,18 +221,17 @@ export default function App() {
         <Route path="/app/my-division" element={
           <ProtectedTenant><AppShell kind="tenant"><MyDivision /></AppShell></ProtectedTenant>
         } />
-        <Route path="/app/teams" element={
-          <ProtectedTenant><AppShell kind="tenant"><Teams /></AppShell></ProtectedTenant>
-        } />
+        {/* Teams / Products / Brands each already live as a tab inside a hub
+            page (Employees -> Teams tab, Catalog -> Products/Brands tabs) --
+            these routes only exist so old links/bookmarks still land somewhere. */}
+        <Route path="/app/teams" element={<Navigate to="/app/user-management?tab=teams" replace />} />
         <Route path="/app/catalog" element={
           <ProtectedTenant><AppShell kind="tenant"><Catalog /></AppShell></ProtectedTenant>
         } />
         <Route path="/app/regions" element={
           <ProtectedTenant><AppShell kind="tenant"><Regions /></AppShell></ProtectedTenant>
         } />
-        <Route path="/app/products" element={
-          <ProtectedTenant><AppShell kind="tenant"><Products /></AppShell></ProtectedTenant>
-        } />
+        <Route path="/app/products" element={<Navigate to="/app/catalog?tab=products" replace />} />
         <Route path="/app/gifts" element={
           <ProtectedTenant><AppShell kind="tenant"><Gifts /></AppShell></ProtectedTenant>
         } />
@@ -286,9 +282,7 @@ export default function App() {
         <Route path="/app/campaigns" element={
           <ProtectedTenant><AppShell kind="tenant"><ManageCampaigns /></AppShell></ProtectedTenant>
         } />
-        <Route path="/app/brands" element={
-          <ProtectedTenant><AppShell kind="tenant"><ManageBrands /></AppShell></ProtectedTenant>
-        } />
+        <Route path="/app/brands" element={<Navigate to="/app/catalog?tab=brands" replace />} />
         <Route path="/app/user-management" element={
           <ProtectedTenant><AppShell kind="tenant"><UserManagement /></AppShell></ProtectedTenant>
         } />

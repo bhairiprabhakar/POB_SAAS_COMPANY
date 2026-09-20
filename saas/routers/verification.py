@@ -468,6 +468,47 @@ def mark_duplicate(vid: int, body: dict,
     return {"ok": True, "status": "duplicate"}
 
 
+@router.post("/{vid}/flag_review")
+def flag_for_review(vid: int, body: dict, request: Request = None,
+                    ctx: TenantContext = Depends(require_permission("verification.reject"))):
+    """Explicitly flag a pending POB for further manual review.
+
+    Mirrors the pipeline's own manual-review branch (run_verification_pipeline,
+    below, and saas/routers/pob.py's re-extract path): the verification stays
+    'pending' (so it keeps showing in the default /queue?status=pending list)
+    with pipeline_status flipped to 'pending_agent', and pob_activities is
+    marked verification_state='manual_review'. No approval/rejection decision
+    is recorded and no gratification is created -- the POB stays unresolved.
+    """
+    reason = (body.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(400, "reason is mandatory when flagging for review")
+    conn = ctx.conn
+    c = conn.cursor()
+    c.execute("SELECT v.*, pa.user_id, pa.invoice_number FROM pob_verifications v "
+              "JOIN pob_activities pa ON pa.id=v.pob_id WHERE v.id=%s FOR UPDATE OF v", (vid,))
+    v = fetchone_dict(c)
+    if not v:
+        raise HTTPException(404, "verification not found")
+    if v["status"] != "pending":
+        raise HTTPException(409, f"item is already {v['status']}")
+    _assert_scope(conn, ctx, vid)
+    c.execute("UPDATE pob_verifications SET pipeline_status='pending_agent', reason=%s WHERE id=%s",
+              (reason, vid))
+    c.execute("UPDATE pob_activities SET verification_state='manual_review' WHERE id=%s", (v["pob_id"],))
+    c.execute("INSERT INTO verification_history (pob_id, verifier_id, action, reason) "
+              "VALUES (%s,%s,'needs_review',%s)", (v["pob_id"], ctx.user["id"], reason))
+    conn.commit()
+    log_action(conn, ctx.user["id"], "verification.flag_review", "pob_verification", vid,
+               {"pob_id": v["pob_id"], "reason": reason}, request=request)
+    c.execute("SELECT cmp.name FROM pob_activities pa LEFT JOIN campaigns cmp ON cmp.id=pa.campaign_id "
+              "WHERE pa.id=%s", (v["pob_id"],))
+    row = c.fetchone()
+    notify_from_template(conn, v["user_id"], "pob.needs_review",
+                         {"pob_id": v["pob_id"], "campaign": row[0] if row else ""}, "pob", v["pob_id"])
+    return {"ok": True, "status": "pending", "pipeline_status": "pending_agent"}
+
+
 @router.post("/{vid}/re_open")
 def re_open_verification(vid: int, body: dict = None, request: Request = None,
                          ctx: TenantContext = Depends(require_permission("verification.approve"))):

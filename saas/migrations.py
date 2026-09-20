@@ -27,7 +27,10 @@ log = logging.getLogger("saas.migrations")
 # 3.15.0 (Batch 2): statement-domain permission codes + role wiring, and
 # uploads.progress_pct / progress_stage so the upload-poll endpoint can read
 # extraction progress from the DB (multi-worker safe).
-SCHEMA_VERSION = "3.15.0"
+# 3.16.0: verifier/verification_agent are POB-only -- revoke the
+# statement.view/statement.verify/statement.credits grants they previously
+# picked up alongside the statement/credits portal wiring.
+SCHEMA_VERSION = "3.16.0"
 
 # RLock: ensure_migrated re-enters via get_tenant_pool → _try_migrate path.
 _lock = threading.RLock()

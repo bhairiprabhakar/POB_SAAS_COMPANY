@@ -510,7 +510,10 @@ def list_products(campaign_id: int = None, brand_id: int = None, status: str = "
     c = conn.cursor()
     # When a campaign is given, the campaign link's POB constraints are the
     # values that apply (a product may carry different thresholds per campaign).
-    base = """SELECT p.*, b.name AS brand_name, d.name AS division_name
+    has_usage_sql = ("EXISTS(SELECT 1 FROM campaign_products cpu WHERE cpu.product_id=p.id) "
+                     "OR EXISTS(SELECT 1 FROM pob_activities pau WHERE pau.product_id=p.id) "
+                     "AS has_usage")
+    base = f"""SELECT p.*, b.name AS brand_name, d.name AS division_name, {has_usage_sql}
               FROM products p
               LEFT JOIN brands b ON b.id=p.brand_id
               LEFT JOIN divisions d ON d.id=p.division_id"""
@@ -518,7 +521,7 @@ def list_products(campaign_id: int = None, brand_id: int = None, status: str = "
     where, params = [], []
     if campaign_id:
         sql = ("SELECT cp.min_quantity, cp.min_pob, cp.max_pob, cp.scheme_eligibility, "
-               "p.*, b.name AS brand_name, d.name AS division_name "
+               f"p.*, b.name AS brand_name, d.name AS division_name, {has_usage_sql} "
                "FROM products p "
                "LEFT JOIN brands b ON b.id=p.brand_id "
                "LEFT JOIN divisions d ON d.id=p.division_id "
@@ -552,6 +555,30 @@ def _get_product(conn, pid: int) -> dict:
     c = conn.cursor()
     c.execute("SELECT * FROM products WHERE id=%s", (pid,))
     return fetchone_dict(c)
+
+
+def _product_has_usage(conn, pid: int) -> bool:
+    """True if a product is referenced by a campaign link or a POB (invoice/
+    verification/gratification/reporting history all hangs off pob_activities,
+    so these two tables are the complete set of usage signals)."""
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM campaign_products WHERE product_id=%s LIMIT 1", (pid,))
+    if c.fetchone():
+        return True
+    c.execute("SELECT 1 FROM pob_activities WHERE product_id=%s LIMIT 1", (pid,))
+    return bool(c.fetchone())
+
+
+def _product_active_campaign(conn, pid: int):
+    """The first ACTIVE campaign this product is linked to, if any."""
+    c = conn.cursor()
+    c.execute(
+        "SELECT cmp.id, cmp.name FROM campaign_products cp "
+        "JOIN campaigns cmp ON cmp.id=cp.campaign_id "
+        "WHERE cp.product_id=%s AND cmp.status='active' LIMIT 1",
+        (pid,))
+    row = c.fetchone()
+    return {"id": row[0], "name": row[1]} if row else None
 
 
 def _assert_product_unique(conn, name: str, brand_id=None, sku=None, division_id: int = None,
@@ -635,11 +662,33 @@ def update_product(pid: int, body: dict, ctx: TenantContext = Depends(require_pe
         if p.get("brand_id"):
             raise HTTPException(400, "Product must keep its brand; you can change the brand but not remove it")
         bid = None
-    if bid is not None:
+    if bid is not None and int(bid) != p.get("brand_id"):
+        # Changing the brand of a product with campaign/POB history would make
+        # historical campaign and POB reporting ambiguous -- block it outright.
+        if _product_has_usage(ctx.conn, pid):
+            raise HTTPException(409, "Product's brand cannot be changed: it has campaign or POB usage history.")
+        _assert_brand_for_div(ctx.conn, int(bid), div)
+    elif bid is not None:
         _assert_brand_for_div(ctx.conn, int(bid), div)
     _assert_product_unique(ctx.conn, name=new_name,
                            brand_id=int(bid) if bid is not None else p.get("brand_id"),
                            sku=body.get("sku") or p.get("sku") or None, division_id=div, exclude_id=pid)
+
+    price_fields = ("ptr", "pts", "mrp")
+    price_changed = any(
+        f in body and body[f] is not None and float(body[f]) != float(p.get(f) or 0)
+        for f in price_fields
+    )
+    if price_changed and not body.get("confirm_price_change"):
+        active_campaign = _product_active_campaign(ctx.conn, pid)
+        if active_campaign:
+            raise HTTPException(
+                409,
+                f"Product pricing is used by the active campaign '{active_campaign['name']}'. "
+                "Pass confirm_price_change=true to update it explicitly, or adjust pricing after "
+                "the campaign ends.",
+            )
+
     campaign_service._update_product(ctx.conn, pid, body, actor_id=_actor(ctx)["id"])
     ctx.conn.commit()
     log_action(ctx.conn, _actor(ctx)["id"], "product.update", "product", pid,
@@ -655,18 +704,14 @@ def delete_product(pid: int, ctx: TenantContext = Depends(require_permission("pr
     div = division_scope(ctx.conn, ctx)
     if div:
         _assert_product_in_div(ctx.conn, p, div)
-    c = ctx.conn.cursor()
     # Referenced products (by campaigns, campaign_products, POBs, invoices,
     # verification or derived gratification/reporting rows) cannot be
     # hard-deleted -- the flow deactivates instead. campaign_products and
     # pob_activities are the direct linkage tables; everything else (invoices,
     # verification, gratifications, reports) hangs off the POB row.
-    c.execute("SELECT 1 FROM campaign_products WHERE product_id=%s LIMIT 1", (pid,))
-    if c.fetchone():
+    if _product_has_usage(ctx.conn, pid):
         raise HTTPException(409, "Product has historical/campaign usage and cannot be deleted. Deactivate it instead.")
-    c.execute("SELECT id FROM pob_activities WHERE product_id=%s LIMIT 1", (pid,))
-    if c.fetchone():
-        raise HTTPException(409, "Product has historical/campaign usage and cannot be deleted. Deactivate it instead.")
+    c = ctx.conn.cursor()
     c.execute("DELETE FROM products WHERE id=%s", (pid,))
     ctx.conn.commit()
     log_action(ctx.conn, _actor(ctx)["id"], "product.delete", "product", pid,

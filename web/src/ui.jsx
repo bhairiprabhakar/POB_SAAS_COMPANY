@@ -387,6 +387,7 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
     { to: '/app/gifts', label: 'Gifts', icon: <Icon name="gift" />, perm: 'gratification.manage', group: 'Master Data', tone: 'indigo' },
 
     { to: '/app/campaigns', label: 'All Campaigns', icon: <Icon name="megaphone" />, perm: 'campaign.view', group: 'Campaigns', tone: 'teal' },
+    { to: '/app/masters/campaigns', label: 'Campaign Tracking', icon: <Icon name="layers" />, perm: 'campaign.view', group: 'Campaigns', tone: 'indigo' },
 
     { to: '/app/pob', label: 'All POB', icon: <Icon name="layers" />, perm: 'pob.view', group: 'POB', tone: 'blue' },
 
@@ -423,9 +424,9 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
           ? <img src={companyLogo} className="brand-logo" alt={`${company.name} logo`}
               onError={(e) => { e.currentTarget.style.display = 'none'; }} />
           : <>
-              <span className="brand-mark">{(company.name || 'C').charAt(0)}</span>
+              <span className="brand-mark">{(company.name || 'F').charAt(0)}</span>
               <div>
-                <strong>{company.name || 'CampaignOS'}</strong>
+                <strong>{company.name || 'FieldNet'}</strong>
                 <small>{company.code || ''}</small>
               </div>
             </>}
@@ -527,7 +528,7 @@ function SuperSidebar({ onNavigate, open, collapsed, onToggleCollapse }) {
   ];
   const role = saRole();
   const visible = items.filter((i) => !i.roles || i.roles.includes(role));
-  const [brand, setBrand] = useState({ platform_name: 'CampaignOS', has_logo: false });
+  const [brand, setBrand] = useState({ platform_name: 'FieldNet', has_logo: false });
   const [queue, setQueue] = useState(null);
   useEffect(() => {
     api('/api/v1/auth/platform-branding').then(setBrand).catch(() => {});
@@ -560,9 +561,12 @@ function SuperSidebar({ onNavigate, open, collapsed, onToggleCollapse }) {
     <aside className={`sidebar${open ? ' open' : ''}${collapsed ? ' collapsed' : ''}`}>
       <div className="brand">
         {brand.has_logo
-          ? <img src="/api/v1/auth/platform-logo" alt="" className="brand-logo" />
-          : <span className="brand-mark">C</span>}
-        <div><strong>{brand.platform_name}</strong><small>Platform Console</small></div>
+          ? <img src="/api/v1/auth/platform-logo" alt={brand.platform_name} className="brand-logo" />
+          : <span className="brand-mark">{(brand.platform_name || 'F').charAt(0)}</span>}
+        {/* The logo already carries the brand name -- avoid repeating it
+            next to the image (matches the tenant sidebar's pattern). */}
+        <div><strong>{brand.has_logo ? 'Platform Console' : brand.platform_name}</strong>
+          {!brand.has_logo && <small>Platform Console</small>}</div>
         <SideCollapse collapsed={collapsed} onToggle={onToggleCollapse} />
       </div>
       <SideNav items={visible} badges={badges} onNavigate={onNavigate} />

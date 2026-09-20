@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { api, fmtDateTime, fmtMoney, getSession } from '../../api';
 import QrScanner from '../../QrScanner';
 import {
@@ -16,8 +16,9 @@ export default function Gratification() {
   const qs = params.toString();
   const { data, loading, error, run } = useAsync(() =>
     api(`/api/v1/gratification${qs ? `?${qs}` : ''}`), [qs]);
+  const typesQ = useAsync(() => api('/api/v1/gratification/types'));
 
-  const types = useMemo(() => new Set((data?.items || []).map((g) => g.type_code)), [data]);
+  const types = typesQ.data?.items || [];
 
   const cols = [
     { key: 'id', label: 'ID', render: (r) => <strong>#{r.id}</strong> },
@@ -40,7 +41,9 @@ export default function Gratification() {
         <div className="inline-filters">
           <select className="input" value={type} onChange={(e) => setType(e.target.value)}>
             <option value="">All types</option>
-            {[...types].map((t) => <option key={t} value={t}>{t}</option>)}
+            {types.filter((t) => t.active !== false).map((t) => (
+              <option key={t.code} value={t.code}>{t.name}</option>
+            ))}
           </select>
           <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">All statuses</option>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import { TextInput } from '../ui';
 
 export default function ChangePassword() {
   const nav = useNavigate();
@@ -51,7 +52,7 @@ export default function ChangePassword() {
       <div className="auth-page">
         <div className="auth-card">
           <div className="auth-brand">
-            <span className="brand-mark lg">C</span>
+            <span className="brand-mark lg">F</span>
             <h1>Set a new password</h1>
           </div>
           <div className="error-box">
@@ -68,7 +69,7 @@ export default function ChangePassword() {
     <div className="auth-page">
       <form className="auth-card" onSubmit={submit}>
         <div className="auth-brand">
-          <span className="brand-mark lg">C</span>
+          <span className="brand-mark lg">F</span>
           <h1>Set a new password</h1>
           <p className="muted">
             You are signed in with a temporary password for <strong>{username}</strong>.

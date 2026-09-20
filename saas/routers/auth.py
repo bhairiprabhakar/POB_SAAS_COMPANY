@@ -402,7 +402,7 @@ def tenant_login(body: dict, request: Request):
         # Division code is not asked on the login screen. When the username is
         # unique across the platform we resolve its single division; ambiguous
         # usernames must use their division's own sign-in link.
-        from . import user_index
+        from .. import user_index
         matches = user_index.lookup_divisions_by_username(username)
         if len(matches) == 1:
             division = matches[0]

@@ -388,8 +388,14 @@ a.user-chip:hover { background: var(--bg-3); text-decoration: none; }
   margin-top: 1px;
 }
 .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 16px; }
-.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
-.stats-grid.compact { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+/* Cards pack from the left at a natural max width instead of stretching to
+   fill the row -- a 2-3 tile KPI strip on a wide screen shouldn't blow each
+   tile up to show one number in a mostly-empty box. */
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 240px)); justify-content: start; gap: 12px; margin-bottom: 18px; }
+.stats-grid.compact { grid-template-columns: repeat(auto-fill, minmax(150px, 190px)); justify-content: start; }
+@media (max-width: 640px) {
+  .stats-grid, .stats-grid.compact { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); justify-content: stretch; }
+}
 .stat-card {
   --t: var(--blue); --tint: var(--blue-tint);
   display: flex; gap: 12px; align-items: center;
@@ -469,6 +475,7 @@ a.user-chip:hover { background: var(--bg-3); text-decoration: none; }
   background: var(--surface-alt); white-space: nowrap;
 }
 .data-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.data-table tbody tr:nth-child(even) { background: var(--surface-alt); }
 .data-table tbody tr:hover { background: var(--bg-3); }
 .data-table tbody tr.clickable { cursor: pointer; }
 .data-table tr.row-current td { background: var(--primary-tint); }

@@ -19,7 +19,7 @@ function AssetPreview({ rel, className, alt }) {
 // `platform` masters are set up by the company owner from the platform console;
 // `tenant` items are division-owned data (field teams / chemist network).
 const CONFIG_LINKS = {
-  hierarchy: null, employees: '/app/user-management', brands: '/app/brands',
+  hierarchy: null, employees: '/app/user-management', brands: '/app/catalog?tab=brands',
   chemists: '/app/chemists', regions: '/app/user-management', states: '/app/chemists',
   gifts: null,
 };
@@ -943,6 +943,7 @@ function ProductBuilder({ base, products, setProducts, brands, divBrands, single
   const addQuick = async (e) => {
     e.preventDefault();
     if (!(n.name || '').trim()) { toast('Product name is required', 'error'); return; }
+    if (!n.brand_id) { toast('Brand is required', 'error'); return; }
     setBusy(true);
     try {
       const r = await api(`${base}/products`, {
@@ -994,7 +995,7 @@ function ProductBuilder({ base, products, setProducts, brands, divBrands, single
         {quick && (
           <form className="prod-picker-quick" onSubmit={addQuick}>
             <select className="input" value={n.brand_id || ''} onChange={(e) => setN((p) => ({ ...p, brand_id: e.target.value }))}>
-              <option value="">No brand</option>
+              <option value="">Select brand…</option>
               {divBrands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
             <input className="input" placeholder="Product name" value={n.name || ''} onChange={(e) => setN((p) => ({ ...p, name: e.target.value }))} />

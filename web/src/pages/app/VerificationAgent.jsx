@@ -92,7 +92,9 @@ function AgentWorkspace({ vid, onBack, onDone }) {
 
   const [rejecting, setRejecting] = useState(false);
   const [reOpening, setReOpening] = useState(false);
+  const [flagging, setFlagging] = useState(false);
   const [reason, setReason] = useState('');
+  const [flagReason, setFlagReason] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState('');
@@ -401,6 +403,7 @@ function AgentWorkspace({ vid, onBack, onDone }) {
                 <button className="btn btn-amber" disabled={busy} onClick={() => act(() => api(`/api/v1/verification/${vid}/duplicate`, {
                   method: 'POST', body: { reason: 'Marked duplicate during verification' },
                 }), 'Marked as duplicate')}>Mark Duplicate</button>
+                <button className="btn btn-amber" disabled={busy} onClick={() => setFlagging(true)}>Needs Review</button>
                 <button className="btn btn-primary" disabled={busy} onClick={() => act(() =>
                   api(`/api/v1/verification/${vid}/approve`, { method: 'POST', body: { note } }),
                   'POB approved — gratification created')}>Approve</button>
@@ -460,6 +463,30 @@ function AgentWorkspace({ vid, onBack, onDone }) {
         <Field label="Reason for re-opening" required>
           <TextArea rows={3} value={reason} onChange={(e) => setReason(e.target.value)}
             placeholder="e.g. Client reported discrepancy, need to re-verify details" />
+        </Field>
+      </Modal>
+
+      {/* Needs Review modal */}
+      <Modal open={flagging} title="Flag for further review" onClose={() => { setFlagging(false); setFlagReason(''); }}
+        footer={<>
+          <button className="btn" onClick={() => { setFlagging(false); setFlagReason(''); }}>Cancel</button>
+          <button className="btn btn-amber" disabled={!flagReason.trim() || busy} onClick={() =>
+            act(() => api(`/api/v1/verification/${vid}/flag_review`, { method: 'POST', body: { reason: flagReason } }),
+            'Flagged for further review').then(() => { setFlagging(false); setFlagReason(''); })}>
+            {busy ? 'Flagging…' : 'Flag for review'}
+          </button>
+        </>}>
+        <div style={{ marginBottom: 16 }}>
+          <strong>Flag POB #{d.pob_id} for further review?</strong>
+          <span className="muted" style={{ marginLeft: 8 }}>{d.campaign_name} · {d.chemist_name}{d.shop_name ? ` (${d.shop_name})` : ''}</span>
+        </div>
+        <p style={{ margin: '0 0 12px', fontSize: 13 }}>
+          This keeps the POB <strong>unresolved</strong> in the manual verification queue — no approval,
+          rejection or gratification is created. The MR is notified that their POB needs further review.
+        </p>
+        <Field label="Reason / remark" required>
+          <TextArea rows={3} value={flagReason} onChange={(e) => setFlagReason(e.target.value)}
+            placeholder="e.g. Invoice legible but chemist details need a follow-up call" />
         </Field>
       </Modal>
     </div>

@@ -817,6 +817,11 @@ def delete_campaign(conn, actor: dict, cid: int) -> None:
 # ── Products (division-scoped master catalogue; campaigns link via junction) ─
 
 def _insert_product(conn, p: dict, division_id: int = None, actor_id: int = None) -> int:
+    if not p.get("brand_id"):
+        # Product Master: brand is REQUIRED (mirrors routers/masters.py's
+        # create_product) -- no unbranded products, including from the
+        # campaign builder's inline "new product" quick-add.
+        raise HTTPException(400, "Product must belong to a brand")
     c = conn.cursor()
     c.execute(
         """INSERT INTO products (brand_id, division_id, sku, name, composition, strength, dosage_form,
@@ -886,9 +891,12 @@ def _sync_products(conn, cid: int, products, division_id: int = None, actor_id: 
         if not pid:
             continue
         linked.add(pid)
+        # Existing products are only ever linked with this campaign's own
+        # constraints (min/max POB, scheme eligibility) -- the master row
+        # itself (brand, PTR/PTS/MRP, ...) is edited on the Products page
+        # through routers/masters.py's validated update, never silently
+        # rewritten by a campaign save.
         _link_product(c, cid, pid, p if isinstance(p, dict) else {}, list(existing))
-        if isinstance(p, dict):
-            _update_product(conn, pid, p, actor_id)
     for pid in existing - linked:
         c.execute("DELETE FROM campaign_products WHERE campaign_id=%s AND product_id=%s", (cid, pid))
 

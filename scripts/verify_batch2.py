@@ -175,11 +175,12 @@ def part_a(tenant_conn, platform_conn):
           f"nsm={_stmt(nsm)} sm={_stmt(sm)} rsm={_stmt(rsm)}")
     check("mr/psr: upload + view + credits",
           {"statement.upload", "statement.view", "statement.credits"} <= mr)
-    check("verifier/verification_agent: verify + view, no upload",
-          {"statement.verify", "statement.view"} <= verifier
-          and "statement.upload" not in verifier
-          and {"statement.verify", "statement.view"} <= vagent
-          and "statement.upload" not in vagent)
+    # FINAL architecture: verifier/verification_agent are POB-verification-only
+    # roles and no longer carry any statement/credits permissions (see
+    # tenant_schema.py's "Verification agents are POB-only" migration patch).
+    check("verifier/verification_agent: no statement.* permissions at all",
+          not _stmt(verifier) and not _stmt(vagent),
+          f"verifier={_stmt(verifier)} vagent={_stmt(vagent)}")
     check("auditor/finance: view + credits only",
           {"statement.view", "statement.credits"} <= auditor
           and "statement.verify" not in auditor

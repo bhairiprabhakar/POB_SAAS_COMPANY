@@ -622,11 +622,9 @@ DEFAULT_ROLES = {
             "notification.view", "visit.view", "visit.manage", "statement.upload",
             "statement.view", "statement.credits"],
     "verifier": ["dashboard.view", "verification.view", "verification.approve", "verification.reject",
-                 "report.view", "notification.view", "pob.view", "statement.view",
-                 "statement.verify", "statement.credits"],
+                 "report.view", "notification.view", "pob.view"],
     "verification_agent": ["dashboard.view", "verification.view", "verification.approve",
-                           "verification.reject", "report.view", "notification.view", "pob.view",
-                           "statement.view", "statement.verify", "statement.credits"],
+                           "verification.reject", "report.view", "notification.view", "pob.view"],
     "auditor": ["dashboard.view", "report.view", "report.export", "audit.view", "verification.view",
                 "notification.view", "apikey.view", "webhook.view", "statement.view",
                 "statement.credits"],
@@ -2008,4 +2006,15 @@ CREATE INDEX IF NOT EXISTS idx_cr_requester ON credit_requests (requested_by);
 -- cache only augments it, matching the legacy _TTLDict behaviour).
 ALTER TABLE uploads ADD COLUMN IF NOT EXISTS progress_pct INTEGER;
 ALTER TABLE uploads ADD COLUMN IF NOT EXISTS progress_stage TEXT;
+
+-- ── Verification agents are POB-only: drop statement.* grants (3.16.0) ──────
+-- verifier/verification_agent were previously seeded with statement.view/
+-- statement.verify/statement.credits (see the "Verification agents /
+-- verifiers" block above) so they could also work the statement/credits
+-- portal. The FINAL architecture scopes them to manual POB verification
+-- only; DEFAULT_ROLES no longer grants these, and existing tenants need this
+-- explicit revoke since patches only ever add rows.
+DELETE FROM role_permissions
+WHERE permission_code IN ('statement.view', 'statement.verify', 'statement.credits')
+  AND role_id IN (SELECT id FROM roles WHERE name IN ('verifier', 'verification_agent'));
 """

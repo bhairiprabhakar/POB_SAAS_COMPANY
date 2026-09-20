@@ -439,6 +439,93 @@ def main():
     check("reward points paid -> completed", ok(r) and j(r).get("status") == "completed",
           f"{r.status_code} {j(r)}")
 
+    section("12. Brand-change lock for used products")
+    r = client.post("/api/v1/brands", headers=T1, json={"name": f"Align Brand 2 {UUID}", "code": f"AB2{UUID}"})
+    check("create second brand", ok(r), f"{r.status_code} {j(r)}")
+    B2 = j(r).get("id")
+
+    # P1 already has POB usage from section 8/11 (product_id=P1) -- use a
+    # freshly created, never-referenced product for the "allowed" case.
+    r = client.post("/api/v1/products", headers=T1, json={
+        "name": f"Align Product C {UUID}", "brand_id": B1, "sku": "PC-1", "ptr": 5, "pts": 4, "mrp": 6,
+    })
+    check("create unused product", ok(r), f"{r.status_code} {j(r)}")
+    P3 = j(r).get("id")
+
+    r = client.put(f"/api/v1/products/{P2}", headers=T1, json={"brand_id": B2})
+    check("brand change blocked on campaign-linked product -> 409",
+          r.status_code == 409 and "brand" in j(r).get("detail", "").lower(), f"{r.status_code} {j(r)}")
+    r = client.put(f"/api/v1/products/{P3}", headers=T1, json={"brand_id": B2})
+    check("brand change allowed on unused product", ok(r), f"{r.status_code} {j(r)}")
+    r = client.put(f"/api/v1/products/{P3}", headers=T1, json={"brand_id": B1})
+    check("brand change back (still unused)", ok(r), f"{r.status_code} {j(r)}")
+
+    section("13. Product pricing safety (active-campaign guard)")
+    r = client.put(f"/api/v1/products/{P2}", headers=T1, json={"ptr": 999})
+    check("pricing change blocked on active-campaign product -> 409",
+          r.status_code == 409 and "active campaign" in j(r).get("detail", "").lower(), f"{r.status_code} {j(r)}")
+    r = client.put(f"/api/v1/products/{P2}", headers=T1, json={"ptr": 999, "confirm_price_change": True})
+    check("pricing change allowed with explicit confirm_price_change", ok(r), f"{r.status_code} {j(r)}")
+
+    section("14. Campaign builder cannot create an unbranded product")
+    r = client.put(f"/api/v1/campaigns/{C1}", headers=T1, json={
+        "products": [{"name": f"Unbranded Quick {UUID}", "ptr": 5}],
+    })
+    check("campaign save rejects an inline product with no brand -> 400",
+          r.status_code == 400 and "brand" in j(r).get("detail", "").lower(), f"{r.status_code} {j(r)}")
+
+    section("15. Verification agent -- explicit Needs Review")
+    conn = provision_pool_conn(tenant_db1)
+    cur = conn.cursor()
+    cur.execute("""INSERT INTO pob_activities (user_id, campaign_id, product_id, chemist_id,
+                   quantity, ptr, mrp, invoice_amount, pob_amount, status)
+                   VALUES (%s,%s,%s,%s,10,20,25,250,250,'pending_verification') RETURNING id""",
+                (MR_ID, C1, P1, CHEM_ID))
+    POB4 = cur.fetchone()[0]
+    cur.execute("INSERT INTO pob_verifications (pob_id, status) VALUES (%s,'pending') RETURNING id", (POB4,))
+    VID4 = cur.fetchone()[0]
+    conn.commit()
+    conn.close()
+
+    r = client.post(f"/api/v1/verification/{VID4}/flag_review", headers=TV, json={})
+    check("flag_review requires a reason -> 400", r.status_code == 400, f"{r.status_code} {j(r)}")
+    r = client.post(f"/api/v1/verification/{VID4}/flag_review", headers=TV,
+                    json={"reason": "Invoice legible but needs a follow-up call"})
+    check("verifier can flag a pending item for review", ok(r), f"{r.status_code} {j(r)}")
+    check("flag_review response reports pending/pending_agent",
+          j(r).get("status") == "pending" and j(r).get("pipeline_status") == "pending_agent", j(r))
+
+    conn = provision_pool_conn(tenant_db1)
+    cur = conn.cursor()
+    cur.execute("SELECT status, pipeline_status, reason FROM pob_verifications WHERE id=%s", (VID4,))
+    vrow = cur.fetchone()
+    check("verification stays pending with pipeline_status=pending_agent",
+          vrow[0] == "pending" and vrow[1] == "pending_agent", vrow)
+    cur.execute("SELECT verification_state FROM pob_activities WHERE id=%s", (POB4,))
+    check("POB verification_state -> manual_review", cur.fetchone()[0] == "manual_review")
+    cur.execute("SELECT action FROM verification_history WHERE pob_id=%s ORDER BY id DESC LIMIT 1", (POB4,))
+    check("verification_history records needs_review", cur.fetchone()[0] == "needs_review")
+    cur.execute("SELECT count(*) FROM gratifications WHERE pob_id=%s", (POB4,))
+    check("no gratification created by flag_review", cur.fetchone()[0] == 0)
+    conn.close()
+
+    r = client.get("/api/v1/verification/queue", headers=TV, params={"status": "pending"})
+    check("flagged POB still appears in the pending queue",
+          ok(r) and any(item.get("verification_id") == VID4 for item in j(r).get("items", [])),
+          f"{r.status_code} {j(r)}")
+
+    section("16. Verification agent permissions are POB-only")
+    r = client.get("/api/v1/auth/me", headers=TV)
+    vperms = (j(r).get("permissions") or []) if ok(r) else []
+    for forbidden in ("statement.verify", "statement.credits", "statement.view",
+                      "verification.manage", "product.manage", "campaign.manage",
+                      "user.manage", "gratification.manage", "gratification.approve",
+                      "gratification.pay", "brand.manage", "chemist.classification.manage"):
+        check(f"verifier lacks {forbidden}", forbidden not in vperms, vperms)
+    for required in ("dashboard.view", "verification.view", "verification.approve",
+                     "verification.reject", "pob.view", "report.view", "notification.view"):
+        check(f"verifier has {required}", required in vperms, vperms)
+
     return finish(keep)
 
 

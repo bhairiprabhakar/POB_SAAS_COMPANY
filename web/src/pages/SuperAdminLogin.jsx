@@ -9,7 +9,7 @@ export default function SuperAdminLogin() {
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [brand, setBrand] = useState({ platform_name: 'CampaignOS', has_logo: false });
+  const [brand, setBrand] = useState({ platform_name: 'FieldNet', has_logo: false });
 
   useEffect(() => {
     api('/api/v1/auth/platform-branding').then(setBrand).catch(() => {});

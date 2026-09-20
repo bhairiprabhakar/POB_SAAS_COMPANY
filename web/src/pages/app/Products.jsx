@@ -106,29 +106,63 @@ export default function Products() {
     setEditing((p) => ({ ...p, [k]: v === '' ? null : v }));
   };
 
+  const saveProduct = (id, payload) => (id
+    ? api(`/api/v1/products/${id}`, { method: 'PUT', body: payload })
+    : api('/api/v1/products', { method: 'POST', body: payload }));
+
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
+    const payload = { ...editing };
+    delete payload.campaign_id;
+    if (!editing.id && !payload.brand_id) {
+      toast('Brand is required', 'error');
+      setBusy(false);
+      return;
+    }
     try {
-      const payload = { ...editing };
-      delete payload.campaign_id;
-      if (!editing.id && !payload.brand_id) {
-        toast('Brand is required', 'error');
-        setBusy(false);
-        return;
+      try {
+        await saveProduct(editing.id, payload);
+      } catch (err) {
+        // Pricing on a product used by an ACTIVE campaign is blocked unless
+        // the admin explicitly confirms the commercial change (backend
+        // guard in routers/masters.py::update_product).
+        if (editing.id && err.status === 409 && /active campaign/i.test(err.message)
+            && window.confirm(`${err.message}\n\nUpdate the pricing anyway?`)) {
+          await saveProduct(editing.id, { ...payload, confirm_price_change: true });
+        } else {
+          throw err;
+        }
       }
-      if (editing.id) await api(`/api/v1/products/${editing.id}`, { method: 'PUT', body: payload });
-      else await api('/api/v1/products', { method: 'POST', body: payload });
       toast(editing.id ? 'Product updated' : 'Product created', 'success');
       setEditing(null);
       run();
     } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
   };
 
+  const toggleActive = async (row) => {
+    const next = row.status === 'active' ? 'inactive' : 'active';
+    try {
+      await api(`/api/v1/products/${row.id}`, { method: 'PUT', body: { status: next } });
+      toast(next === 'active' ? 'Activated' : 'Deactivated', 'success');
+      run();
+    } catch (err) { toast(err.message, 'error'); }
+  };
+
   const del = async (row) => {
     if (!window.confirm(`Delete "${row.name}"?`)) return;
-    try { await api(`/api/v1/products/${row.id}`, { method: 'DELETE' }); toast('Deleted', 'success'); run(); }
-    catch (err) { toast(err.message, 'error'); }
+    try {
+      await api(`/api/v1/products/${row.id}`, { method: 'DELETE' });
+      toast('Deleted', 'success');
+      run();
+    } catch (err) {
+      if (err.status === 409) {
+        toast('Product is in use — opening it for deactivation instead of delete', 'error');
+        setEditing({ ...row, status: 'inactive' });
+      } else {
+        toast(err.message, 'error');
+      }
+    }
   };
 
   const brandOpts = (brands.data?.items || []).map((b) => ({ value: b.id, label: b.name }));
@@ -160,7 +194,11 @@ export default function Products() {
     { key: '_a', label: '', thClass: 'actions-th', render: (r) => (
       <span className="row-actions">
         <button className="btn-link" onClick={() => setEditing({ ...r })}>Edit</button>
-        <button className="btn-link danger" onClick={() => del(r)}>Delete</button>
+        {r.has_usage
+          ? <button className="btn-link" title="In use — deactivate instead of deleting" onClick={() => toggleActive(r)}>
+              {r.status === 'active' ? 'Deactivate' : 'Activate'}
+            </button>
+          : <button className="btn-link danger" onClick={() => del(r)}>Delete</button>}
       </span>
     ) },
   ];
@@ -206,9 +244,11 @@ export default function Products() {
           <form id="product-form" onSubmit={submit}>
             <h4 className="section-title">Product</h4>
             <div className="grid-2">
-              <Field label="Brand" required hint="Required — a product belongs to a brand in your division">
+              <Field label="Brand" required hint={editing.id && editing.has_usage
+                ? 'Locked — this product has campaign/POB history, so its brand cannot change'
+                : 'Required — a product belongs to a brand in your division'}>
                 <Select value={editing.brand_id || ''} onChange={set('brand_id')} placeholder="Select brand…"
-                  options={brandOpts} />
+                  options={brandOpts} disabled={editing.id && editing.has_usage} />
               </Field>
               <Field label="Product name" required><TextInput value={editing.name || ''} onChange={set('name')} required placeholder="e.g. Allegra 120mg Strip" /></Field>
               <Field label="SKU"><TextInput value={editing.sku || ''} onChange={set('sku')} placeholder="e.g. ALEG-120-10" /></Field>
@@ -221,6 +261,12 @@ export default function Products() {
               <Field label="Composition"><TextInput value={editing.composition || ''} onChange={set('composition')} placeholder="e.g. Fexofenadine HCl 120 mg" /></Field>
             </div>
             <h4 className="section-title" style={{ marginTop: 18 }}>Commercial</h4>
+            {editing.id && editing.has_usage && (
+              <p className="muted" style={{ margin: '0 0 10px', fontSize: 12 }}>
+                This product has campaign/POB history — if it's linked to an active campaign,
+                changing PTR/PTS/MRP will ask for confirmation before updating the commercial basis.
+              </p>
+            )}
             <div className="grid-2">
               <Field label="PTR (₹)"><TextInput type="number" step="0.01" min="0" value={editing.ptr ?? ''} onChange={setNum('ptr')} /></Field>
               <Field label="PTS (₹)"><TextInput type="number" step="0.01" min="0" value={editing.pts ?? ''} onChange={setNum('pts')} /></Field>
