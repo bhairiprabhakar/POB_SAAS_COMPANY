@@ -370,6 +370,159 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     ip TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ── Statements: document uploads + credits ledger ─────────────────────────
+-- The legacy single-company portal's statement-processing domain, ported to
+-- the per-tenant boundary: the database itself IS the company, so the legacy
+-- company_id columns are dropped. user_id/division_id reference tenant
+-- users/divisions. uploads tracks the OCR lifecycle (processing -> done /
+-- rejected / error) with the two dedup keys (file_hash = exact-bytes L1,
+-- content_fingerprint = same stockist + period L2); manual_verifications
+-- drives the offline Excel review; credits meters how many documents the
+-- tenant may process.
+CREATE TABLE IF NOT EXISTS uploads (
+    id SERIAL PRIMARY KEY,
+    division_id INTEGER REFERENCES divisions(id),
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    original_filename TEXT,
+    stored_filename TEXT,
+    file_type TEXT,
+    upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status TEXT DEFAULT 'pending',            -- pending | processing | done | rejected | error
+    error_msg TEXT,
+    file_hash TEXT,                            -- L1 dedup: SHA-256 of the file bytes
+    content_fingerprint TEXT,                  -- L2 dedup: sha256(stockist||from||to)
+    rejected_by INTEGER,
+    rejected_at TEXT,
+    rejection_reason TEXT,
+    rejection_type TEXT,
+    verification_status TEXT DEFAULT 'ocr_done'
+);
+CREATE INDEX IF NOT EXISTS idx_uploads_user ON uploads (user_id);
+CREATE INDEX IF NOT EXISTS idx_uploads_division_date ON uploads (division_id, upload_date);
+CREATE INDEX IF NOT EXISTS idx_uploads_status ON uploads (status);
+CREATE INDEX IF NOT EXISTS idx_uploads_hash ON uploads (file_hash);
+CREATE INDEX IF NOT EXISTS idx_uploads_fingerprint ON uploads (content_fingerprint);
+
+CREATE TABLE IF NOT EXISTS extractions (
+    id SERIAL PRIMARY KEY,
+    upload_id INTEGER UNIQUE NOT NULL REFERENCES uploads(id),
+    stockist_name TEXT,
+    stockist_gst TEXT,
+    stockist_address TEXT,
+    bill_number TEXT,
+    bill_date TEXT,
+    statement_from_date TEXT,
+    statement_to_date TEXT,
+    total_amount REAL DEFAULT 0,
+    total_quantity INTEGER DEFAULT 0,
+    discount_percent REAL DEFAULT 0,
+    discount_amount REAL DEFAULT 0,
+    net_sale REAL DEFAULT 0,
+    sgst REAL DEFAULT 0,
+    cgst REAL DEFAULT 0,
+    invoice_net REAL DEFAULT 0,
+    doc_type TEXT DEFAULT 'STATEMENT',
+    raw_json TEXT,
+    extracted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_extractions_stockist ON extractions (stockist_name);
+CREATE INDEX IF NOT EXISTS idx_extractions_period ON extractions (statement_from_date, statement_to_date);
+
+CREATE TABLE IF NOT EXISTS parties (
+    id SERIAL PRIMARY KEY,
+    extraction_id INTEGER NOT NULL REFERENCES extractions(id),
+    name TEXT,
+    type TEXT,
+    area TEXT,
+    dl_number TEXT,
+    gst_number TEXT,
+    total_quantity INTEGER DEFAULT 0,
+    total_amount REAL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_parties_extraction ON parties (extraction_id);
+
+CREATE TABLE IF NOT EXISTS items (
+    id SERIAL PRIMARY KEY,
+    party_id INTEGER NOT NULL REFERENCES parties(id),
+    brand TEXT,
+    mfg TEXT,
+    pack TEXT,
+    batch_no TEXT,
+    expiry TEXT,
+    hsn_code TEXT,
+    quantity INTEGER DEFAULT 0,
+    mrp REAL DEFAULT 0,
+    unit_rate REAL DEFAULT 0,
+    tax_type TEXT,
+    discount_percent REAL DEFAULT 0,
+    final_amount REAL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_items_party ON items (party_id);
+
+CREATE TABLE IF NOT EXISTS manual_verifications (
+    id SERIAL PRIMARY KEY,
+    upload_id INTEGER NOT NULL REFERENCES uploads(id),
+    division_id INTEGER REFERENCES divisions(id),
+    status TEXT DEFAULT 'pending',            -- pending | in_progress | verified | rejected | needs_revision
+    assigned_to INTEGER REFERENCES users(id), -- verification agent (tenant user)
+    verified_by INTEGER REFERENCES users(id),
+    verified_at TEXT,
+    notes TEXT,
+    excel_downloaded_at TEXT,
+    excel_uploaded_at TEXT,
+    corrections_json TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_mv_upload ON manual_verifications (upload_id);
+CREATE INDEX IF NOT EXISTS idx_mv_status ON manual_verifications (status);
+CREATE INDEX IF NOT EXISTS idx_mv_agent_status ON manual_verifications (assigned_to, status);
+
+-- Singleton credit wallet per tenant -- the database IS the company, so the
+-- legacy company_id UNIQUE key collapses to a single enforced row (id=1).
+CREATE TABLE IF NOT EXISTS credits (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    total_credits INTEGER DEFAULT 100,
+    used_credits INTEGER DEFAULT 0,
+    plan TEXT DEFAULT 'demo',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+INSERT INTO credits (id, total_credits, used_credits, plan) VALUES (1, 100, 0, 'demo')
+    ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS credit_transactions (
+    id SERIAL PRIMARY KEY,
+    division_id INTEGER REFERENCES divisions(id),
+    user_id INTEGER REFERENCES users(id),
+    operation_type TEXT NOT NULL,             -- extraction | request_approved | adjustment ...
+    credits_used INTEGER NOT NULL DEFAULT 1,  -- units moved by this operation
+    reference_id INTEGER,                     -- upload id / credit request id
+    detail TEXT,
+    balance_after INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_ct_created ON credit_transactions (created_at);
+CREATE INDEX IF NOT EXISTS idx_ct_reference ON credit_transactions (reference_id);
+
+CREATE TABLE IF NOT EXISTS credit_requests (
+    id SERIAL PRIMARY KEY,
+    requested_by INTEGER NOT NULL REFERENCES users(id),
+    credits_requested INTEGER NOT NULL,
+    message TEXT,
+    status TEXT DEFAULT 'pending',            -- pending | approved | rejected
+    reviewed_by INTEGER REFERENCES users(id),
+    reviewed_at TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_cr_status ON credit_requests (status);
+CREATE INDEX IF NOT EXISTS idx_cr_requester ON credit_requests (requested_by);
+
+-- Upload progress columns: the extraction pipeline runs on a worker thread and
+-- the client polls /statements/uploads/<id>/progress -- persisting pct/stage
+-- makes the poll multi-worker safe (DB is the source of truth; the in-memory
+-- cache only augments it, matching the legacy _TTLDict behaviour).
+ALTER TABLE uploads ADD COLUMN IF NOT EXISTS progress_pct INTEGER;
+ALTER TABLE uploads ADD COLUMN IF NOT EXISTS progress_stage TEXT;
 """
 
 # ── Seed data ───────────────────────────────────────────────────────────────
@@ -399,6 +552,11 @@ PERMISSION_CATALOG = [
     ("pob",          [("pob.submit", "Submit POB activities"), ("pob.view", "View POB activities"), ("pob.manage", "Manage POB activities")]),
     ("verification", [("verification.view", "View verification queue"), ("verification.approve", "Approve POBs"),
                       ("verification.reject", "Reject POBs"), ("verification.manage", "Manage verification")]),
+    ("statement",    [("statement.upload", "Upload & extract statement documents"),
+                      ("statement.view", "View documents & extractions"),
+                      ("statement.manage", "Administer uploaded documents"),
+                      ("statement.verify", "Verify / edit extraction data"),
+                      ("statement.credits", "View wallet & request credits")]),
     ("gratification",[("gratification.view", "View gratifications"), ("gratification.manage", "Manage gratifications"),
                       ("gratification.dispatch", "Dispatch physical gifts"), ("gratification.approve", "Approve cashback"),
                       ("gratification.pay", "Mark payments paid")]),
@@ -434,38 +592,49 @@ DEFAULT_ROLES = {
     "ho":  ["dashboard.view", "user.view", "hierarchy.view", "campaign.view", "product.view",
             "brand.view", "chemist.view", "chemist.manage", "pob.view", "verification.view",
             "verification.approve", "verification.reject", "report.view", "report.export",
-            "notification.view"],
+            "notification.view", "statement.view", "statement.upload", "statement.verify",
+            "statement.credits"],
     "nsm": ["dashboard.view", "user.view", "hierarchy.view", "campaign.view", "product.view",
             "brand.view", "chemist.view", "chemist.manage", "pob.view", "report.view",
-            "report.export", "notification.view"],
+            "report.export", "notification.view", "statement.view", "statement.upload",
+            "statement.credits"],
     "zsm": ["dashboard.view", "user.view", "hierarchy.view", "campaign.view", "product.view",
             "brand.view", "chemist.view", "chemist.manage", "pob.view", "report.view",
-            "report.export", "notification.view"],
+            "report.export", "notification.view", "statement.view", "statement.upload",
+            "statement.credits"],
     "sm":  ["dashboard.view", "user.view", "hierarchy.view", "campaign.view", "product.view",
             "brand.view", "chemist.view", "chemist.manage", "pob.view", "report.view",
-            "report.export", "notification.view"],
+            "report.export", "notification.view", "statement.view", "statement.upload",
+            "statement.credits"],
     "rsm": ["dashboard.view", "hierarchy.view", "campaign.view", "product.view", "brand.view",
             "chemist.view", "chemist.manage", "pob.view", "report.view", "report.export",
-            "notification.view"],
+            "notification.view", "statement.view", "statement.upload", "statement.credits"],
     "asm": ["dashboard.view", "hierarchy.view", "campaign.view", "product.view",
             "brand.view", "chemist.view", "chemist.manage", "pob.view", "verification.view",
-            "verification.approve", "report.view", "notification.view"],
+            "verification.approve", "report.view", "notification.view", "statement.view",
+            "statement.upload", "statement.verify", "statement.credits"],
     "mr":  ["dashboard.view", "pob.submit", "campaign.view", "product.view", "chemist.view",
             "chemist.manage", "chemist.classification.view", "gratification.view",
-            "notification.view", "visit.view", "visit.manage"],
+            "notification.view", "visit.view", "visit.manage", "statement.upload",
+            "statement.view", "statement.credits"],
     "psr": ["dashboard.view", "pob.submit", "campaign.view", "product.view", "chemist.view",
             "chemist.manage", "chemist.classification.view", "gratification.view",
-            "notification.view", "visit.view", "visit.manage"],
+            "notification.view", "visit.view", "visit.manage", "statement.upload",
+            "statement.view", "statement.credits"],
     "verifier": ["dashboard.view", "verification.view", "verification.approve", "verification.reject",
-                 "report.view", "notification.view", "pob.view"],
+                 "report.view", "notification.view", "pob.view", "statement.view",
+                 "statement.verify", "statement.credits"],
     "verification_agent": ["dashboard.view", "verification.view", "verification.approve",
-                           "verification.reject", "report.view", "notification.view", "pob.view"],
+                           "verification.reject", "report.view", "notification.view", "pob.view",
+                           "statement.view", "statement.verify", "statement.credits"],
     "auditor": ["dashboard.view", "report.view", "report.export", "audit.view", "verification.view",
-                "notification.view", "apikey.view", "webhook.view"],
+                "notification.view", "apikey.view", "webhook.view", "statement.view",
+                "statement.credits"],
     "finance": ["dashboard.view", "gratification.view", "gratification.approve", "gratification.pay",
                 "payout.view", "payout.run", "payout.reconcile", "inventory.view",
-                "report.view", "report.export", "notification.view"],
-    "distributor": ["dashboard.view", "gratification.view", "notification.view"],
+                "report.view", "report.export", "notification.view", "statement.view",
+                "statement.credits"],
+    "distributor": ["dashboard.view", "gratification.view", "notification.view", "statement.view"],
 }
 
 # Roles whose users submit / upload field data (see nav bar visibility).
@@ -1597,4 +1766,214 @@ CREATE INDEX IF NOT EXISTS idx_chemists_registered_by ON chemists (registered_by
 DELETE FROM role_permissions
 WHERE role_id IN (SELECT id FROM roles WHERE name = 'division_admin')
 AND permission_code IN ('chemist.manage','chemist.classification.manage');
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Phase 11: Statement uploads + tenant credit ledger (schema v3.14.0)
+
+-- ── Phase 12: statement-domain permissions (schema v3.15.0) ─────────────────
+-- Statement module permission codes (mirrors seed_tenant / PERMISSION_CATALOG)
+-- plus role wiring for the roles that historically used the single-company
+-- document portal. Idempotent (INSERT ... ON CONFLICT DO NOTHING).
+INSERT INTO permissions (code, label, module) VALUES
+    ('statement.upload',  'Upload & extract statement documents', 'statement'),
+    ('statement.view',    'View documents & extractions',         'statement'),
+    ('statement.manage',  'Administer uploaded documents',        'statement'),
+    ('statement.verify',  'Verify / edit extraction data',        'statement'),
+    ('statement.credits', 'View wallet & request credits',        'statement')
+ON CONFLICT (code) DO NOTHING;
+
+-- HO + ASM can upload and verify (legacy: full portal + verification.approve)
+INSERT INTO role_permissions (role_id, permission_code)
+SELECT r.id, p.code FROM roles r, permissions p
+WHERE r.name IN ('ho','asm')
+  AND p.code IN ('statement.view','statement.upload','statement.verify','statement.credits')
+ON CONFLICT DO NOTHING;
+
+-- Sales managers: upload + view + request credits
+INSERT INTO role_permissions (role_id, permission_code)
+SELECT r.id, p.code FROM roles r, permissions p
+WHERE r.name IN ('nsm','zsm','sm','rsm')
+  AND p.code IN ('statement.view','statement.upload','statement.credits')
+ON CONFLICT DO NOTHING;
+
+-- Field staff (data entry)
+INSERT INTO role_permissions (role_id, permission_code)
+SELECT r.id, p.code FROM roles r, permissions p
+WHERE r.name IN ('mr','psr')
+  AND p.code IN ('statement.upload','statement.view','statement.credits')
+ON CONFLICT DO NOTHING;
+
+-- Verification agents / verifiers
+INSERT INTO role_permissions (role_id, permission_code)
+SELECT r.id, p.code FROM roles r, permissions p
+WHERE r.name IN ('verifier','verification_agent')
+  AND p.code IN ('statement.view','statement.verify','statement.credits')
+ON CONFLICT DO NOTHING;
+
+-- Auditor + finance: read-only exposure
+INSERT INTO role_permissions (role_id, permission_code)
+SELECT r.id, p.code FROM roles r, permissions p
+WHERE r.name='auditor'
+  AND p.code IN ('statement.view','statement.credits')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (role_id, permission_code)
+SELECT r.id, p.code FROM roles r, permissions p
+WHERE r.name='finance'
+  AND p.code IN ('statement.view','statement.credits')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO role_permissions (role_id, permission_code)
+SELECT r.id, p.code FROM roles r, permissions p
+WHERE r.name='distributor' AND p.code='statement.view'
+ON CONFLICT DO NOTHING;
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Ports the legacy single-company document domain onto the per-tenant
+-- boundary (no company_id FKs -- the database IS the company). New tenants
+-- also get this from TENANT_DDL; this block upgrades already-provisioned
+-- tenants so everyone converges on the same tables/indexes. Every statement
+-- is idempotent; the credits INSERT seeds the singleton wallet (id=1).
+CREATE TABLE IF NOT EXISTS uploads (
+    id SERIAL PRIMARY KEY,
+    division_id INTEGER REFERENCES divisions(id),
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    original_filename TEXT,
+    stored_filename TEXT,
+    file_type TEXT,
+    upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status TEXT DEFAULT 'pending',            -- pending | processing | done | rejected | error
+    error_msg TEXT,
+    file_hash TEXT,                            -- L1 dedup: SHA-256 of the file bytes
+    content_fingerprint TEXT,                  -- L2 dedup: sha256(stockist||from||to)
+    rejected_by INTEGER,
+    rejected_at TEXT,
+    rejection_reason TEXT,
+    rejection_type TEXT,
+    verification_status TEXT DEFAULT 'ocr_done'
+);
+CREATE INDEX IF NOT EXISTS idx_uploads_user ON uploads (user_id);
+CREATE INDEX IF NOT EXISTS idx_uploads_division_date ON uploads (division_id, upload_date);
+CREATE INDEX IF NOT EXISTS idx_uploads_status ON uploads (status);
+CREATE INDEX IF NOT EXISTS idx_uploads_hash ON uploads (file_hash);
+CREATE INDEX IF NOT EXISTS idx_uploads_fingerprint ON uploads (content_fingerprint);
+
+CREATE TABLE IF NOT EXISTS extractions (
+    id SERIAL PRIMARY KEY,
+    upload_id INTEGER UNIQUE NOT NULL REFERENCES uploads(id),
+    stockist_name TEXT,
+    stockist_gst TEXT,
+    stockist_address TEXT,
+    bill_number TEXT,
+    bill_date TEXT,
+    statement_from_date TEXT,
+    statement_to_date TEXT,
+    total_amount REAL DEFAULT 0,
+    total_quantity INTEGER DEFAULT 0,
+    discount_percent REAL DEFAULT 0,
+    discount_amount REAL DEFAULT 0,
+    net_sale REAL DEFAULT 0,
+    sgst REAL DEFAULT 0,
+    cgst REAL DEFAULT 0,
+    invoice_net REAL DEFAULT 0,
+    doc_type TEXT DEFAULT 'STATEMENT',
+    raw_json TEXT,
+    extracted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_extractions_stockist ON extractions (stockist_name);
+CREATE INDEX IF NOT EXISTS idx_extractions_period ON extractions (statement_from_date, statement_to_date);
+
+CREATE TABLE IF NOT EXISTS parties (
+    id SERIAL PRIMARY KEY,
+    extraction_id INTEGER NOT NULL REFERENCES extractions(id),
+    name TEXT,
+    type TEXT,
+    area TEXT,
+    dl_number TEXT,
+    gst_number TEXT,
+    total_quantity INTEGER DEFAULT 0,
+    total_amount REAL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_parties_extraction ON parties (extraction_id);
+
+CREATE TABLE IF NOT EXISTS items (
+    id SERIAL PRIMARY KEY,
+    party_id INTEGER NOT NULL REFERENCES parties(id),
+    brand TEXT,
+    mfg TEXT,
+    pack TEXT,
+    batch_no TEXT,
+    expiry TEXT,
+    hsn_code TEXT,
+    quantity INTEGER DEFAULT 0,
+    mrp REAL DEFAULT 0,
+    unit_rate REAL DEFAULT 0,
+    tax_type TEXT,
+    discount_percent REAL DEFAULT 0,
+    final_amount REAL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_items_party ON items (party_id);
+
+CREATE TABLE IF NOT EXISTS manual_verifications (
+    id SERIAL PRIMARY KEY,
+    upload_id INTEGER NOT NULL REFERENCES uploads(id),
+    division_id INTEGER REFERENCES divisions(id),
+    status TEXT DEFAULT 'pending',            -- pending | in_progress | verified | rejected | needs_revision
+    assigned_to INTEGER REFERENCES users(id), -- verification agent (tenant user)
+    verified_by INTEGER REFERENCES users(id),
+    verified_at TEXT,
+    notes TEXT,
+    excel_downloaded_at TEXT,
+    excel_uploaded_at TEXT,
+    corrections_json TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_mv_upload ON manual_verifications (upload_id);
+CREATE INDEX IF NOT EXISTS idx_mv_status ON manual_verifications (status);
+CREATE INDEX IF NOT EXISTS idx_mv_agent_status ON manual_verifications (assigned_to, status);
+
+-- Singleton credit wallet per tenant -- the database IS the company, so the
+-- legacy company_id UNIQUE key collapses to a single enforced row (id=1).
+CREATE TABLE IF NOT EXISTS credits (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    total_credits INTEGER DEFAULT 100,
+    used_credits INTEGER DEFAULT 0,
+    plan TEXT DEFAULT 'demo',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+INSERT INTO credits (id, total_credits, used_credits, plan) VALUES (1, 100, 0, 'demo')
+    ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS credit_transactions (
+    id SERIAL PRIMARY KEY,
+    division_id INTEGER REFERENCES divisions(id),
+    user_id INTEGER REFERENCES users(id),
+    operation_type TEXT NOT NULL,             -- extraction | request_approved | adjustment ...
+    credits_used INTEGER NOT NULL DEFAULT 1,  -- units moved by this operation
+    reference_id INTEGER,                     -- upload id / credit request id
+    detail TEXT,
+    balance_after INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_ct_created ON credit_transactions (created_at);
+CREATE INDEX IF NOT EXISTS idx_ct_reference ON credit_transactions (reference_id);
+
+CREATE TABLE IF NOT EXISTS credit_requests (
+    id SERIAL PRIMARY KEY,
+    requested_by INTEGER NOT NULL REFERENCES users(id),
+    credits_requested INTEGER NOT NULL,
+    message TEXT,
+    status TEXT DEFAULT 'pending',            -- pending | approved | rejected
+    reviewed_by INTEGER REFERENCES users(id),
+    reviewed_at TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_cr_status ON credit_requests (status);
+CREATE INDEX IF NOT EXISTS idx_cr_requester ON credit_requests (requested_by);
+
+-- Upload progress columns: the extraction pipeline runs on a worker thread and
+-- the client polls /statements/uploads/<id>/progress -- persisting pct/stage
+-- makes the poll multi-worker safe (DB is the source of truth; the in-memory
+-- cache only augments it, matching the legacy _TTLDict behaviour).
+ALTER TABLE uploads ADD COLUMN IF NOT EXISTS progress_pct INTEGER;
+ALTER TABLE uploads ADD COLUMN IF NOT EXISTS progress_stage TEXT;
 """

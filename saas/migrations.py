@@ -19,7 +19,15 @@ log = logging.getLogger("saas.migrations")
 # the new patch -- that is how campaigns.pob_required went missing on 27 of 35
 # tenant databases. Every patch is idempotent, so re-running the whole set is
 # safe and is exactly how existing tenants catch up.
-SCHEMA_VERSION = "3.13.0"
+#
+# 3.14.0 (Batch 1b): statement-document domain -- uploads, extractions,
+# parties, items, manual_verifications, credits (singleton wallet),
+# credit_transactions, credit_requests (+ indexes, dedup keys, rejection and
+# verification_status columns).
+# 3.15.0 (Batch 2): statement-domain permission codes + role wiring, and
+# uploads.progress_pct / progress_stage so the upload-poll endpoint can read
+# extraction progress from the DB (multi-worker safe).
+SCHEMA_VERSION = "3.15.0"
 
 # RLock: ensure_migrated re-enters via get_tenant_pool → _try_migrate path.
 _lock = threading.RLock()

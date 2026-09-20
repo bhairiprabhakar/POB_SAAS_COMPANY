@@ -18,7 +18,7 @@ from ..db_utils import fetchall_dict, fetchone_dict
 from ..deps import require_owner, require_sa_path, require_sa_roles, require_superadmin
 from ..upload_validation import IMAGE_KINDS, UploadValidationError, validate_upload
 from ..pagination import PageLimit, PageOffset
-from app.security import hash_pw
+from saas.passwords import hash_pw
 
 log = logging.getLogger("saas.superadmin")
 
@@ -1129,27 +1129,35 @@ _COSTING_TTL = 60
 _costing_cache: dict = {"at": 0.0, "key": None, "data": None}
 
 
-def _costing_where(days: int, model: str):
-    """Return (sql, params) for the ocr_usage WHERE clause shared by every
-    costing aggregate. `model` matches the model that served the call."""
+def _costing_where(days: int, model: str, division_id: int = 0):
+    """Return (sql, params) for the platform ai_usage_log WHERE clause shared
+    by every costing aggregate. Uses the ``a.`` alias so the same clause works
+    inside every aggregate query."""
     sql, params = [], []
     if days:
-        sql.append("created_at >= now() - make_interval(days => %s)")
+        sql.append("a.created_at >= now() - make_interval(days => %s)")
         params.append(int(days))
     if model:
-        sql.append("model_name = %s")
+        sql.append("a.model_name = %s")
         params.append(model)
+    if division_id:
+        sql.append("COALESCE(a.division_id, a.company_id) = %s")
+        params.append(int(division_id))
     return ("WHERE " + " AND ".join(sql)) if sql else "", params
 
 
 @router.get("/costing")
 def platform_costing(days: int = 0, division_id: int = 0, model: str = "",
                      claims=Depends(require_superadmin)):
-    """Aggregate Gemini invoice-extraction spend across every division tenant.
+    """Aggregate Gemini invoice-extraction spend (Batch 2: ai_usage_log).
 
-    Reports input/output tokens, cost and model used -- summarised platform-wide,
-    per division, per model and per user, plus the newest extraction calls.
-    `days=0` means all time; `division_id` / `model` narrow the view.
+    Reads the platform control-plane ai_usage_log -- the merged, tenant-
+    annotated ledger written by saas/ai/gemini_extraction.py -- instead of the
+    legacy per-tenant ocr_usage tables (vestigial under the merged path).
+    Reports input/output/thinking tokens, chunks, model used and computed
+    cost, summarised platform-wide, per division, per model and per (tenant)
+    user, plus the newest extraction calls. ``days=0`` means all time;
+    ``division_id`` / ``model`` narrow the view.
     """
     import time as _time
     from .. import config
@@ -1159,167 +1167,191 @@ def platform_costing(days: int = 0, division_id: int = 0, model: str = "",
             and now - _costing_cache["at"] < _COSTING_TTL):
         return _costing_cache["data"]
 
+    currency = config.OCR_COST_CURRENCY or "USD"
+    use_inr = currency.upper() == "INR"
+
+    def _cost(cusd, cinr):
+        return round(cinr if use_inr else cusd, 6)
+
+    calls = itok = otok = thok = chunks = 0
+    cost_usd = cost_inr = 0.0
+    by_division_list = []
+    by_model: dict = {}
+    user_slots: dict = {}
+    monthly: dict = {}
+    recent: list = []
+
     conn = platform_db.get_db()
     try:
         c = conn.cursor()
-        if division_id:
-            c.execute("SELECT id, name, code, status, tenant_db_name FROM divisions WHERE id=%s",
-                      (division_id,))
-        else:
-            c.execute("""SELECT id, name, code, status, tenant_db_name
-                         FROM divisions WHERE tenant_db_name IS NOT NULL ORDER BY id""")
-        divisions = fetchall_dict(c)
+        div_meta = {}
+        c.execute("SELECT id, name, code, tenant_db_name FROM divisions")
+        for didx, dname, dcode, tdb in c.fetchall():
+            div_meta[didx] = {"name": dname, "code": dcode, "tenant_db_name": tdb}
+
+        def _div_label(didx):
+            meta = div_meta.get(didx)
+            if meta:
+                return meta["name"], meta["code"]
+            return (f"Division #{didx}" if didx else "Unattributed"), ""
+
+        where_sql, where_params = _costing_where(days, model, division_id)
+
+        # ── Platform totals ──────────────────────────────────────────────
+        c.execute(
+            f"""SELECT COUNT(*),
+                       COALESCE(SUM(a.input_tokens),0), COALESCE(SUM(a.output_tokens),0),
+                       COALESCE(SUM(a.thinking_tokens),0), COALESCE(SUM(a.chunk_count),0),
+                       COALESCE(SUM(a.cost_usd),0), COALESCE(SUM(a.cost_inr),0)
+                FROM ai_usage_log a {where_sql}""",
+            where_params,
+        )
+        row = c.fetchone() or (0, 0, 0, 0, 0, 0, 0)
+        calls, itok, otok = int(row[0] or 0), int(row[1] or 0), int(row[2] or 0)
+        thok, chunks = int(row[3] or 0), int(row[4] or 0)
+        cost_usd, cost_inr = float(row[5] or 0), float(row[6] or 0)
+
+        # ── Per division ─────────────────────────────────────────────────
+        c.execute(
+            f"""SELECT COALESCE(a.division_id, a.company_id, 0), COUNT(*),
+                       COALESCE(SUM(a.input_tokens),0), COALESCE(SUM(a.output_tokens),0),
+                       COALESCE(SUM(a.cost_usd),0), COALESCE(SUM(a.cost_inr),0)
+                FROM ai_usage_log a {where_sql} GROUP BY 1""",
+            where_params,
+        )
+        by_division_index: dict = {}
+        for didx, cnt, di, do, cusd, cinr in c.fetchall():
+            name, code = _div_label(didx)
+            rec = {
+                "division_id": didx, "name": name, "code": code,
+                "calls": int(cnt or 0), "input_tokens": int(di or 0),
+                "output_tokens": int(do or 0), "cost": _cost(cusd, cinr), "models": [],
+            }
+            by_division_index[didx] = rec
+            by_division_list.append(rec)
+
+        # per-division model sub-list (matches the legacy shape)
+        c.execute(
+            f"""SELECT COALESCE(a.division_id, a.company_id, 0), COALESCE(a.model_name, '(text)'),
+                       COUNT(*), COALESCE(SUM(a.input_tokens),0), COALESCE(SUM(a.output_tokens),0),
+                       COALESCE(SUM(a.cost_usd),0)
+                FROM ai_usage_log a {where_sql} GROUP BY 1, 2""",
+            where_params,
+        )
+        for didx, mdl, cnt, di, do, cusd in c.fetchall():
+            slot = by_division_index.get(didx)
+            if slot is not None:
+                slot["models"].append({"model": mdl or "(text)", "calls": int(cnt or 0),
+                                       "input_tokens": int(di or 0),
+                                       "output_tokens": int(do or 0),
+                                       "cost": round(float(cusd or 0), 6)})
+
+        # ── Per model ────────────────────────────────────────────────────
+        c.execute(
+            f"""SELECT COALESCE(a.model_name, '(text)'), COUNT(*),
+                       COALESCE(SUM(a.input_tokens),0), COALESCE(SUM(a.output_tokens),0),
+                       COALESCE(SUM(a.thinking_tokens),0),
+                       COALESCE(SUM(a.cost_usd),0), COALESCE(SUM(a.cost_inr),0)
+                FROM ai_usage_log a {where_sql} GROUP BY 1""",
+            where_params,
+        )
+        for mdl, cnt, di, do, dt, cusd, cinr in c.fetchall():
+            m = mdl or "(text)"
+            by_model[m] = {"model": m, "calls": int(cnt or 0),
+                           "input_tokens": int(di or 0), "output_tokens": int(do or 0),
+                           "thinking_tokens": int(dt or 0), "cost": _cost(cusd, cinr)}
+
+        # ── Per (tenant) user, attributed per division ───────────────────
+        c.execute(
+            f"""SELECT COALESCE(a.division_id, a.company_id, 0), COALESCE(a.user_id, 0),
+                       COUNT(*), COALESCE(SUM(a.input_tokens),0), COALESCE(SUM(a.output_tokens),0),
+                       COALESCE(SUM(a.cost_usd),0), COALESCE(SUM(a.cost_inr),0)
+                FROM ai_usage_log a {where_sql} GROUP BY 1, 2""",
+            where_params,
+        )
+        user_ids_by_div: dict = {}
+        for didx, uid, cnt, di, do, cusd, cinr in c.fetchall():
+            name, code = _div_label(didx)
+            ukey = f"{didx}:{uid}"
+            user_slots[ukey] = {
+                "division_id": didx, "division_name": name, "division_code": code,
+                "user_id": uid, "username": "", "full_name": "", "role": "",
+                "calls": int(cnt or 0), "input_tokens": int(di or 0),
+                "output_tokens": int(do or 0), "cost": _cost(cusd, cinr),
+            }
+            user_ids_by_div.setdefault(didx, set()).add(uid)
+
+        # Best-effort tenant user names (names live in each tenant DB).
+        from .. import pools as _pools
+        for didx, uids in user_ids_by_div.items():
+            tdb = div_meta.get(didx, {}).get("tenant_db_name")
+            if not tdb or not uids:
+                continue
+            try:
+                tconn = _pools.get_tenant_conn(tdb)
+                try:
+                    cur = tconn.cursor()
+                    cur.execute(
+                        "SELECT u.id, COALESCE(u.username,''), COALESCE(u.full_name,''), "
+                        "COALESCE(r.name,'') FROM users u "
+                        "LEFT JOIN roles r ON r.id=u.role_id WHERE u.id = ANY(%s)",
+                        (list(uids),),
+                    )
+                    for uid, uname, fname, rn in cur.fetchall():
+                        slot = user_slots.get(f"{didx}:{uid}")
+                        if slot:
+                            slot["username"], slot["full_name"], slot["role"] = uname, fname, rn or ""
+                finally:
+                    tconn.close()
+            except Exception:
+                pass
+
+        # ── Monthly trend for the spend chart ────────────────────────────
+        c.execute(
+            f"""SELECT to_char(a.created_at, 'YYYY-MM'), COUNT(*),
+                       COALESCE(SUM(a.input_tokens),0), COALESCE(SUM(a.output_tokens),0),
+                       COALESCE(SUM(a.cost_usd),0), COALESCE(SUM(a.cost_inr),0)
+                FROM ai_usage_log a {where_sql} GROUP BY 1""",
+            where_params,
+        )
+        for mth, cnt, di, do, cusd, cinr in c.fetchall():
+            monthly[mth] = {"month": mth, "calls": int(cnt or 0),
+                            "input_tokens": int(di or 0), "output_tokens": int(do or 0),
+                            "cost": _cost(cusd, cinr)}
+
+        # ── Newest calls (detail table) ──────────────────────────────────
+        c.execute(
+            f"""SELECT a.id, COALESCE(a.division_id, a.company_id, 0), a.model_name,
+                       a.input_tokens, a.output_tokens, a.thinking_tokens, a.chunk_count,
+                       a.cost_usd, a.cost_inr, a.original_filename, a.user_id,
+                       to_char(a.created_at, 'YYYY-MM-DD HH24:MI:SS')
+                FROM ai_usage_log a {where_sql}
+                ORDER BY a.created_at DESC, a.id DESC LIMIT %s""",
+            where_params + [200],
+        )
+        for rid, didx, mdl, it, ot, dt, ch, cusd, cinr, fname, uid, ts in c.fetchall():
+            dname, dcode = _div_label(didx)
+            recent.append({
+                "id": rid, "division_id": didx, "division_name": dname,
+                "division_code": dcode, "model": mdl or "(text)",
+                "input_tokens": int(it or 0), "output_tokens": int(ot or 0),
+                "thinking_tokens": int(dt or 0), "chunks": int(ch or 0),
+                "cost": _cost(cusd, cinr), "filename": fname or "",
+                "user_id": uid, "created_at": ts,
+            })
     finally:
         conn.close()
 
-    where_sql, where_params = _costing_where(days, model)
-
-    summary = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cost": 0.0,
-               "reported_divisions": 0, "unreachable_divisions": 0}
-    by_division: dict = {}
-    by_model: dict = {}
-    by_user: dict = {}
-    monthly: dict = {}
-    recent: list = []
-    unreachable: list = []
-    currency = config.OCR_COST_CURRENCY or "USD"
-
-    for div in divisions:
-        tdb = div.get("tenant_db_name")
-        if not tdb:
-            continue
-        tconn = None
-        try:
-            from .. import migrations
-            migrations.ensure_migrated(tdb)
-            tconn = _direct_tenant_conn(tdb)
-            tc = tconn.cursor()
-
-            # ── Division totals ───────────────────────────────────────────
-            tc.execute(
-                f"""SELECT count(*), coalesce(sum(input_tokens),0),
-                           coalesce(sum(output_tokens),0), coalesce(sum(cost),0)
-                    FROM ocr_usage {where_sql}""",
-                where_params,
-            )
-            row = tc.fetchone() or (0, 0, 0, 0)
-            calls = int(row[0] or 0)
-            itok = int(row[1] or 0)
-            otok = int(row[2] or 0)
-            cost = float(row[3] or 0)
-            summary["calls"] += calls
-            summary["input_tokens"] += itok
-            summary["output_tokens"] += otok
-            summary["cost"] += cost
-            summary["reported_divisions"] += 1
-            div_id = div["id"]
-            drec = {
-                "division_id": div_id, "name": div["name"], "code": div["code"],
-                "calls": calls, "input_tokens": itok, "output_tokens": otok,
-                "cost": round(cost, 6), "models": [],
-            }
-            by_division[div_id] = drec
-
-            # ── Per model ─────────────────────────────────────────────────
-            tc.execute(
-                f"""SELECT COALESCE(model_name, '(text)') m,
-                           count(*), coalesce(sum(input_tokens),0),
-                           coalesce(sum(output_tokens),0), coalesce(sum(cost),0)
-                    FROM ocr_usage {where_sql} GROUP BY 1""",
-                where_params,
-            )
-            for m, cnt, it, ot, cst in tc.fetchall():
-                model = m or "(text)"
-                slot = by_model.setdefault(model, {"model": model, "calls": 0,
-                                                   "input_tokens": 0, "output_tokens": 0, "cost": 0.0})
-                slot["calls"] += int(cnt or 0)
-                slot["input_tokens"] += int(it or 0)
-                slot["output_tokens"] += int(ot or 0)
-                slot["cost"] = round(slot["cost"] + float(cst or 0), 6)
-                drec["models"].append({"model": model, "calls": int(cnt or 0),
-                                       "input_tokens": int(it or 0),
-                                       "output_tokens": int(ot or 0),
-                                       "cost": round(float(cst or 0), 6)})
-
-            # ── Per user (joined across the tenant's ocr_usage) ───────────
-            tc.execute(
-                f"""SELECT COALESCE(u.id, 0) uid, COALESCE(u.username, '(deleted)'),
-                           COALESCE(u.full_name, '—') fname, r.name rn,
-                           count(*) calls, coalesce(sum(o.input_tokens),0),
-                           coalesce(sum(o.output_tokens),0), coalesce(sum(o.cost),0)
-                    FROM ocr_usage o
-                    LEFT JOIN users u ON u.id = o.user_id
-                    LEFT JOIN roles r ON r.id = u.role_id
-                    {where_sql} GROUP BY 1, 2, 3, 4""",
-                where_params,
-            )
-            for uid, uname, fname, rn, cnt, it, ot, cst in tc.fetchall():
-                ukey = f"{div_id}:{uid}"
-                uslot = by_user.setdefault(ukey, {
-                    "division_id": div_id, "division_name": div["name"],
-                    "division_code": div["code"], "user_id": uid,
-                    "username": uname, "full_name": fname, "role": rn or "—",
-                    "calls": 0, "input_tokens": 0, "output_tokens": 0, "cost": 0.0,
-                })
-                uslot["calls"] += int(cnt or 0)
-                uslot["input_tokens"] += int(it or 0)
-                uslot["output_tokens"] += int(ot or 0)
-                uslot["cost"] = round(uslot["cost"] + float(cst or 0), 6)
-
-            # ── Monthly trend for the spend chart ─────────────────────────
-            tc.execute(
-                f"""SELECT to_char(created_at, 'YYYY-MM') m, count(*),
-                           coalesce(sum(input_tokens),0), coalesce(sum(output_tokens),0),
-                           coalesce(sum(cost),0)
-                    FROM ocr_usage {where_sql} GROUP BY 1""",
-                where_params,
-            )
-            for mth, cnt, it, ot, cst in tc.fetchall():
-                ms = monthly.setdefault(mth, {"month": mth, "calls": 0,
-                                              "input_tokens": 0, "output_tokens": 0, "cost": 0.0})
-                ms["calls"] += int(cnt or 0)
-                ms["input_tokens"] += int(it or 0)
-                ms["output_tokens"] += int(ot or 0)
-                ms["cost"] = round(ms["cost"] + float(cst or 0), 6)
-
-            # ── Newest calls (detail table) ───────────────────────────────
-            tc.execute(
-                f"""SELECT o.id, COALESCE(u.full_name, '—'), COALESCE(u.username, ''),
-                           o.engine, o.model_name, o.input_tokens, o.output_tokens,
-                           o.cost, o.currency, o.status, o.invoice_number, o.filename,
-                           to_char(o.created_at, 'YYYY-MM-DD HH24:MI:SS')
-                    FROM ocr_usage o
-                    LEFT JOIN users u ON u.id = o.user_id
-                    {where_sql} ORDER BY o.created_at DESC, o.id DESC LIMIT %s""",
-                where_params + [200],
-            )
-            for _id, fname, uname, engine, mdl, it, ot, cst, cur, st, inv, fn, ts in tc.fetchall():
-                recent.append({
-                    "id": _id, "division_id": div_id, "division_name": div["name"],
-                    "division_code": div["code"], "full_name": fname, "username": uname,
-                    "engine": engine, "model": mdl, "input_tokens": int(it or 0),
-                    "output_tokens": int(ot or 0), "cost": round(float(cst or 0), 6),
-                    "currency": cur, "status": st, "invoice_number": inv, "filename": fn,
-                    "created_at": ts,
-                })
-        except Exception as exc:
-            unreachable.append({"division_id": div["id"], "name": div["name"],
-                                "code": div["code"], "error": str(exc).strip().split("\n")[0][:200]})
-        finally:
-            if tconn:
-                try:
-                    tconn.close()
-                except Exception:
-                    pass
-
-    by_model_list = [{"model": m["model"], "calls": m["calls"],
-                      "input_tokens": m["input_tokens"], "output_tokens": m["output_tokens"],
-                      "cost": round(m["cost"], 6)}
-                     for m in sorted(by_model.values(), key=lambda x: x["cost"], reverse=True)]
-    by_user_list = sorted(by_user.values(), key=lambda x: x["cost"], reverse=True)[:500]
-    div_list = sorted(by_division.values(), key=lambda x: x["cost"], reverse=True)
-    summary["cost"] = round(summary["cost"], 6)
-    summary["avg_cost"] = round(summary["cost"] / summary["calls"], 6) if summary["calls"] else 0.0
+    summary = {
+        "calls": calls, "input_tokens": itok, "output_tokens": otok,
+        "thinking_tokens": thok, "chunks": chunks, "cost": _cost(cost_usd, cost_inr),
+        "cost_usd": round(cost_usd, 6), "cost_inr": round(cost_inr, 6),
+        "reported_divisions": len(by_division_list), "unreachable_divisions": 0,
+        "avg_cost": round(_cost(cost_usd, cost_inr) / calls, 6) if calls else 0.0,
+    }
+    by_model_list = sorted(by_model.values(), key=lambda x: x["cost"], reverse=True)
+    by_user_list = sorted(user_slots.values(), key=lambda x: x["cost"], reverse=True)[:500]
+    div_list = sorted(by_division_list, key=lambda x: x["cost"], reverse=True)
 
     data = {
         "days": days,
@@ -1330,10 +1362,308 @@ def platform_costing(days: int = 0, division_id: int = 0, model: str = "",
         "by_user": by_user_list,
         "monthly": sorted(monthly.values(), key=lambda m: m["month"]),
         "recent": recent,
-        "unreachable": unreachable,
+        "unreachable": [],
     }
     _costing_cache.update({"at": now, "key": key, "data": data})
     return data
+
+
+@router.get("/costing/export")
+def platform_costing_export(days: int = 0, division_id: int = 0, model: str = "",
+                            claims=Depends(require_superadmin)):
+    """Export the AI Costing report as Excel: summary + by division + by
+    user + daily trend + the full per-extraction detail (not capped at 200).
+    Ported from legacy sa_ai_costing_export, sourced from ai_usage_log."""
+    import time as _time
+    now = _time.time()
+    from .. import config
+    currency = config.OCR_COST_CURRENCY or "USD"
+    use_inr = currency.upper() == "INR"
+    effective_days = days or 3650
+
+    conn = platform_db.get_db()
+    try:
+        c = conn.cursor()
+        where_sql, where_params = _costing_where(days, model, division_id)
+
+        if division_id:
+            c.execute("SELECT id, name, code FROM divisions WHERE id=%s", (division_id,))
+        else:
+            c.execute("SELECT id, name, code FROM divisions ORDER BY name")
+        divisions = {r[0]: (r[1], r[2]) for r in c.fetchall()}
+
+        def _dlabel(didx):
+            m = divisions.get(didx)
+            return (m[0], m[1]) if m else (f"Division #{didx}" if didx else "Unattributed", "")
+
+        def _cost(cusd, cinr):
+            return cinr if use_inr else cusd
+
+        # Sums / by model / by user / daily / detail.
+        c.execute(
+            f"""SELECT COUNT(*), COALESCE(SUM(a.input_tokens),0), COALESCE(SUM(a.output_tokens),0),
+                       COALESCE(SUM(a.thinking_tokens),0), COALESCE(SUM(a.chunk_count),0),
+                       COALESCE(SUM(a.cost_usd),0), COALESCE(SUM(a.cost_inr),0)
+                FROM ai_usage_log a {where_sql}""",
+            where_params,
+        )
+        totals = c.fetchone() or (0, 0, 0, 0, 0, 0, 0)
+
+        c.execute(
+            f"""SELECT COALESCE(a.model_name, '(text)'), COUNT(*),
+                       COALESCE(SUM(a.input_tokens),0), COALESCE(SUM(a.output_tokens),0),
+                       COALESCE(SUM(a.thinking_tokens),0),
+                       COALESCE(SUM(a.cost_usd),0), COALESCE(SUM(a.cost_inr),0)
+                FROM ai_usage_log a {where_sql} GROUP BY 1""",
+            where_params,
+        )
+        by_model = c.fetchall()
+
+        c.execute(
+            f"""SELECT COALESCE(a.division_id, a.company_id, 0), COALESCE(a.user_id, 0),
+                       COUNT(*), COALESCE(SUM(a.input_tokens),0), COALESCE(SUM(a.output_tokens),0),
+                       COALESCE(SUM(a.cost_usd),0), COALESCE(SUM(a.cost_inr),0)
+                FROM ai_usage_log a {where_sql} GROUP BY 1, 2 ORDER BY 7 DESC""",
+            where_params,
+        )
+        by_user = c.fetchall()
+
+        c.execute(
+            f"""SELECT to_char(a.created_at, 'YYYY-MM-DD'), COUNT(*),
+                       COALESCE(SUM(a.cost_inr),0), COALESCE(SUM(a.cost_usd),0)
+                FROM ai_usage_log a {where_sql} GROUP BY 1 ORDER BY 1""",
+            where_params,
+        )
+        daily = c.fetchall()
+
+        c.execute(
+            f"""SELECT a.created_at, a.original_filename, a.model_name,
+                       a.input_tokens, a.output_tokens, a.thinking_tokens, a.chunk_count,
+                       a.cost_usd, a.cost_inr, COALESCE(a.division_id, a.company_id, 0), a.user_id
+                FROM ai_usage_log a {where_sql}
+                ORDER BY a.created_at DESC LIMIT 5000""",
+            where_params,
+        )
+        detail = c.fetchall()
+    finally:
+        conn.close()
+
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws1 = wb.active
+    ws1.title = "Summary"
+    ws1.append(["AI Costing Report", f"Last {days or 'all-time'} days",
+                f"Currency: {currency}"])
+    ws1.append([])
+    ws1.append(["Calls", "Input Tokens", "Output Tokens", "Thinking Tokens",
+                "Chunks", "Cost", "Cost (USD)", "Cost (INR)"])
+    ws1.append([totals[0], totals[1], totals[2], totals[3], totals[4],
+                _cost(totals[5], totals[6]), round(totals[5], 6), round(totals[6], 6)])
+    ws1.append([])
+    ws1.append(["Model", "Calls", "Input Tokens", "Output Tokens", "Thinking Tokens",
+                "Cost", "Cost (USD)", "Cost (INR)"])
+    for mdl, cnt, di, do, dt, cusd, cinr in by_model:
+        ws1.append([mdl, cnt, di, do, dt, _cost(cusd, cinr),
+                    round(cusd or 0, 6), round(cinr or 0, 6)])
+
+    ws2 = wb.create_sheet("By User")
+    ws2.append(["Division", "Code", "User ID", "Calls", "Input Tokens", "Output Tokens",
+                "Cost", "Cost (USD)", "Cost (INR)"])
+    for didx, uid, cnt, di, do, cusd, cinr in by_user:
+        name, code = _dlabel(didx)
+        ws2.append([name, code, uid, cnt, di, do, _cost(cusd, cinr),
+                    round(cusd or 0, 6), round(cinr or 0, 6)])
+
+    ws3 = wb.create_sheet("Daily Trend")
+    ws3.append(["Date", "Calls", "Cost (USD)", "Cost (INR)"])
+    for d, cnt, cinr, cusd in daily:
+        ws3.append([str(d), cnt, round(cusd or 0, 6), round(cinr or 0, 6)])
+
+    ws4 = wb.create_sheet("Per-Extraction Detail")
+    ws4.append(["When", "Document", "Division", "Division Code", "User ID", "Model Used",
+                "Input Tokens", "Output Tokens", "Thinking Tokens", "Chunks",
+                "Cost (USD)", "Cost (INR)"])
+    for ts, fname, mdl, it, ot, dt, ch, cusd, cinr, didx, uid in detail:
+        name, code = _dlabel(didx)
+        ws4.append([str(ts), fname or "", name, code, uid, mdl,
+                    it or 0, ot or 0, dt or 0, ch or 1,
+                    round(cusd or 0, 6), round(cinr or 0, 6)])
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="ai_costing_report_last_{effective_days}_days.xlsx"'},
+    )
+
+
+# -- AI model routing + pricing (platform-wide superadmin config) --
+
+@router.get("/ai-models")
+def sa_ai_models(claims=Depends(require_superadmin)):
+    """Model Settings: which Gemini model handles each file category, plus the
+    editable per-model USD pricing table (see saas/ai/model_registry.py)."""
+    from ..ai import model_registry
+    return {
+        "categories": model_registry.CATEGORIES,
+        "routing": model_registry.get_routing(),
+        "env_defaults": model_registry.env_defaults(),
+        "models": model_registry.model_options(),
+        "pricing": model_registry.get_pricing_rows(),
+    }
+
+
+@router.post("/ai-models/routing")
+def sa_ai_models_routing_save(body: dict, claims=Depends(require_superadmin)):
+    """Save the per-category model overrides. An empty choice deletes that
+    category's override so it follows .env again."""
+    from ..ai import model_registry
+    overrides = (body or {}).get("overrides")
+    if overrides is None:
+        overrides = body or {}
+    try:
+        model_registry.save_routing(overrides or {}, claims.get("sub"))
+        return {"success": True,
+                "message": "Model settings saved -- applies to the next document processed."}
+    except Exception as exc:
+        raise HTTPException(400, f"Error saving model settings: {exc}")
+
+
+@router.post("/ai-models/pricing")
+def sa_ai_models_pricing_save(body: dict, claims=Depends(require_superadmin)):
+    """Save the pricing table rows plus an optional new-model entry. A blank
+    price falls back to default pricing."""
+    from ..ai import model_registry
+    body = body or {}
+    rows = body.get("rows") or []
+    new_model = body.get("new_model") or {}
+    saved = 0
+    try:
+        for r in rows:
+            mid = (r.get("model_id") or "").strip()
+            if mid:
+                model_registry.upsert_pricing(
+                    mid, r.get("label", ""), r.get("input"), r.get("output"))
+                saved += 1
+        nm = (new_model.get("model_id") or "").strip()
+        if nm:
+            model_registry.upsert_pricing(
+                nm, new_model.get("label", ""),
+                new_model.get("input"), new_model.get("output"))
+            saved += 1
+        return {"success": True,
+                "message": f"Pricing saved -- {saved} model(s) updated. New prices apply to the next document processed."}
+    except Exception as exc:
+        raise HTTPException(400, f"Error saving pricing: {exc}")
+
+
+@router.post("/ai-models/pricing/delete")
+def sa_ai_models_pricing_delete(body: dict, claims=Depends(require_superadmin)):
+    """Remove a model from pricing. Refuses if the model is currently selected
+    in any routing category (see model_registry.delete_pricing)."""
+    from ..ai import model_registry
+    mid = ((body or {}).get("model_id") or "").strip()
+    if not mid:
+        raise HTTPException(400, "model_id required")
+    ok, reason = model_registry.delete_pricing(mid)
+    if not ok:
+        raise HTTPException(400, reason or "Cannot delete that model")
+    return {"success": True, "message": f"Removed '{mid}' from pricing."}
+
+
+# -- Tenant credits admin (statement wallet; superadmin review) --
+
+@router.get("/divisions/{did}/credits")
+def sa_tenant_credits(did: int, claims=Depends(require_superadmin)):
+    """Tenant statement-credit wallet + pending requests + ledger (the merged
+    home of the legacy /superadmin/credits page)."""
+    from .. import credits
+    conn = platform_db.get_db()
+    try:
+        tconn = _tenant_conn_for(conn, did)
+        try:
+            return {
+                "division_id": did,
+                "credits": credits.get_credits(tconn),
+                "pending_requests": credits.pending_credit_requests(tconn),
+                "ledger": credits.credit_ledger(tconn, limit=50),
+                "usage_summary": credits.credit_usage_summary(tconn),
+            }
+        finally:
+            tconn.close()
+    finally:
+        conn.close()
+
+
+@router.post("/divisions/{did}/credits/allocate")
+def sa_tenant_credits_allocate(did: int, body: dict, claims=Depends(require_superadmin)):
+    """Allocate credits to a tenant wallet (legacy /superadmin/credits/allocate)."""
+    from .. import credits
+    amount = int((body or {}).get("amount") or 0)
+    plan = ((body or {}).get("plan") or "demo").strip() or "demo"
+    if amount <= 0:
+        raise HTTPException(400, "Amount must be positive")
+    conn = platform_db.get_db()
+    try:
+        tconn = _tenant_conn_for(conn, did)
+        try:
+            wallet = credits.top_up_credits(tconn, amount, plan=plan)
+            _audit(conn, claims, "credits.allocate", "division", did,
+                   {"amount": amount, "plan": plan})
+            return {"success": True,
+                    "message": f"✓ {amount} credits allocated",
+                    "credits": wallet}
+        finally:
+            tconn.close()
+    finally:
+        conn.close()
+
+
+@router.post("/divisions/{did}/credits/requests/{rid}/approve")
+def sa_tenant_credits_approve(did: int, rid: int, body: dict = None,
+                              claims=Depends(require_superadmin)):
+    """Approve a tenant credit request. reviewed_by stays NULL because the
+    platform superadmin is not a tenant users(id) FK; the actor is recorded in
+    platform_audit_logs by the platform-side _audit helper."""
+    from .. import credits
+    conn = platform_db.get_db()
+    try:
+        tconn = _tenant_conn_for(conn, did)
+        try:
+            req = credits.approve_credit_request(tconn, rid, reviewed_by=None)
+            if not req:
+                raise HTTPException(404, "Request not found or no longer pending")
+            _audit(conn, claims, "credits.request.approve", "division", did,
+                   {"request_id": rid, "amount": req["credits_requested"]})
+            return {"success": True,
+                    "message": f"✓ Credit request approved -- {req['credits_requested']} credits added"}
+        finally:
+            tconn.close()
+    finally:
+        conn.close()
+
+
+@router.post("/divisions/{did}/credits/requests/{rid}/reject")
+def sa_tenant_credits_reject(did: int, rid: int, body: dict = None,
+                             claims=Depends(require_superadmin)):
+    """Reject a tenant credit request (reviewed_by=NULL; actor in audit log)."""
+    from .. import credits
+    conn = platform_db.get_db()
+    try:
+        tconn = _tenant_conn_for(conn, did)
+        try:
+            ok = credits.reject_credit_request(tconn, rid, reviewed_by=None)
+            if not ok:
+                raise HTTPException(404, "Request not found or no longer pending")
+            _audit(conn, claims, "credits.request.reject", "division", did,
+                   {"request_id": rid})
+            return {"success": True, "message": f"Credit request #{rid} rejected"}
+        finally:
+            tconn.close()
+    finally:
+        conn.close()
 
 
 # -- Platform-wide modules (campaigns / POB / gratification / users) --
@@ -1549,6 +1879,41 @@ def platform_finance(days: int = 0, claims=Depends(require_superadmin)):
     by_division: list = []
     unreachable: list = []
     currency = config.OCR_COST_CURRENCY or "USD"
+    use_inr = currency.upper() == "INR"
+
+    # AI extraction spend comes from the platform ai_usage_log (Batch 2): the
+    # legacy per-tenant ocr_usage tables are vestigial under the merged path,
+    # so the control-plane ledger is the single source of truth. We aggregate
+    # per division + the monthly trend once, before the tenant loop below.
+    ai_by_div: dict = {}
+    ai_since = ("a.created_at >= now() - make_interval(days => %s)" if days else "")
+    ai_since_params = [int(days)] if days else []
+    ai_where = ("WHERE " + ai_since) if ai_since else ""
+    platform_conn = platform_db.get_db()
+    try:
+        pc = platform_conn.cursor()
+        pc.execute(
+            f"""SELECT COALESCE(a.division_id, a.company_id, 0), COUNT(*),
+                       COALESCE(SUM(a.cost_usd),0), COALESCE(SUM(a.cost_inr),0)
+                FROM ai_usage_log a {ai_where} GROUP BY 1""",
+            ai_since_params,
+        )
+        for fidx, cnt, cusd, cinr in pc.fetchall():
+            ai_by_div[fidx] = (int(cnt or 0), float(cinr if use_inr else cusd or 0))
+            ai_calls += int(cnt or 0)
+            ai_cost += float(cinr if use_inr else cusd or 0)
+        pc.execute(
+            f"""SELECT to_char(a.created_at, 'YYYY-MM'), COUNT(*),
+                       COALESCE(SUM(a.cost_usd),0), COALESCE(SUM(a.cost_inr),0)
+                FROM ai_usage_log a {ai_where} GROUP BY 1""",
+            ai_since_params,
+        )
+        for mth, cnt, cusd, cinr in pc.fetchall():
+            ms = monthly.setdefault(mth, {"month": mth, "paid_out": 0.0,
+                                          "cleared": 0.0, "ai_cost": 0.0})
+            ms["ai_cost"] = round(ms["ai_cost"] + float(cinr if use_inr else cusd or 0), 2)
+    finally:
+        platform_conn.close()
 
     for div in divisions:
         tdb = div["tenant_db_name"]
@@ -1588,13 +1953,8 @@ def platform_finance(days: int = 0, claims=Depends(require_superadmin)):
             verified_count += vcnt
             verified_value += vval
 
-            # AI extraction spend.
-            tc.execute(
-                f"""SELECT count(*), coalesce(sum(cost),0) FROM ocr_usage {w}""", p)
-            arow = tc.fetchone() or (0, 0)
-            acnt, acost = int(arow[0] or 0), float(arow[1] or 0)
-            ai_calls += acnt
-            ai_cost += acost
+            # AI extraction spend (from the platform ledger aggregated above).
+            acnt, acost = ai_by_div.get(div["id"], (0, 0))
 
             # Monthly money-out trend (by pay/dispatch time where set).
             tc.execute(
@@ -1614,15 +1974,6 @@ def platform_finance(days: int = 0, claims=Depends(require_superadmin)):
                 ms = monthly.setdefault(mth, {"month": mth, "paid_out": 0.0,
                                               "cleared": 0.0, "ai_cost": 0.0})
                 ms["cleared"] = round(ms["cleared"] + float(val or 0), 2)
-
-            # Monthly AI spend.
-            tc.execute(
-                f"""SELECT to_char(created_at,'YYYY-MM'), count(*), coalesce(sum(cost),0)
-                    FROM ocr_usage {w} GROUP BY 1""", p)
-            for mth, cnt, val in tc.fetchall():
-                ms = monthly.setdefault(mth, {"month": mth, "paid_out": 0.0,
-                                              "cleared": 0.0, "ai_cost": 0.0})
-                ms["ai_cost"] = round(ms["ai_cost"] + float(val or 0), 2)
 
             by_division.append({
                 "division_id": div["id"], "name": div["name"], "code": div["code"],

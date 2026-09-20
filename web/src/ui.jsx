@@ -356,6 +356,13 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
   };
   const canSee = (i) => hasPerm(p, i.perm) && (!i.entry || isDataEntry);
 
+  // Statement extraction (Batch 3): tenant upload / verify / credits wallet.
+  const statementNav = [
+    { to: '/app/statements', label: 'Statements', icon: <Icon name="file-text" />, perm: 'statement.view', group: 'Statements', tone: 'teal' },
+    { to: '/app/statements/verify', label: 'Statement Verify', icon: <Icon name="shield-check" />, perm: 'statement.verify', group: 'Statements', tone: 'blue' },
+    { to: '/app/statements/credits', label: 'Statement Credits', icon: <Icon name="wallet" />, perm: 'statement.credits', group: 'Statements', tone: 'amber' },
+  ];
+
   // Role-based navigation: three distinct experiences.
   // `group` drives the section headers, `tone` the coloured icon tile.
   const items = isVerifier ? [
@@ -366,6 +373,7 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
     { to: '/app/analytics', label: 'Analytics', icon: <Icon name="trending-up" />, perm: 'dashboard.view', group: 'Core Modules', tone: 'green' },
     { to: '/app/notifications', label: 'Notifications', icon: <Icon name="bell" />, perm: 'notification.view', group: 'Quick Access', tone: 'amber' },
     { to: '/app/profile', label: 'My Profile', icon: <Icon name="user" />, group: 'Quick Access', tone: 'gray' },
+    ...statementNav,
   ] : isAdmin ? [
     // ── Division Admin / HO ──
     { to: '/app/admin', label: 'Dashboard', icon: <Icon name="grid" />, perm: 'dashboard.view', end: true, group: 'Core Modules', tone: 'primary' },
@@ -391,6 +399,7 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
     { to: '/app/audit', label: 'Audit', icon: <Icon name="file-text" />, perm: 'audit.view', group: 'Quick Access', tone: 'gray' },
     { to: '/app/security', label: 'Security', icon: <Icon name="lock" />, perm: 'apikey.view', group: 'Quick Access', tone: 'green' },
     { to: '/app/jobs', label: 'Background Jobs', icon: <Icon name="settings" />, perm: 'job.view', group: 'Quick Access', tone: 'amber' },
+    ...statementNav,
   ] : [
     // ── Campaign Users (PSR / ASM / RSM / SM / MR / etc.) ──
     { to: '/app', label: 'Dashboard', icon: <Icon name="grid" />, perm: 'dashboard.view', end: true, group: 'Core Modules', tone: 'primary' },
@@ -405,6 +414,7 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
     { to: '/app/visits', label: 'Chemist Visits', icon: <Icon name="calendar" />, perm: 'visit.view', entry: true, group: 'Quick Access', tone: 'blue' },
     { to: '/app/notifications', label: 'Notifications', icon: <Icon name="bell" />, perm: 'notification.view', group: 'Quick Access', tone: 'amber' },
     { to: '/app/profile', label: 'My Profile', icon: <Icon name="user" />, group: 'Quick Access', tone: 'gray' },
+    ...statementNav,
   ];
   return (
     <aside className={`sidebar${open ? ' open' : ''}${collapsed ? ' collapsed' : ''}`}>
@@ -513,6 +523,7 @@ function SuperSidebar({ onNavigate, open, collapsed, onToggleCollapse }) {
     { to: '/superadmin/admins', label: 'Platform Admins', icon: <Icon name="lock" />, group: 'Platform', tone: 'primary', roles: ['owner'] },
     { to: '/superadmin/audit', label: 'Audit Logs', icon: <Icon name="file-text" />, group: 'Platform', tone: 'gray', roles: ['owner', 'full'] },
     { to: '/superadmin/platform-settings', label: 'Platform Settings', icon: <Icon name="settings" />, group: 'Platform', tone: 'gray', roles: ['owner', 'full'] },
+    { to: '/superadmin/ai-models', label: 'AI Models', icon: <Icon name="percent" />, group: 'Platform', tone: 'blue', roles: ['owner', 'full'] },
   ];
   const role = saRole();
   const visible = items.filter((i) => !i.roles || i.roles.includes(role));

@@ -27,7 +27,7 @@ from fastapi import APIRouter, HTTPException, Request
 from .. import config, notify, platform_db, pools, security
 from ..db_utils import fetchone_dict
 from ..ratelimit import RateLimiter
-from app.security import hash_pw, verify_pw
+from saas.passwords import hash_pw, verify_pw
 
 log = logging.getLogger("saas.recovery")
 

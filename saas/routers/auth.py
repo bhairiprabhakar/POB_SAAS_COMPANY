@@ -13,7 +13,7 @@ from .. import config, platform_db, pools, security, storage
 from ..db_utils import fetchone_dict
 from ..deps import get_tenant_context
 from ..ratelimit import login_allowed, login_failed, login_reset, login_succeeded
-from app.security import hash_pw, verify_pw
+from saas.passwords import hash_pw, verify_pw
 
 import os
 import json

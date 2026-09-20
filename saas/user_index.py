@@ -7,7 +7,9 @@ contain that account. This module maintains the ``division_users`` table:
 
   - kept in sync whenever a user is created (single, bulk, or the provisioned
     bootstrap admin), and
-  - backfilled for pre-existing tenants by scripts/backfill_user_index.py.
+  - backfilled in a one-time migration for any pre-existing tenants that
+    predate the index (the legacy demo/phase-era tenants were retired together
+    with the unification sweep).
 
 Usernames are intentionally NOT globally unique (legacy divisions share
 usernames like ``division_admin``), so lookups return every match and the auth

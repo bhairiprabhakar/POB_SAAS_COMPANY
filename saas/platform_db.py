@@ -9,7 +9,7 @@ import datetime as dt
 
 from . import config
 from . import db_utils
-from app.security import hash_pw
+from saas.passwords import hash_pw
 
 PLATFORM_POOL = db_utils.make_pool(
     config.PLATFORM_DB_NAME,
@@ -160,6 +160,45 @@ CREATE TABLE IF NOT EXISTS platform_notifications (
 
 CREATE INDEX IF NOT EXISTS idx_platform_notif_sa
     ON platform_notifications (super_admin_id, is_read, created_at DESC);
+
+-- Merged document-extraction AI tables (previously in the legacy
+-- single-company DB). ai_model_routing / ai_model_pricing are platform-wide
+-- superadmin configuration (same URL, same page, every tenant); ai_usage_log
+-- records per-extraction token+cost, tenant-annotated via division_id.
+CREATE TABLE IF NOT EXISTS ai_model_routing (
+    category TEXT PRIMARY KEY,
+    model_id TEXT NOT NULL,
+    updated_by INTEGER,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ai_model_pricing (
+    model_id TEXT PRIMARY KEY,
+    label TEXT DEFAULT '',
+    input_usd REAL,
+    output_usd REAL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ai_usage_log (
+    id SERIAL PRIMARY KEY,
+    upload_id INTEGER,
+    company_id INTEGER,
+    division_id INTEGER,
+    model_name TEXT NOT NULL,
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    thinking_tokens INTEGER DEFAULT 0,
+    chunk_count INTEGER DEFAULT 1,
+    cost_usd REAL DEFAULT 0,
+    cost_inr REAL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_usage_log_company
+    ON ai_usage_log (company_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_ai_usage_log_upload
+    ON ai_usage_log (upload_id);
 """
 
 _PLATFORM_MIGRATIONS = """
@@ -168,6 +207,8 @@ ALTER TABLE super_admins ADD COLUMN IF NOT EXISTS company_id INTEGER;
 ALTER TABLE super_admins ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'full';
 UPDATE super_admins SET role='owner' WHERE owner_flag=TRUE AND role='full';
 ALTER TABLE divisions ADD COLUMN IF NOT EXISTS covered_regions TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE ai_usage_log ADD COLUMN IF NOT EXISTS user_id INTEGER;
+ALTER TABLE ai_usage_log ADD COLUMN IF NOT EXISTS original_filename TEXT;
 """
 
 

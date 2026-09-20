@@ -154,6 +154,14 @@ def verification_queue(status: str = "pending", q: str = "", limit: int = PageLi
     return {"items": [_filter_for_role(r, ctx) for r in items], "total": c.fetchone()[0]}
 
 
+@router.get("/product-aliases")
+def list_product_aliases(campaign_id: int = None,
+                         ctx: TenantContext = Depends(require_permission("verification.view"))):
+    """List product aliases, optionally filtered by campaign."""
+    from ..product_alias import list_product_aliases as _list
+    return {"items": _list(ctx.conn, campaign_id)}
+
+
 @router.get("/{vid}")
 def verification_detail(vid: int, ctx: TenantContext = Depends(require_permission("verification.view"))):
     conn = ctx.conn
@@ -807,14 +815,6 @@ def delete_product_alias(alias_id: int,
     if not ok:
         raise HTTPException(404, "alias not found")
     return {"ok": True}
-
-
-@router.get("/product-aliases")
-def list_product_aliases(campaign_id: int = None,
-                         ctx: TenantContext = Depends(require_permission("verification.view"))):
-    """List product aliases, optionally filtered by campaign."""
-    from ..product_alias import list_product_aliases as _list
-    return {"items": _list(ctx.conn, campaign_id)}
 
 
 @router.get("/verification-rules/{campaign_id}")

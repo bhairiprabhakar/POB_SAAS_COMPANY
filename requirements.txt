@@ -1,15 +1,13 @@
 fastapi>=0.115,<1.0
 uvicorn[standard]>=0.30
 starlette>=0.38
-jinja2>=3.1
 python-multipart>=0.0.9
-itsdangerous>=2.2          # required by starlette.middleware.sessions.SessionMiddleware
 psycopg2-binary>=2.9
 werkzeug>=3.0               # password hashing (generate_password_hash/check_password_hash)
 openpyxl>=3.1
-google-genai>=0.3.0         # Gemini extraction (model chosen per-document, see app/ai/gemini_extraction.py)
+google-genai>=0.3.0         # Gemini extraction (model chosen per-document, see saas/ai/gemini_extraction.py)
 pypdf>=5.0                   # PDF page counting, text-layer detection, chunk splitting for large documents
-pdfminer.six>=20231228       # cross-validation for text-layer detection (see app/ai/gemini_extraction.py)
+pdfminer.six>=20231228       # cross-validation for text-layer detection (see saas/ai/gemini_extraction.py)
 PyMuPDF>=1.24                # cross-validation for text-layer detection (imported as `fitz`)
 Pillow>=10.0                 # EXIF-orientation auto-correction for uploaded photos
 requests>=2.31                # remote document import (S3/EC2/Drive/web links)

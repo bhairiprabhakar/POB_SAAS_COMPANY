@@ -14,7 +14,7 @@ from . import config
 from . import db_utils
 from . import db_creds
 from .tenant_schema import TENANT_DDL, seed_tenant
-from app.security import hash_pw
+from saas.passwords import hash_pw
 
 SCHEMA_VERSION = "1.0.0"
 

@@ -1,12 +1,19 @@
 """
-Verification for the legacy-app "AI Models" superadmin feature:
+Verification for the SaaS "AI Models" superadmin feature. Ported from the
+legacy-app script of the same name -- the legacy `/superadmin/ai-models` page
+and form posts are now the FastAPI endpoints in saas/routers/superadmin.py
+(`/api/v1/superadmin/ai-models*`), backed by saas/ai/model_registry.py,
+saas/ai/pricing.py and saas/ai/gemini_extraction.py:
+
   - per-category Gemini model routing (DB override > .env default), saved
     without restart, applied on the next document processed
   - editable per-model pricing (DB override > static > conservative estimate),
     add-new-model support, and the "can't remove a model selected in a
     category" guard
+
 Run:  venv\\Scripts\\python.exe scripts\\test_ai_models.py
-against a running Postgres (POB_SAAS database).
+against a running Postgres (model routing/pricing live in the control-plane
+DB, config.PLATFORM_DB_NAME; a throwaway superadmin is created and removed).
 """
 import os
 import sys
@@ -16,12 +23,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient
 
-from app.main import app  # triggers init_db() on startup
-from app.security import hash_pw
-from app.ai import model_registry
-from app.ai.pricing import compute_cost, get_pricing, GEMINI_PRICING
-from app.ai.gemini_extraction import _category_for, _select_model
+from saas.main import app  # triggers platform init + pool setup on startup
+from saas.passwords import hash_pw
+from saas.platform_db import get_db
+from saas.ai import model_registry
+from saas.ai.pricing import compute_cost, get_pricing, GEMINI_PRICING
+from saas.ai.gemini_extraction import _category_for, _select_model
 
+BASE = "/api/v1"
 FAILED = []
 
 
@@ -32,6 +41,10 @@ def check(name, cond, extra=""):
         FAILED.append(name)
 
 
+def auth_header(token):
+    return {"Authorization": f"Bearer {token}"}
+
+
 def main():
     tag = f"aim{int(time.time())}"
     sa_user = f"test_sa_models_{tag}"
@@ -39,7 +52,7 @@ def main():
     test_model = f"gemini-test-{tag}"
 
     with TestClient(app) as client:
-        # ── unit: category detection ──
+        # ── unit: category detection (unchanged from legacy port) ──
         check("category pdf resolves to pdf_text/pdf_scan",
               _category_for("x.pdf", "application/pdf") in ("pdf_text", "pdf_scan"))
         check("category image", _category_for("x.jpg", "image/jpeg") == "image")
@@ -71,51 +84,70 @@ def main():
               model_registry.resolve_model("image") == model_registry.category_default("image"))
 
         # ── create a throwaway superadmin ──
-        from app.database import get_db
         conn = get_db()
         c = conn.cursor()
         c.execute(
-            "INSERT INTO super_admins (username,password,full_name,email,role) VALUES (%s,%s,%s,%s,%s)",
-            (sa_user, hash_pw(sa_pw), "Test SA Models", "test@models.in", "superadmin"))
+            "INSERT INTO super_admins (username,password,full_name,email) VALUES (%s,%s,%s,%s)",
+            (sa_user, hash_pw(sa_pw), "Test SA Models", "test@models.in"))
         conn.commit()
         conn.close()
 
         try:
-            # login
-            r = client.post("/superadmin/login", data={"username": sa_user, "password": sa_pw})
-            check("superadmin login", r.status_code in (200, 302, 303, 307),
+            # login (SaaS /api/v1/auth/superadmin/login, JWT bearer)
+            r = client.post(f"{BASE}/auth/superadmin/login",
+                            json={"username": sa_user, "password": sa_pw})
+            check("superadmin login", r.status_code == 200,
                   f"{r.status_code} {r.text[:120]}")
-            r = client.get("/superadmin/dashboard")
-            check("superadmin session works", r.status_code == 200, f"{r.status_code}")
+            sa_token = r.json().get("access_token")
+            SA = auth_header(sa_token)
 
-            # ── routing save (override image, reset the rest to default) ──
-            r = client.post("/superadmin/api/ai-models/routing", data={
-                "routing[image]": "gemini-2.5-flash",
-                "routing[pdf_text]": "",
-                "routing[pdf_scan]": "",
-                "routing[xlsx]": "",
-                "routing[docx]": "",
-                "routing[text]": "",
+            # GET: settings + pricing payload (the ported "page render")
+            r = client.get(f"{BASE}/superadmin/ai-models", headers=SA)
+            check("ai-models GET 200", r.status_code == 200, f"{r.status_code} {r.text[:120]}")
+            data = r.json() if r.status_code == 200 else {}
+            cats = {c.get("key") for c in data.get("categories") or []}
+            check("page lists all six categories",
+                  {"pdf_text", "pdf_scan", "image", "xlsx", "docx", "text"} <= cats, f"{cats}")
+            check("page returns env defaults", bool(data.get("env_defaults")), f"{data.get('env_defaults')}")
+            check("page returns .env default hint",
+                  data.get("env_defaults", {}).get("image") == model_registry.category_default("image"))
+
+            # ── routing save: override image + docx, reset the rest ──
+            # (docx is overridden to a model that DIFFERS from the .env default
+            # so the DB-override-wins path is proven, not just echoed)
+            r = client.post(f"{BASE}/superadmin/ai-models/routing", headers=SA, json={
+                "overrides": {
+                    "image": "gemini-2.5-flash",
+                    "docx": "gemini-3.5-flash",
+                    "pdf_text": "", "pdf_scan": "", "xlsx": "", "text": "",
+                },
             })
-            check("routing save (POST ok)", r.status_code in (200, 302, 303, 307),
+            check("routing save (POST ok)", r.status_code == 200,
                   f"{r.status_code} {r.text[:120]}")
+            routing = model_registry.get_routing()
+            check("image override persisted in DB",
+                  routing.get("image") == "gemini-2.5-flash", f"{routing}")
+            check("docx override resolved live (differs from env default)",
+                  model_registry.resolve_model("docx") == "gemini-3.5-flash",
+                  model_registry.resolve_model("docx"))
+            check("pdf_text still follows env",
+                  model_registry.resolve_model("pdf_text") == model_registry.category_default("pdf_text"))
             check("image override resolved live",
                   model_registry.resolve_model("image") == "gemini-2.5-flash",
                   model_registry.resolve_model("image"))
-            check("pdf_text still follows env",
-                  model_registry.resolve_model("pdf_text") == model_registry.category_default("pdf_text"))
 
             # ── pricing save: edit a known model + add a new one ──
-            r = client.post("/superadmin/api/ai-models/pricing", data={
-                "label[gemini-2.5-flash]": "Gemini 2.5 Flash",
-                "input[gemini-2.5-flash]": "0.33",
-                "output[gemini-2.5-flash]": "2.75",
-                "new_model_id": test_model,
-                "new_model_label": "Test Model",
-                "new_model_input": "0.12",
-                "new_model_output": "0.45",
+            r = client.post(f"{BASE}/superadmin/ai-models/pricing", headers=SA, json={
+                "rows": [
+                    {"model_id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash",
+                     "input": "0.33", "output": "2.75"},
+                ],
+                "new_model": {
+                    "model_id": test_model, "label": "Test Model",
+                    "input": "0.12", "output": "0.45",
+                },
             })
-            check("pricing save (POST ok)", r.status_code in (200, 302, 303, 307),
+            check("pricing save (POST ok)", r.status_code == 200,
                   f"{r.status_code} {r.text[:120]}")
             p = get_pricing("gemini-2.5-flash")
             check("DB price override wins for known model",
@@ -126,28 +158,34 @@ def main():
             check("compute_cost uses DB price",
                   abs(usd - (1.0 * 0.12 + 0.1 * 0.45)) < 1e-6, f"{usd}")
 
-            # ── delete guard: model selected in a category can't be removed ──
-            r = client.post("/superadmin/api/ai-models/pricing/delete", data={"model_id": "gemini-2.5-flash"})
-            body = r.text.lower()
+            # ── delete guard: selected-in-category can't be removed ──
+            r = client.post(f"{BASE}/superadmin/ai-models/pricing/delete", headers=SA,
+                            json={"model_id": "gemini-2.5-flash"})
+            body = (r.text or "").lower()
             check("delete in-use blocked with reason",
-                  "selected in" in body or "can't be removed" in body or "is selected" in body,
-                  body[:300])
+                  r.status_code == 400 and "selected in" in body,
+                  f"{r.status_code} {body[:300]}")
             check("in-use model still priced after blocked delete",
                   get_pricing("gemini-2.5-flash")["input"] == 0.33)
 
             # ── delete a free (unselected) model succeeds ──
-            r = client.post("/superadmin/api/ai-models/pricing/delete", data={"model_id": test_model})
+            r = client.post(f"{BASE}/superadmin/ai-models/pricing/delete", headers=SA,
+                            json={"model_id": test_model})
+            check("free model removable", r.status_code == 200,
+                  f"{r.status_code} {r.text[:120]}")
             p = get_pricing(test_model)
-            check("free model removable (falls back to estimate)",
+            check("free model falls back to estimate",
                   p["input"] == 1.50 and p["output"] == 9.00, f"{p}")
 
-            # ── GET page renders with settings + pricing ──
-            r = client.get("/superadmin/ai-models")
-            check("ai-models page 200", r.status_code == 200, f"{r.status_code}")
-            check("page shows Model Settings", b"Model Settings" in r.content, "")
-            check("page shows Model Pricing", b"Model Pricing" in r.content, "")
-            check("page lists scanned-pdf category", b"PDF (scanned / images)" in r.content, "")
-            check("page shows .env default hint", b"from .env" in r.content, "")
+            # ── GET again: settings + pricing reflected in the payload ──
+            r = client.get(f"{BASE}/superadmin/ai-models", headers=SA)
+            data = r.json() if r.status_code == 200 else {}
+            pricing = data.get("pricing") or {}
+            models = [m.get("model_id") for m in data.get("models") or []]
+            check("page still lists every category", len(data.get("categories") or []) == 6)
+            check("saved price shown on page",
+                  pricing.get("gemini-2.5-flash", {}).get("input") == 0.33, f"{pricing.get('gemini-2.5-flash')}")
+            check("added model removed from pricing after delete", test_model not in models)
 
             # ── _select_model honours override + default ──
             check("_select_model image uses override",
@@ -160,7 +198,7 @@ def main():
             # cleanup: restore routing + pricing, drop the throwaway superadmin
             conn = get_db()
             c = conn.cursor()
-            c.execute("DELETE FROM ai_model_routing WHERE category='image'")
+            c.execute("DELETE FROM ai_model_routing WHERE category IN ('image','docx')")
             c.execute("DELETE FROM ai_model_pricing WHERE model_id IN (%s,%s)",
                       ("gemini-2.5-flash", test_model))
             c.execute("DELETE FROM super_admins WHERE username=%s", (sa_user,))

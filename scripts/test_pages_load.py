@@ -1,5 +1,5 @@
-"""Page-load verification for every role type: superadmin, tenant admin,
-agent (MR/PSR - data entry), and company people (verifier/finance/asm).
+"""Page-load verification for every role type: superadmin, division admin,
+agent (MR/ASM - data entry), and company people (verifier/finance).
 
 For each login it calls the API endpoints each page fetches on mount and
 reports 200 (page loads) / 403 (permission-blocked, matching the sidebar
@@ -7,15 +7,35 @@ PERM_GATE) / 401 / 5xx. Only endpoints on pages the role should see (per
 permission + data_entry flag) are expected 200; every other endpoint must be
 a clean 403, never 401/404/500.
 
-Run:  python scripts/test_pages_load.py
+Runs FULLY HERMETIC: a scratch control-plane DB is created before the saas
+package is imported, one division is provisioned (fresh tenant DB), all role
+users are created inside it, and both scratch DBs are dropped at the end.
+
+Ported in Batch 4 from the companies/plans model (DEMO1234 users + company_code
+login) to the current divisions/division_slug architecture.
+
+Run:  venv\\Scripts\\python.exe scripts\\test_pages_load.py
 """
 import os
 import sys
+import uuid
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
 
-from fastapi.testclient import TestClient
-from saas.main import app
+# hermetic: point the platform at a scratch control-plane DB BEFORE the saas
+# package is imported (config reads this at import time)
+SCRATCH_PLATFORM = f"psk_pages_{uuid.uuid4().hex[:10]}"
+os.environ["PLATFORM_DB_NAME"] = SCRATCH_PLATFORM
+
+from fastapi.testclient import TestClient  # noqa: E402
+from saas.main import app  # noqa: E402
+from saas import platform_db  # noqa: E402
+
+platform_db.init_platform_db()
+
+BOOT = os.environ.get("SUPERADMIN_BOOTSTRAP_PASSWORD", "101990")
+_TENANT_DB = None
 
 # sidebar perm gates from web/src/ui.jsx
 PERM_GATE = {
@@ -87,9 +107,9 @@ def check(name, cond, extra=""):
         FAILED.append(name)
 
 
-def login(client, company_code, username, password):
+def login(client, division_slug, username, password):
     r = client.post("/api/v1/auth/login",
-                    json={"company_code": company_code, "username": username, "password": password})
+                    json={"division_slug": division_slug, "username": username, "password": password})
     if r.status_code != 200:
         return None
     d = r.json()
@@ -111,20 +131,22 @@ def call(client, h, path):
 
 
 def main():
+    global _TENANT_DB
     client = TestClient(app)
+    tag = uuid.uuid4().hex[:6].upper()
 
     r = client.post("/api/v1/auth/superadmin/login",
-                    json={"username": "superadmin", "password": "Pob_Saas@2026"})
+                    json={"username": "superadmin", "password": BOOT})
     ok = r.status_code == 200
     check("superadmin login", ok, f"{r.status_code} {r.text[:200]}")
     sa_h = {"Authorization": f"Bearer {r.json()['access_token']}"} if ok else None
 
     sa_pages = [
         "/api/v1/superadmin/metrics",
-        "/api/v1/superadmin/companies",
-        "/api/v1/superadmin/plans",
+        "/api/v1/superadmin/divisions",
         "/api/v1/superadmin/audit-logs",
-        "/api/v1/superadmin/ocr-usage/companies",
+        "/api/v1/superadmin/ai-models",
+        "/api/v1/superadmin/costing",
     ]
     print("\n== superadmin (platform console) ==")
     if sa_h:
@@ -132,21 +154,99 @@ def main():
             code, txt = call(client, sa_h, p)
             check(f"SA {p}", code == 200, f"{code} {txt}")
 
+    # ── hermetic tenant: provision one division, mint the role users ────────
+    r = client.post("/api/v1/superadmin/divisions", headers=sa_h, json={
+        "name": f"Pages Load {tag}", "code": f"PGS{tag}",
+        "contact_person": "Test", "contact_email": f"pages{tag}@test.in",
+        "contact_mobile": "9800000000",
+        "provision": True, "admin_username": "company_admin",
+        "admin_password": "Admin@123", "admin_email": f"pages{tag}@admin.in",
+    })
+    check("create+provision division", r.status_code == 200, f"{r.status_code} {r.text[:300]}")
+    div = r.json()
+    _TENANT_DB = div.get("tenant_db_name")
+    slug = div.get("code")
+    did = div.get("id")
+
+    # clear the provisioned admin's onboarding flags
+    from saas.db_utils import get_conn
+    conn = get_conn(_TENANT_DB)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM divisions ORDER BY id LIMIT 1")
+        tenant_division_id = cur.fetchone()[0]
+        cur.execute(
+            "UPDATE users SET must_change_password=FALSE, mfa_setup_required=FALSE, "
+            "profile_pending=FALSE WHERE username='company_admin'")
+        conn.commit()
+    finally:
+        conn.close()
+
+    # tenant-side master data fetch (levels + roles) as the division admin
+    r = client.post("/api/v1/auth/login",
+                    json={"division_slug": slug, "username": "company_admin", "password": "Admin@123"})
+    check("admin login", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
+    if r.status_code != 200:
+        print("\n" + ("ALL PASS" if not FAILED else f"{len(FAILED)} FAILED: {FAILED}"))
+        sys.exit(1 if FAILED else 0)
+    ADM = {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+    levels = {lv["name"]: lv for lv in client.get("/api/v1/hierarchy/levels", headers=ADM).json()["items"]}
+    roles = {r0["name"]: r0 for r0 in client.get("/api/v1/roles", headers=ADM).json()["items"]}
+
+    def mk_user(payload):
+        return client.post("/api/v1/users", headers=ADM, json=payload)
+
+    r = mk_user({"username": f"mr.pages{tag.lower()}", "password": "Mr@12345",
+                 "full_name": "Pages MR", "email": f"mr.pages{tag.lower()}@test.in", "mobile": "9000000011",
+                 "hierarchy_level_id": levels["MR"]["id"], "role_id": roles["mr"]["id"],
+                 "parent_id": None, "territory": "Pune East"})
+    check("create mr user", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
+    r = mk_user({"username": f"asm.pages{tag.lower()}", "password": "Am@12345",
+                 "full_name": "Pages ASM", "email": f"asm.pages{tag.lower()}@test.in", "mobile": "9000000012",
+                 "hierarchy_level_id": levels["ASM"]["id"], "role_id": roles["asm"]["id"],
+                 "parent_id": None, "territory": "Pune East"})
+    check("create asm user", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
+
+    # verifier + finance are GLOBAL roles: only the SA console can mint them
+    def mk_global(username, password, role_name, full_name, mobile):
+        rr = client.post(f"/api/v1/superadmin/divisions/{did}/users", headers=sa_h, json={
+            "username": username, "password": password, "full_name": full_name,
+            "email": f"{username}@test.in", "role_id": roles[role_name]["id"],
+            "division_id": tenant_division_id, "mobile": mobile})
+        return rr
+
+    rr = mk_global(f"verifier.pages{tag.lower()}", "Vf@12345", "verifier", "Pages Verifier", "9000000013")
+    check("create verifier user (SA console)", rr.status_code == 200, f"{rr.status_code} {rr.text[:200]}")
+    rr = mk_global(f"finance.pages{tag.lower()}", "Fn@12345", "finance", "Pages Finance", "9000000014")
+    check("create finance user (SA console)", rr.status_code == 200, f"{rr.status_code} {rr.text[:200]}")
+
+    # SA-minted users land with onboarding flags up -- clear them like the UI does
+    conn = get_conn(_TENANT_DB)
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET must_change_password=FALSE, mfa_setup_required=FALSE, "
+                    "profile_pending=FALSE WHERE role_id IN (%s,%s)",
+                    (roles["verifier"]["id"], roles["finance"]["id"]))
+        conn.commit()
+    finally:
+        conn.close()
+
     tenants = [
-        ("admin",      "DEMO1234", "company_admin", "Admin@123"),
-        ("mr",         "DEMO1234", "mr.amit",        "Demo@123"),
-        ("asm",        "DEMO1234", "asm.rahul",      "Demo@123"),
-        ("verifier",   "DEMO1234", "verifier.kavita","Demo@123"),
-        ("finance",    "DEMO1234", "finance.sunil",  "Demo@123"),
+        ("admin",    slug, "company_admin", "Admin@123"),
+        ("mr",       slug, f"mr.pages{tag.lower()}", "Mr@12345"),
+        ("asm",      slug, f"asm.pages{tag.lower()}", "Am@12345"),
+        ("verifier", slug, f"verifier.pages{tag.lower()}", "Vf@12345"),
+        ("finance",  slug, f"finance.pages{tag.lower()}", "Fn@12345"),
     ]
 
-    for label, company, username, password in tenants:
-        s = login(client, company, username, password)
+    for label, division_slug, username, password in tenants:
+        s = login(client, division_slug, username, password)
         if not s:
-            check(f"login {label} ({username}@{company})", False, "login failed")
+            check(f"login {label} ({username}@{division_slug})", False, "login failed")
             continue
         perms, entry = set(s["perms"]), s["entry"]
-        check(f"login {label} ({username}@{company}) role={s['user'].get('role')} perms={len(perms)} entry={entry}", True)
+        check(f"login {label} ({username}@{division_slug}) role={s['user'].get('role')} perms={len(perms)} entry={entry}", True)
         h = {"Authorization": f"Bearer {s['access']}"}
         print(f"-- {label} --")
         for page, eps in ENDPOINTS.items():
@@ -168,4 +268,25 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        # hermetic: drop the scratch tenant + scratch platform DBs
+        if _TENANT_DB:
+            __import__("psycopg2")
+            from saas import config
+            conn = __import__("psycopg2").connect(
+                host=config.DB_HOST, port=config.DB_PORT,
+                user=config.DB_USER, password=config.DB_PASSWORD, dbname="postgres")
+            conn.autocommit = True
+            try:
+                cur = conn.cursor()
+                for name in (_TENANT_DB, SCRATCH_PLATFORM):
+                    cur.execute("SELECT 1 FROM pg_database WHERE datname=%s", (name,))
+                    if not cur.fetchone():
+                        continue
+                    cur.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                                "WHERE datname=%s AND pid<>pg_backend_pid()", (name,))
+                    cur.execute(f'DROP DATABASE IF EXISTS "{name}"')
+            finally:
+                conn.close()

@@ -1,26 +1,45 @@
 """
-End-to-end smoke test for the SaaS platform, run against real Postgres.
+End-to-end smoke test for the SaaS platform, on a FULLY HERMETIC scratch
+platform database (a fresh control-plane DB is created at run start and both
+it and the provisioned tenant DB are dropped afterwards -- the live platform
+DB is never touched).
 
 Covers the full happy path:
-  superadmin -> create+provision company -> company admin -> masters
-  -> MR submits POB (with invoice upload) -> duplicate detection
+  superadmin -> create+provision division (tenant DB) -> division admin
+  -> masters -> MR submits POB (with invoice upload) -> duplicate detection
   -> verifier approves -> gratification (cashback) paid -> dashboards/reports
+
+Ported in Batch 4 from the legacy companies/plans model to the current
+divisions/:div login (division_slug) architecture.
 
 Run:  venv\\Scripts\\python.exe scripts\\smoke_test.py
 """
+import base64
 import io
 import os
 import sys
+import uuid
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+
+# ── hermetic: point the platform at a scratch control-plane DB BEFORE the
+# saas package is imported (config reads this at import time) ──────────────
+SCRATCH_PLATFORM = f"psk_smoke_{uuid.uuid4().hex[:10]}"
+os.environ["PLATFORM_DB_NAME"] = SCRATCH_PLATFORM
 
 from fastapi.testclient import TestClient
 
 from saas.main import app
+import saas.config as config
+from saas import platform_db, provision as provision_mod
+
+platform_db.init_platform_db()
 
 BASE = "/api/v1"
 FAILED = []
-BOOT_PASSWORD = os.environ.get("SUPERADMIN_BOOTSTRAP_PASSWORD", "superadmin@2025")
+BOOT_PASSWORD = os.environ.get("SUPERADMIN_BOOTSTRAP_PASSWORD", "101990")
+_TENANT_DB = None
 
 
 def check(name, cond, extra=""):
@@ -34,7 +53,48 @@ def auth_header(token):
     return {"Authorization": f"Bearer {token}"}
 
 
+def _min_pdf(seed="x"):
+    """A tiny but structurally-valid PDF (passes pypdf's parse + magic checks).
+
+    pypdf blank-page output is byte-deterministic, so every PDF in the suite
+    must carry a unique title/metadata -- otherwise the content-hash duplicate
+    guard would flag distinct invoices as copies of each other."""
+    from pypdf import PdfWriter
+    w = PdfWriter()
+    w.add_blank_page(width=100, height=100)
+    w.add_metadata({"/Title": f"smoke-{seed}"})
+    buf = io.BytesIO()
+    w.write(buf)
+    return buf.getvalue()
+
+
+# canonical 1x1 transparent PNG -- decodes under Pillow (upload validation
+# requires a real image decode, not just magic bytes)
+PNG_1PX = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+
+
+def _drop_database(name):
+    """Terminate connections and drop a scratch database from the maintenance
+    DB (no-op if it never existed)."""
+    conn = __import__("psycopg2").connect(
+        host=config.DB_HOST, port=config.DB_PORT,
+        user=config.DB_USER, password=config.DB_PASSWORD, dbname="postgres")
+    conn.autocommit = True
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM pg_database WHERE datname=%s", (name,))
+        if not cur.fetchone():
+            return
+        cur.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname=%s AND pid<>pg_backend_pid()", (name,))
+        cur.execute(f'DROP DATABASE IF EXISTS "{name}"')
+    finally:
+        conn.close()
+
+
 def main():
+    global _TENANT_DB
     with TestClient(app) as client:
         # ── superadmin login ────────────────────────────────────────────────
         r = client.post(f"{BASE}/auth/superadmin/login",
@@ -43,36 +103,45 @@ def main():
         sa_token = r.json().get("access_token")
         SA = auth_header(sa_token)
 
-        # ── plans seeded ────────────────────────────────────────────────────
-        r = client.get(f"{BASE}/superadmin/plans", headers=SA)
-        check("plans listed", r.status_code == 200 and len(r.json()["items"]) >= 4)
-        trial_plan = next(p for p in r.json()["items"] if p["code"] == "trial")
-
-        # ── create + provision a company ────────────────────────────────────
-        r = client.post(f"{BASE}/superadmin/companies", headers=SA, json={
-            "name": "Acme Pharma Ltd",
-            "gst": "27AABCU9603R1ZM",
-            "pan": "AABCU9603R",
-            "contact_person": "Rahul Mehta",
-            "contact_email": "rahul@acme.in",
-            "contact_mobile": "9898989898",
-            "plan_id": trial_plan["id"],
-            "user_limit": 500,
+        # ── create + provision a division (the tenant) ──────────────────────
+        tag = uuid.uuid4().hex[:6].upper()
+        code = f"SMK{tag}"
+        r = client.post(f"{BASE}/superadmin/divisions", headers=SA, json={
+            "name": f"Smoke Division {tag}", "code": code,
             "provision": True,
-            "admin_username": "company_admin",
-            "admin_password": "Admin@123",
-            "admin_email": "admin@acme.in",
+            "admin_username": "company_admin", "admin_password": "Admin@123",
+            "admin_email": "admin@smoke.in",
         })
-        check("company created + provisioned", r.status_code == 200, f"{r.status_code} {r.text[:300]}")
-        company = r.json()
-        check("company status active", company.get("status") == "active", company.get("status"))
-        check("tenant db assigned", bool(company.get("tenant_db_name")), company.get("tenant_db_name"))
-        tenant_db = company.get("tenant_db_name")
+        check("division created + provisioned", r.status_code == 200,
+              f"{r.status_code} {r.text[:300]}")
+        division = r.json()
+        check("division status active", division.get("status") == "active",
+              division.get("status"))
+        check("tenant db assigned", bool(division.get("tenant_db_name")),
+              division.get("tenant_db_name"))
+        tenant_db = division.get("tenant_db_name")
+        _TENANT_DB = tenant_db
 
-        # ── tenant login as company admin ───────────────────────────────────
+        # Provisioning leaves the admin in onboarding; clear the flags so the
+        # API session behaves like a normal one (see test_product_crud.py).
+        pool = __import__("saas.db_utils", fromlist=["make_pool"]).make_pool(
+            tenant_db, minconn=1, maxconn=2)
+        c = pool.get_conn()
+        cur = c.cursor()
+        cur.execute("UPDATE users SET must_change_password=FALSE, "
+                    "mfa_setup_required=FALSE, profile_pending=FALSE "
+                    "WHERE username='company_admin'")
+        c.commit()
+        cur.execute("SELECT id FROM divisions ORDER BY id LIMIT 1")
+        tenant_division_id = cur.fetchone()[0]
+        pool.close_all()
+
+        # ── tenant login as division admin ──────────────────────────────────
         r = client.post(f"{BASE}/auth/login", json={
-            "company_code": company["code"], "username": "company_admin", "password": "Admin@123"})
-        check("company admin login", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
+            "division_slug": division["code"], "username": "company_admin",
+            "password": "Admin@123"})
+        check("division admin login", r.status_code == 200,
+              f"{r.status_code} {r.text[:200]}")
         admin_token = r.json()["access_token"]
         ADM = auth_header(admin_token)
 
@@ -104,10 +173,22 @@ def main():
         check("create MR user", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
         mr_id = r.json()["id"]
 
-        r = client.post(f"{BASE}/users", headers=ADM, json={
+        # verifier/auditor/finance are GLOBAL roles a division-scoped admin
+        # cannot hand out -- the platform superadmin console provisions them.
+        r = client.post(f"{BASE}/superadmin/divisions/{division['id']}/users", headers=SA, json={
             "username": "verifier1", "password": "Vf@12345", "full_name": "Verifier One",
-            "email": "verifier@acme.in", "role_id": verifier_role})
-        check("create verifier user", r.status_code == 200, r.text[:200])
+            "email": "verifier@acme.in", "role_id": verifier_role,
+            "division_id": tenant_division_id})
+        check("create verifier user (SA console)", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
+        pool = __import__("saas.db_utils", fromlist=["make_pool"]).make_pool(
+            tenant_db, minconn=1, maxconn=2)
+        c = pool.get_conn()
+        cur = c.cursor()
+        cur.execute("UPDATE users SET must_change_password=FALSE, "
+                    "mfa_setup_required=FALSE, profile_pending=FALSE "
+                    "WHERE username='verifier1'")
+        c.commit()
+        pool.close_all()
 
         # ── masters: brand / campaign / product / chemist ──────────────────
         r = client.post(f"{BASE}/brands", headers=ADM, json={"name": "Asthakind", "code": "ASKD"})
@@ -118,9 +199,21 @@ def main():
             "name": "Asthakind POB Cashback", "brand_id": brand_id,
             "division": "Cardio", "start_date": "2026-01-01", "end_date": "2026-12-31",
             "status": "active", "active": True, "scheme_type": "cashback",
-            "terms_conditions": "Invoice must be legible."})
+            "terms_conditions": "Invoice must be legible.",
+            "rules": [{
+                "name": "Cashback >= 1000", "priority": 1,
+                "conditions": [{"field": "invoice_amount", "op": ">=", "value": 1000}],
+                "then_action": "cashback", "value": 300, "active": True}]})
         check("create campaign", r.status_code == 200, r.text[:200])
         campaign_id = r.json()["id"]
+        # modern lifecycle: draft -> pending_approval -> platform-approved
+        r = client.post(f"{BASE}/campaigns/{campaign_id}/submit", headers=ADM, json={})
+        check("submit campaign for approval", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
+        r = client.post(f"{BASE}/superadmin/divisions/{division['id']}/campaigns/{campaign_id}/approve",
+                        headers=SA, json={})
+        check("SA approves campaign (active)",
+              r.status_code == 200 and r.json().get("status") == "active",
+              f"{r.status_code} {r.text[:200]}")
 
         r = client.post(f"{BASE}/products", headers=ADM, json={
             "campaign_id": campaign_id, "brand_id": brand_id, "sku": "ASKD-10",
@@ -130,22 +223,24 @@ def main():
         check("create product", r.status_code == 200, r.text[:200])
         product_id = r.json()["id"]
 
-        r = client.post(f"{BASE}/chemists", headers=ADM, json={
-            "name": "Sunrise Medical", "shop_name": "Sunrise Medical Store",
-            "gst": "27AABCU9603R1ZM", "mobile": "9888898888", "city": "Pune",
-            "state": "Maharashtra", "pin": "411001", "owner_name": "Sunil Jain",
-            "doctor_name": "Dr. Deshpande", "category": "Retail", "ocid": "OC-0001"})
-        check("create chemist", r.status_code == 200, r.text[:200])
-        chemist_id = r.json()["id"]
-
         # ── MR submits POB with invoice ─────────────────────────────────────
         r = client.post(f"{BASE}/auth/login", json={
-            "company_code": company["code"], "username": "mr.ashok", "password": "Mr@12345"})
+            "division_slug": division["code"], "username": "mr.ashok", "password": "Mr@12345"})
         check("MR login", r.status_code == 200, r.text[:200])
         mr_token = r.json()["access_token"]
         MR = auth_header(mr_token)
 
-        invoice_bytes = b"%PDF-1.4 fake invoice content 001"
+        # Chemists are registered by the field roles (mr/psr hold
+        # chemist.manage; division_admin is explicitly read-only there).
+        r = client.post(f"{BASE}/chemists", headers=MR, json={
+            "name": "Sunrise Medical", "shop_name": "Sunrise Medical Store",
+            "gst": "27AABCU9603R1ZM", "mobile": "9888898888", "city": "Pune",
+            "state": "Maharashtra", "pin": "411001", "owner_name": "Sunil Jain",
+            "doctor_name": "Dr. Deshpande", "category": "Retail", "ocid": "OC-0001"})
+        check("create chemist (MR)", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
+        chemist_id = r.json()["id"]
+
+        invoice_bytes = _min_pdf("inv-1001")
         r = client.post(
             f"{BASE}/pob/submit", headers=MR,
             data={"campaign_id": campaign_id, "product_id": product_id, "chemist_id": chemist_id,
@@ -170,7 +265,7 @@ def main():
 
         # ── verifier approves ───────────────────────────────────────────────
         r = client.post(f"{BASE}/auth/login", json={
-            "company_code": company["code"], "username": "verifier1", "password": "Vf@12345"})
+            "division_slug": division["code"], "username": "verifier1", "password": "Vf@12345"})
         check("verifier login", r.status_code == 200, r.text[:200])
         vf_token = r.json()["access_token"]
         VF = auth_header(vf_token)
@@ -201,7 +296,7 @@ def main():
                         data={"campaign_id": campaign_id, "product_id": product_id, "chemist_id": chemist_id,
                               "quantity": 3, "ptr": 185.0, "invoice_amount": 555.0, "pob_amount": 555.0,
                               "invoice_number": "INV-2001", "invoice_date": "2026-07-02"},
-                        files={"invoice": ("inv2001.pdf", b"%PDF-1.4 fake 002", "application/pdf")})
+                        files={"invoice": ("inv2001.pdf", _min_pdf("inv-2001"), "application/pdf")})
         pob2 = r.json()["pob_id"]
         r = client.get(f"{BASE}/verification/queue?status=pending", headers=VF)
         v2 = next(i["verification_id"] for i in r.json()["items"] if i["pob_id"] == pob2)
@@ -216,7 +311,7 @@ def main():
         r = client.get(f"{BASE}/dashboards/verification", headers=ADM)
         check("verification dashboard", r.status_code == 200 and "avg_tat_hours" in r.json())
         r = client.get(f"{BASE}/dashboards/finance", headers=ADM)
-        check("finance dashboard", r.status_code == 200 and r.json().get("paid") == 1850.0, r.text[:200])
+        check("finance dashboard", r.status_code == 200 and r.json().get("paid") == 300.0, r.text[:200])
 
         r = client.get(f"{BASE}/reports/campaign", headers=ADM)
         check("campaign report xlsx", r.status_code == 200 and r.content[:2] == b"PK", "not xlsx")
@@ -225,29 +320,37 @@ def main():
 
         # ── notifications to MR ─────────────────────────────────────────────
         r = client.post(f"{BASE}/auth/login", json={
-            "company_code": company["code"], "username": "mr.ashok", "password": "Mr@12345"})
+            "division_slug": division["code"], "username": "mr.ashok", "password": "Mr@12345"})
         MR = auth_header(r.json()["access_token"])
         r = client.get(f"{BASE}/notifications/", headers=MR)
         check("MR notifications", r.status_code == 200 and r.json()["unread"] >= 2,
               f"{r.status_code} {r.text[:200]}")
 
         # ── physical gift flow (different scheme) ───────────────────────────
-        r = client.post(f"{BASE}/campaigns", headers=ADM, json={
-            "name": "Celevida Reward", "status": "active", "scheme_type": "physical_gift"})
-        gift_campaign = r.json()["id"]
-        r = client.post(f"{BASE}/products", headers=ADM, json={
-            "campaign_id": gift_campaign, "name": "Celevida 100g", "ptr": 500, "mrp": 550})
-        gift_product = r.json()["id"]
+        # gift master must exist before the campaign rule can reference it
         r = client.post(f"{BASE}/gifts", headers=ADM, json={
             "name": "Bluetooth Speaker", "cost": 1200, "stock": 5})
         check("create gift", r.status_code == 200)
         gift_id = r.json()["id"]
+        r = client.post(f"{BASE}/campaigns", headers=ADM, json={
+            "name": "Celevida Reward", "status": "active", "scheme_type": "physical_gift",
+            "rules": [{
+                "name": "Gift >= 1000", "priority": 1,
+                "conditions": [{"field": "invoice_amount", "op": ">=", "value": 1000}],
+                "then_action": "gift", "value": 0, "gift_id": gift_id, "active": True}]})
+        gift_campaign = r.json()["id"]
+        r = client.post(f"{BASE}/campaigns/{gift_campaign}/submit", headers=ADM, json={})
+        r = client.post(f"{BASE}/superadmin/divisions/{division['id']}/campaigns/{gift_campaign}/approve",
+                        headers=SA, json={})
+        r = client.post(f"{BASE}/products", headers=ADM, json={
+            "campaign_id": gift_campaign, "name": "Celevida 100g", "ptr": 500, "mrp": 550})
+        gift_product = r.json()["id"]
 
         r = client.post(f"{BASE}/pob/submit", headers=MR,
                         data={"campaign_id": gift_campaign, "product_id": gift_product, "chemist_id": chemist_id,
                               "quantity": 4, "ptr": 500.0, "invoice_amount": 2000.0, "pob_amount": 2000.0,
                               "invoice_number": "INV-3001", "invoice_date": "2026-07-03"},
-                        files={"invoice": ("inv3001.pdf", b"%PDF-1.4 fake 003", "application/pdf")})
+                        files={"invoice": ("inv3001.pdf", _min_pdf("inv-3001"), "application/pdf")})
         gift_pob_id = r.json()["pob_id"]
         r = client.get(f"{BASE}/verification/queue?status=pending", headers=VF)
         v3 = next(i["verification_id"] for i in r.json()["items"] if i["pob_id"] == gift_pob_id)
@@ -260,7 +363,7 @@ def main():
         check("gift dispatched", r.status_code == 200 and r.json()["status"] == "dispatched", r.text[:200])
         r = client.post(f"{BASE}/gratification/{gift_grat['id']}/delivered", headers=ADM,
                         data={"latitude": 18.5204, "longitude": 73.8567},
-                        files={"photo": ("proof.jpg", b"jpgbytes", "image/jpeg")})
+                        files={"photo": ("proof.png", PNG_1PX, "image/png")})
         check("gift delivered + GPS + photo", r.status_code == 200 and r.json()["status"] == "delivered",
               r.text[:200])
         r = client.post(f"{BASE}/gratification/{gift_grat['id']}/acknowledge", headers=ADM,
@@ -269,8 +372,15 @@ def main():
 
         # ── voucher flow ────────────────────────────────────────────────────
         r = client.post(f"{BASE}/campaigns", headers=ADM, json={
-            "name": "Nise Cashback Voucher", "status": "active", "scheme_type": "voucher"})
+            "name": "Nise Cashback Voucher", "status": "active", "scheme_type": "voucher",
+            "rules": [{
+                "name": "Voucher >= 500", "priority": 1,
+                "conditions": [{"field": "invoice_amount", "op": ">=", "value": 500}],
+                "then_action": "voucher", "value": 300, "active": True}]})
         vch_campaign = r.json()["id"]
+        r = client.post(f"{BASE}/campaigns/{vch_campaign}/submit", headers=ADM, json={})
+        r = client.post(f"{BASE}/superadmin/divisions/{division['id']}/campaigns/{vch_campaign}/approve",
+                        headers=SA, json={})
         r = client.post(f"{BASE}/products", headers=ADM, json={
             "campaign_id": vch_campaign, "name": "Nise 100", "ptr": 300, "mrp": 340})
         vch_product = r.json()["id"]
@@ -278,7 +388,7 @@ def main():
                         data={"campaign_id": vch_campaign, "product_id": vch_product, "chemist_id": chemist_id,
                               "quantity": 2, "ptr": 300.0, "invoice_amount": 600.0, "pob_amount": 600.0,
                               "invoice_number": "INV-4001", "invoice_date": "2026-07-04"},
-                        files={"invoice": ("inv4001.pdf", b"%PDF-1.4 fake 004", "application/pdf")})
+                        files={"invoice": ("inv4001.pdf", _min_pdf("inv-4001"), "application/pdf")})
         vch_pob = r.json()["pob_id"]
         r = client.get(f"{BASE}/verification/queue?status=pending", headers=VF)
         v4 = next(i["verification_id"] for i in r.json()["items"] if i["pob_id"] == vch_pob)
@@ -301,13 +411,21 @@ def main():
         r = client.get(f"{BASE}/storage/{tenant_db}/invoices/x.pdf", headers=MR)
         check("storage tenant scoped", r.status_code == 404, f"expected 404 got {r.status_code}")
 
-        print("\nCompany code:", company["code"], "| tenant_db:", tenant_db)
+        print(f"\nDivision code: {division['code']} | tenant_db: {tenant_db}")
         print(f"\n{len(FAILED)} failures out of the checks above.")
         if FAILED:
             print("Failed:", FAILED)
-            sys.exit(1)
-        print("SMOKE TEST PASSED")
+        else:
+            print("SMOKE TEST PASSED")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        # hermetic: drop the scratch tenant + scratch platform DBs
+        if _TENANT_DB:
+            _drop_database(_TENANT_DB)
+        _drop_database(SCRATCH_PLATFORM)
+    if FAILED:
+        sys.exit(1)

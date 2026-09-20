@@ -170,7 +170,7 @@ def _daily_pass():
     except Exception:
         log.exception("daily backup sweep failed")
     try:
-        from app.ai.gemini_extraction import cleanup_orphaned_gemini_files
+        from saas.ai_cleanup import cleanup_orphaned_gemini_files
         deleted = cleanup_orphaned_gemini_files()
         log.info("gemini orphaned-file sweep: deleted=%s", deleted)
     except Exception:

@@ -16,7 +16,7 @@ from ..scoping import GLOBAL_ROLES, division_scope
 from ..upload_validation import SPREADSHEET_KINDS, UploadValidationError, validate_upload
 from ..pagination import PageLimit, PageOffset
 from .. import config
-from app.security import hash_pw
+from saas.passwords import hash_pw
 
 router = APIRouter(prefix="/api/v1", tags=["company"])
 

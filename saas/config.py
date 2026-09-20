@@ -116,6 +116,26 @@ OCR_COST_INPUT_PER_MTOK = float(os.environ.get("OCR_COST_INPUT_PER_MTOK", "0.075
 OCR_COST_OUTPUT_PER_MTOK = float(os.environ.get("OCR_COST_OUTPUT_PER_MTOK", "0.30"))
 OCR_COST_CURRENCY = os.environ.get("OCR_COST_CURRENCY", "USD")
 
+# ── Statement / document extraction (merged from legacy app/config.py) ─────
+# Two Gemini models, per-document routing (see saas/ai/gemini_extraction.py):
+# pdf_text uses the cheap model on PDFs with a genuine text layer; everything
+# else (scans/images/visual docs) uses GEMINI_MODEL_VISUAL.
+GEMINI_MODEL_TEXT_PDF = os.environ.get("GEMINI_MODEL_TEXT_PDF", "gemini-2.5-flash")
+GEMINI_MODEL_VISUAL = os.environ.get("GEMINI_MODEL_VISUAL", "gemini-3.5-flash")
+# Static USD->INR rate for the superadmin AI costing ledger (saas/ai/pricing.py).
+# Stale rate only skews the displayed INR figure, never Google's actual USD billing.
+USD_TO_INR_RATE = float(os.environ.get("USD_TO_INR_RATE", "95.5"))
+# Documents with more pages than this are split into chunks and extracted in
+# parallel, then merged (Gemini's OUTPUT window, not input, is the real limit).
+GEMINI_MAX_PAGES_PER_CHUNK = int(os.environ.get("GEMINI_MAX_PAGES_PER_CHUNK", "25"))
+# Max chunks of ONE document extracted concurrently (separate from
+# OCR_WORKER_POOL_SIZE, which bounds extraction across different documents).
+GEMINI_CHUNK_PARALLELISM = int(os.environ.get("GEMINI_CHUNK_PARALLELISM", "6"))
+# Dedicated worker pool just for document extraction calls (saas/worker_pool.py),
+# decoupled from the request-handling threadpool so an upload flood can't
+# starve ordinary page requests of threads, and vice versa.
+OCR_WORKER_POOL_SIZE = int(os.environ.get("OCR_WORKER_POOL_SIZE", "40"))
+
 # ── Misc ────────────────────────────────────────────────────────────────────
 MAX_UPLOAD_SIZE = int(os.environ.get("MAX_UPLOAD_SIZE", str(50 * 1024 * 1024)))
 # Reject non-HTTPS webhook registration/delivery targets. Defaults to true

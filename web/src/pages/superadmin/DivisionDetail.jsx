@@ -5,11 +5,13 @@ import {
   Badge, ErrorBox, Field, Modal, PageHeader, SearchBox, Select, Skeleton, StatCard,
   StatSkeleton, StatusBadge, Table, TableSkeleton, Tabs, TextArea, TextInput, toast, useAsync,
 } from '../../ui';
+import { CreditsPanel } from './DivisionCredits';
 
 const TABS = [
   { value: 'overview', label: 'Overview' },
   { value: 'users', label: 'Users' },
   { value: 'roles', label: 'Roles & hierarchy' },
+  { value: 'credits', label: 'Statement Credits' },
 ];
 
 const loginUrl = (code) => (code ? `${window.location.origin}/login/${encodeURIComponent(code)}` : null);
@@ -181,6 +183,7 @@ export default function DivisionDetail() {
 
       {tab === 'users' && <UsersTab did={c.id} />}
       {tab === 'roles' && <RolesTab did={c.id} />}
+      {tab === 'credits' && <CreditsPanel did={c.id} />}
 
       {editOpen && (
         <DivisionEditModal division={c}

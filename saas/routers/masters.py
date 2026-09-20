@@ -189,21 +189,6 @@ def list_campaigns(q: str = "", status: str = "", active: bool = None, brand_id:
     return {"items": campaign_service.list_campaigns(ctx.conn, q, status, active, brand_id, division_id)}
 
 
-@router.get("/campaigns/{cid}")
-def get_campaign(cid: int, ctx: TenantContext = Depends(require_permission("campaign.view"))):
-    row = campaign_service.get_campaign(ctx.conn, cid)
-    if not row:
-        raise HTTPException(404, "campaign not found")
-    div = division_scope(ctx.conn, ctx)
-    if div and row.get("division_id") != div:
-        raise HTTPException(404, "campaign not found")
-    if "campaign.manage" not in ctx.perms and row.get("status") not in ("active", "completed"):
-        # Same execution-only boundary as the list endpoint — a direct-by-ID
-        # request shouldn't leak a draft/pending/rejected campaign either.
-        raise HTTPException(404, "campaign not found")
-    return row
-
-
 @router.get("/campaigns/tracking")
 def campaign_tracking(ctx: TenantContext = Depends(require_permission("campaign.view"))):
     """Divisions -> campaigns -> team hierarchy with per-member POB stats.
@@ -287,6 +272,21 @@ def campaign_tracking(ctx: TenantContext = Depends(require_permission("campaign.
     if unassigned["campaigns"]:
         groups.append(unassigned)
     return {"items": groups, "users_total": len(users), "campaign_total": len(campaigns)}
+
+
+@router.get("/campaigns/{cid}")
+def get_campaign(cid: int, ctx: TenantContext = Depends(require_permission("campaign.view"))):
+    row = campaign_service.get_campaign(ctx.conn, cid)
+    if not row:
+        raise HTTPException(404, "campaign not found")
+    div = division_scope(ctx.conn, ctx)
+    if div and row.get("division_id") != div:
+        raise HTTPException(404, "campaign not found")
+    if "campaign.manage" not in ctx.perms and row.get("status") not in ("active", "completed"):
+        # Same execution-only boundary as the list endpoint — a direct-by-ID
+        # request shouldn't leak a draft/pending/rejected campaign either.
+        raise HTTPException(404, "campaign not found")
+    return row
 
 
 @router.post("/campaigns")
@@ -1092,11 +1092,6 @@ def create_chemist(body: dict, ctx: TenantContext = Depends(require_permission("
     vals.append(ctx.user["id"])
     # Freeze the registering user + their reporting manager at insert time so
     # division admins always see that lineage even if users/hierarchy change.
-    for lc, lv in _registrant_lineage(conn, ctx.user["id"]).items():
-        cols.append(lc)
-        vals.append(lv)
-    # Snapshot the registering end user + their reporting manager so division
-    # admins always see the registrant lineage even after users/hierarchy change.
     for lc, lv in _registrant_lineage(conn, ctx.user["id"]).items():
         cols.append(lc)
         vals.append(lv)

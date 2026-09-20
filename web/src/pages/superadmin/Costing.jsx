@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../../api';
+import { api, downloadFile } from '../../api';
 import {
   BarChart, Badge, DashHero, ErrorBox, MetricTile, PanelCard, PeriodSelect,
   ProgressBar, Spinner, Table, useAsync,
@@ -144,7 +144,13 @@ export default function Costing() {
     <div>
       <DashHero title="AI usage & cost"
         subtitle="Gemini invoice-extraction tokens and spend, by division, by user and by model."
-        actions={<PeriodSelect value={days} onChange={setDays} options={PERIODS} />} />
+        actions={<>
+          <PeriodSelect value={days} onChange={setDays} options={PERIODS} />
+          <button className="btn" disabled={loading}
+            onClick={() => downloadFile(`/api/v1/superadmin/costing/export?days=${days}`, `ai-costing-${days === 0 ? 'all-time' : days + 'd'}.xlsx`)}>
+            ⬇ Export Excel
+          </button>
+        </>} />
 
       <div className="metric-grid">
         <MetricTile label={`AI spend (${currency})`} value={fmtCost(totalCost, currency)} icon="₹" tone="primary"
