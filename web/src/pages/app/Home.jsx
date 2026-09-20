@@ -190,18 +190,14 @@ function PersonalDashboard() {
           sub={`${fmtNum(own.gratifications_pending)} pending · ${fmtNum(own.gratifications_completed)} completed`} />
       </div>
 
-      <div className="card" style={{ padding: 16, marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <h4 style={{ margin: 0 }}>Today at a glance</h4>
-          <span className="muted" style={{ fontSize: 12 }}>Your field activity so far today</span>
-        </div>
+      <PanelCard title="Today at a glance" sub="Your field activity so far today" className="today-glance">
         <div className="metric-grid">
           <MetricTile label="POBs today" value={fmtNum(today.pobs)} icon="≣" tone="primary" sub={`${fmtNum(today.verified)} verified · ${fmtNum(today.pending)} pending`} />
           <MetricTile label="Value today" value={fmtShort(today.amount)} icon="₹" tone="green" sub="Submitted today" />
           <MetricTile label="Chemist visits today" value={fmtNum(today.visits)} icon="📅" tone="blue" sub="Visits logged" />
           <MetricTile label="Rejected today" value={fmtNum(today.rejected)} icon="✕" tone="red" sub={today.rejected ? 'Resubmit with corrected proof' : 'Nothing rejected'} />
         </div>
-      </div>
+      </PanelCard>
 
       <div className="bi-grid">
         <PanelCard title="My submission trend" sub="POBs you submitted per month">
@@ -214,7 +210,7 @@ function PersonalDashboard() {
         </PanelCard>
 
         <PanelCard title="My status mix" sub="Where your submissions stand"
-          action={<Link className="btn btn-sm" to="/app/pob/mine">View all</Link>}>
+          action={<Link className="btn-link" to="/app/pob/mine">View all →</Link>}>
           {statusSegs.length ? (
             <div className="donut-panel">
               <DonutChart segments={statusSegs} size={158} thickness={22}
@@ -236,7 +232,7 @@ function PersonalDashboard() {
         {isManager && (
           <PanelCard title="Team performance" span="2"
             sub={`${members.length} direct report${members.length > 1 ? 's' : ''} · ${fmtShort(team.amount)} team POB value`}
-            action={<Link className="btn btn-sm" to="/app/analytics">Full analytics</Link>}>
+            action={<Link className="btn-link" to="/app/analytics">Full analytics →</Link>}>
             <Table cols={memberCols}
               rows={members.slice().sort((a, b) => (b.amount || 0) - (a.amount || 0)).slice(0, 10)}
               keyOf={(r) => r.id} empty="No team members found" />

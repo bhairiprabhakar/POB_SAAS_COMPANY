@@ -146,7 +146,7 @@ export default function SuperDashboard() {
         </PanelCard>
 
         <PanelCard title="Value by division" sub="Share of total POB value"
-          action={<Link className="btn btn-sm" to="/superadmin/divisions">View all</Link>}>
+          action={<Link className="btn-link" to="/superadmin/divisions">View all →</Link>}>
           {valueSegs.length ? (
             <div className="donut-panel">
               <DonutChart segments={valueSegs} size={158} thickness={22}
@@ -158,7 +158,7 @@ export default function SuperDashboard() {
 
         <PanelCard title="Division performance" span="2"
           sub="Ranked by POB value — approval bar shows verified vs decided"
-          action={<Link className="btn btn-sm" to="/superadmin/divisions">Manage divisions</Link>}>
+          action={<Link className="btn-link" to="/superadmin/divisions">Manage divisions →</Link>}>
           <Table cols={cols} rows={rows.slice(0, 12)} keyOf={(r) => r.division_id}
             empty="No provisioned divisions yet" />
         </PanelCard>

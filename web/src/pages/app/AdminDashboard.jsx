@@ -190,7 +190,7 @@ export default function AdminDashboard() {
         </PanelCard>
 
         <PanelCard title="Status distribution" sub="Where submissions currently sit"
-          action={<Link className="btn btn-sm" to="/app/pob">View POBs</Link>}>
+          action={<Link className="btn-link" to="/app/pob">View POBs →</Link>}>
           {statusSegs.length ? (
             <div className="donut-panel">
               <DonutChart segments={statusSegs} size={158} thickness={22}
@@ -202,7 +202,7 @@ export default function AdminDashboard() {
 
         <PanelCard title="Campaign performance" span="2"
           sub="Ranked by POB value contributed"
-          action={<Link className="btn btn-sm" to="/app/campaigns">Manage campaigns</Link>}>
+          action={<Link className="btn-link" to="/app/campaigns">Manage campaigns →</Link>}>
           <Table
             cols={campCols}
             rows={campaigns.slice().sort((a, b) =>

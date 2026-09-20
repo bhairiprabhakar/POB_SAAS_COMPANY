@@ -79,6 +79,17 @@
   --gray: var(--muted);
   --gray-tint: rgba(100, 116, 139, .10);
 
+  /* Dark navigation rail — same Cobalt hue family as --primary/--text, just
+     pushed near-black so it reads as a deliberate dark surface (not a
+     washed-out blue) and gives light nav text real contrast. */
+  --sidebar-1: #0C1730;
+  --sidebar-2: #14224A;
+  --sidebar-text: rgba(234, 240, 250, .78);
+  --sidebar-text-strong: #FFFFFF;
+  --sidebar-muted: rgba(255, 255, 255, .45);
+  --sidebar-hover: rgba(255, 255, 255, .08);
+  --sidebar-border: rgba(255, 255, 255, .10);
+
   /* Radius tiers · badge 6 · input/button/dropdown 8 · card/table 12 · drawer/modal 16 */
   --radius-sm: 6px;
   --radius: 8px;
@@ -86,11 +97,25 @@
   --radius-xl: 16px;
   --radius-2xl: 16px;
 
-  /* Restrained elevation · borders + spacing carry structure, not shadows */
-  --shadow: none;
-  --shadow-hover: 0 1px 3px rgba(16, 24, 40, .06);
-  --shadow-lg: 0 12px 32px rgba(16, 24, 40, .12);
+  /* Elevated Cobalt · soft layered elevation gives surfaces real depth
+     instead of relying on borders alone, plus brand-tinted "glow" shadows
+     for primary actions and a couple of gradient tokens for hero/accent
+     moments. Still light-only, still restrained on dense data screens —
+     the lift is in shadow + gradient, not new colors. */
+  --shadow: 0 2px 4px rgba(16, 24, 40, .06), 0 4px 10px rgba(16, 24, 40, .05);
+  --shadow-hover: 0 6px 14px rgba(16, 24, 40, .10), 0 18px 36px -8px rgba(16, 24, 40, .18);
+  --shadow-lg: 0 12px 24px rgba(16, 24, 40, .14), 0 36px 72px -12px rgba(16, 24, 40, .26);
+  --shadow-primary: 0 6px 16px rgba(49, 87, 232, .35), 0 2px 6px rgba(49, 87, 232, .25);
+  --shadow-primary-hover: 0 14px 30px rgba(49, 87, 232, .42), 0 4px 10px rgba(49, 87, 232, .3);
   --ring: 0 0 0 3px rgba(49, 87, 232, .15);
+
+  /* Gradient accents — brand moments only (buttons, active nav, hero banners,
+     icon chips), never on dense tables or body text. */
+  --gradient-primary: linear-gradient(135deg, var(--primary) 0%, #5B6FE8 100%);
+  --gradient-primary-hover: linear-gradient(135deg, var(--primary-2) 0%, var(--indigo) 100%);
+  --gradient-hero: radial-gradient(120% 140% at 100% 0%, rgba(91, 111, 232, .14) 0%, transparent 55%),
+                   radial-gradient(90% 120% at 0% 100%, rgba(118, 86, 214, .08) 0%, transparent 50%),
+                   linear-gradient(100deg, var(--primary-tint), var(--bg-2) 72%);
 }
 
 * { box-sizing: border-box; }
@@ -99,7 +124,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: 'Inter', 'Roboto', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: 'Plus Jakarta Sans', 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
   font-size: 14px;
   line-height: 1.5;
   letter-spacing: 0;
@@ -110,8 +135,8 @@ body {
 a { color: var(--primary); text-decoration: none; }
 a:hover { text-decoration: underline; }
 code { background: var(--bg-3); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
-h1, h2, h3, h4 { margin: 0 0 10px; font-weight: 600; line-height: 1.35; letter-spacing: -.01em; }
-h1, h2, h3 { font-family: 'Inter', 'Roboto', system-ui, sans-serif; color: var(--text); }
+h1, h2, h3, h4 { margin: 0 0 10px; font-weight: 700; line-height: 1.3; letter-spacing: -.015em; }
+h1, h2, h3 { font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif; color: var(--text); }
 strong { font-weight: 600; }
 ::selection { background: rgba(49, 87, 232, .16); }
 
@@ -125,18 +150,30 @@ strong { font-weight: 600; }
 
 .sidebar {
   width: 240px;
+  min-width: 0;
   flex-shrink: 0;
-  background: var(--bg-2);
-  border-right: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--sidebar-1) 0%, var(--sidebar-2) 100%);
   padding: 14px 10px;
   position: sticky;
   top: 0;
   height: 100vh;
   overflow-y: auto;
+  overflow-x: visible;
   transition: width .18s ease;
+  box-shadow: var(--shadow-lg);
 }
+.sidebar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .16); }
+.sidebar::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, .28); }
 
-.brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px 14px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+/* The brand mark sits on its own light card inset into the dark rail --
+   division/company logos are made for light backgrounds, so this keeps
+   them legible instead of fighting the dark surface behind them. */
+.brand {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-2); border-radius: var(--radius-lg);
+  padding: 10px 12px; margin: 0 2px 14px;
+  box-shadow: var(--shadow);
+}
 .brand strong { display: block; font-size: 15px; font-weight: 600; color: var(--text); }
 .brand small { color: var(--muted); font-size: 12px; }
 
@@ -155,22 +192,15 @@ strong { font-weight: 600; }
   position: relative;
   display: flex; align-items: center; gap: 12px;
   width: 100%; padding: 9px 12px 9px 15px; margin: 2px 0; border-radius: 12px;
-  color: var(--text-2); font-weight: 500; font-size: 14px; line-height: 1.3;
-  transition: background .12s ease, color .12s ease, transform .12s ease;
+  color: var(--sidebar-text); font-weight: 500; font-size: 14.5px; line-height: 1.3;
+  letter-spacing: -.005em;
+  transition: background .15s ease, color .15s ease, transform .12s ease, box-shadow .15s ease;
 }
-.side-link:hover { background: var(--surface-hover); color: var(--text); }
-.side-link:active { transform: scale(.995); }
-.side-link.active { background: var(--primary-tint); color: var(--primary); font-weight: 600; }
-.side-link.sub { padding-left: 32px; font-size: 13px; color: var(--text-2); }
+.side-link:hover { background: var(--sidebar-hover); color: var(--sidebar-text-strong); transform: translateX(2px); }
+.side-link:active { transform: scale(.98); }
+.side-link.active { background: var(--gradient-primary); color: #fff; font-weight: 700; box-shadow: var(--shadow-primary); }
+.side-link.sub { padding-left: 32px; font-size: 13px; color: var(--sidebar-text); }
 .side-icon { width: 18px; text-align: center; }
-
-/* Signature "Operational Cobalt" mark — a thin brand-colour bar on the
-   current page's nav item, per the theme's recurring indicator motif. */
-.side-link::before {
-  content: ''; position: absolute; left: 0; top: 8%; bottom: 8%; width: 3px;
-  border-radius: 0 3px 3px 0; background: transparent; transition: background .12s ease;
-}
-.side-link.active::before { background: var(--primary); }
 
 .side-badge {
   margin-left: auto; font-size: 11px; font-weight: 500; padding: 1px 8px; border-radius: 10px;
@@ -179,24 +209,9 @@ strong { font-weight: 600; }
 .side-badge.green { background: var(--green-tint); color: var(--green); }
 .side-badge.red { background: var(--red-tint); color: var(--red); }
 
-.side-group { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--text-2); margin: 16px 12px 6px; }
+.side-group { font-size: 10.5px; text-transform: uppercase; letter-spacing: .9px; color: var(--sidebar-muted); margin: 20px 12px 8px; font-weight: 700; }
 
 .side-section { margin: 14px 0 2px; }
-.side-section.closed .side-link { display: none; }
-.side-group-btn {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  width: 100%; margin: 0 0 2px; padding: 10px 12px 6px; border: none; border-radius: 8px;
-  background: none; cursor: pointer; text-align: left;
-  font: inherit; font-size: 11px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: .7px; color: var(--text-2);
-}
-.side-group-btn:hover { background: var(--surface-hover); color: var(--text); }
-.side-chevron {
-  color: var(--muted); font-size: 10px; line-height: 1;
-  transition: transform .18s ease, color .12s ease;
-}
-.side-group-btn:hover .side-chevron { color: var(--text); }
-.side-chevron.open { transform: rotate(180deg); }
 
 .main-col { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
@@ -287,15 +302,20 @@ a.user-chip:hover { background: var(--bg-3); text-decoration: none; }
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border);
   background: var(--bg-2); color: var(--text); cursor: pointer; font-size: 13px; font-weight: 500;
-  font-family: inherit; transition: background .15s, box-shadow .15s, border-color .15s;
+  font-family: inherit; transition: background .15s, box-shadow .15s, border-color .15s, transform .1s;
 }
-.btn:hover { background: var(--bg-3); }
+.btn:hover { background: var(--bg-3); box-shadow: var(--shadow-hover); }
+.btn:active { transform: scale(.98); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn-primary {
-  background: var(--primary); border-color: var(--primary); color: #fff;
-  box-shadow: 0 1px 2px rgba(49, 87, 232, .28);
+  background: var(--gradient-primary); border-color: transparent; color: #fff;
+  box-shadow: var(--shadow-primary);
 }
-.btn-primary:hover { background: var(--primary-2); border-color: var(--primary-2); box-shadow: 0 1px 3px 1px rgba(49, 87, 232, .22); }
+.btn-primary:hover {
+  background: var(--gradient-primary-hover); border-color: transparent;
+  box-shadow: var(--shadow-primary-hover); transform: translateY(-3px);
+}
+.btn-primary:active { transform: translateY(0) scale(.98); }
 .btn-danger { background: var(--red-tint); border-color: transparent; color: var(--red); }
 .btn-danger:hover { background: #f8d7d5; }
 .btn-amber { background: var(--amber-tint); border-color: transparent; color: var(--amber); }
@@ -403,7 +423,7 @@ a.user-chip:hover { background: var(--bg-3); text-decoration: none; }
   box-shadow: var(--shadow);
   transition: box-shadow .15s, transform .1s;
 }
-.stat-card:hover { box-shadow: var(--shadow-hover); transform: translateY(-1px); }
+.stat-card:hover { box-shadow: var(--shadow-hover); transform: translateY(-3px); }
 .stat-card[data-tone="green"] { --t: var(--green); --tint: var(--green-tint); }
 .stat-card[data-tone="amber"] { --t: var(--amber); --tint: var(--amber-tint); }
 .stat-card[data-tone="red"] { --t: var(--red); --tint: var(--red-tint); }
@@ -413,9 +433,11 @@ a.user-chip:hover { background: var(--bg-3); text-decoration: none; }
 .stat-icon {
   width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
   background: var(--tint); color: var(--t); font-size: 17px; flex-shrink: 0;
+  transition: transform .15s ease;
 }
+.stat-card:hover .stat-icon { transform: scale(1.08); }
 .stat-label { font-size: 12px; font-weight: 500; color: var(--text-2); }
-.stat-value { font-size: 22px; font-weight: 500; letter-spacing: -.02em; }
+.stat-value { font-family: 'Plus Jakarta Sans', 'Inter', sans-serif; font-size: 24px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .stat-sub { font-size: 11px; color: var(--muted); }
 
 .kv-grid { display: flex; flex-direction: column; margin-bottom: 4px; }
@@ -452,7 +474,7 @@ a.user-chip:hover { background: var(--bg-3); text-decoration: none; }
 .kv-list span { color: var(--muted); }
 
 .page-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
-.page-header h1 { font-size: 26px; font-weight: 600; letter-spacing: -.015em; line-height: 1.2; color: var(--text); margin-bottom: 4px; }
+.page-header h1 { font-size: 27px; font-weight: 700; letter-spacing: -.02em; line-height: 1.2; color: var(--text); margin-bottom: 4px; }
 .page-header p { color: var(--text-2); margin: 0; font-size: 14px; }
 .page-actions, .inline-filters { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .card-actions { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
@@ -898,8 +920,7 @@ a.user-chip:hover { background: var(--bg-3); text-decoration: none; }
 /* â”€â”€ Tablet: collapsed icon sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @media (max-width: 900px) {
   .sidebar { width: 64px; }
-  .brand div, .side-group, .side-group-btn, .side-link:not(.active) { display: none; }
-  .side-section.closed .side-link { display: flex; }
+  .brand div, .side-group, .side-label { display: none; }
   .side-link { justify-content: center; }
   .grid-2 { grid-template-columns: 1fr; }
   .grid-3 { grid-template-columns: 1fr; }
@@ -926,9 +947,7 @@ a.user-chip:hover { background: var(--bg-3); text-decoration: none; }
 
   /* restore full labels inside the drawer (undo tablet collapse) */
   .brand div, .side-group { display: block; }
-  .side-group-btn { display: flex; }
-  .side-link:not(.active) { display: flex; }
-  .sidebar.open .side-section.closed .side-link { display: none; }
+  .side-label { display: inline; }
   .side-link { justify-content: flex-start; }
 
   /* page header stacks */
@@ -1448,12 +1467,12 @@ a.user-chip:hover { background: var(--bg-3); text-decoration: none; }
 @media (min-width: 901px) {
   .collapse-btn { display: inline-flex; }
   .sidebar.collapsed { width: 64px; padding: 14px 6px; }
-  .sidebar.collapsed .brand { justify-content: center; padding: 4px 0 14px; }
+  /* Two 34px squares (mark + toggle) don't fit side by side in a 64px rail --
+     stack them so the expand button always lands in the same reachable spot
+     instead of being pushed past the sidebar's own edge. */
+  .sidebar.collapsed .brand { flex-direction: column; justify-content: center; gap: 10px; padding: 4px 0 14px; }
   .sidebar.collapsed .brand div,
-  .sidebar.collapsed .side-group,
-  .sidebar.collapsed .side-group-btn,
-  .sidebar.collapsed .side-label { display: none; }
-  .sidebar.collapsed .side-section.closed .side-link { display: flex; }
+  .sidebar.collapsed .side-group { display: none; }
   .sidebar.collapsed .side-link { justify-content: center; padding: 8px 0; position: relative; }
   .sidebar.collapsed .side-link.sub { padding-left: 0; }
   .sidebar.collapsed .side-link .side-icon { font-size: 17px; }
@@ -1467,6 +1486,48 @@ a.user-chip:hover { background: var(--bg-3); text-decoration: none; }
     font-size: 10px;
     line-height: 1.5;
     text-align: center;
+  }
+
+  /* The page name doesn't disappear when the rail collapses -- it moves into
+     a hover/focus tooltip next to the icon, so it's always one hover away
+     instead of gone until you expand the sidebar again. */
+  .sidebar.collapsed .side-label {
+    position: absolute;
+    left: calc(100% + 12px);
+    top: 50%;
+    display: inline-block;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: var(--text);
+    color: var(--bg-2);
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    box-shadow: var(--shadow-hover);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(-50%) translateX(-4px);
+    transition: opacity .14s ease, transform .14s ease, visibility .14s;
+    z-index: 100;
+  }
+  /* Small arrow pointing back at the icon, same colour as the tooltip body. */
+  .sidebar.collapsed .side-label::before {
+    content: '';
+    position: absolute;
+    left: -4px;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    background: inherit;
+    transform: translateY(-50%) rotate(45deg);
+    border-radius: 2px;
+  }
+  .sidebar.collapsed .side-link:hover .side-label,
+  .sidebar.collapsed .side-link:focus-visible .side-label {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(-50%) translateX(0);
   }
 }
 
@@ -1503,7 +1564,7 @@ a.user-chip:hover { background: var(--bg-3); text-decoration: none; }
   padding: 14px 16px; box-shadow: var(--shadow);
   transition: box-shadow .15s, transform .1s;
 }
-.kpi-card:hover { box-shadow: var(--shadow-hover); transform: translateY(-1px); }
+.kpi-card:hover { box-shadow: var(--shadow-hover); transform: translateY(-3px); }
 .kpi-card[data-tone="green"] { --k: var(--green); --ktint: var(--green-tint); }
 .kpi-card[data-tone="amber"] { --k: var(--amber); --ktint: var(--amber-tint); }
 .kpi-card[data-tone="red"]   { --k: var(--red);   --ktint: var(--red-tint); }
@@ -1544,8 +1605,9 @@ a.user-chip:hover { background: var(--bg-3); text-decoration: none; }
   padding: 18px; box-shadow: var(--shadow); min-width: 0;
 }
 .bi-card.span-2 { grid-column: span 2; }
+.bi-card.today-glance { margin-bottom: 4px; }
 .bi-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-.bi-card-head h3 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -.005em; }
+.bi-card-head h3 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
 .bi-card-head .muted { font-size: 12px; display: block; margin-top: 2px; }
 
 /* shared legend row / dot */
@@ -1644,12 +1706,8 @@ body {
   body { animation: none; }
 }
 
-/* Sidebar + topbar: solid, calm surfaces (no glassmorphism — flat per theme) */
-.sidebar {
-  background: var(--bg-2);
-  border-right: 1px solid var(--border);
-}
-
+/* Sidebar: dark navigation rail (see the base .sidebar rule for the actual
+   gradient) — topbar/content stay light per theme, only the rail is dark. */
 .topbar {
   background: var(--bg-2);
   border-bottom: 1px solid var(--border);
@@ -1682,18 +1740,19 @@ body {
 .btn {
   background: var(--bg-2);
   border-color: var(--border);
-  box-shadow: 0 1px 2px rgba(60, 64, 67, .04);
+  box-shadow: var(--shadow);
 }
-.btn:hover { background: var(--bg-3); box-shadow: none; }
+.btn:hover { background: var(--bg-3); box-shadow: var(--shadow-hover); }
 .btn-primary {
-  background: var(--primary);
-  border-color: var(--primary);
-  box-shadow: 0 1px 2px rgba(49, 87, 232, .3);
+  background: var(--gradient-primary);
+  border-color: transparent;
+  box-shadow: var(--shadow-primary);
 }
 .btn-primary:hover {
-  background: var(--primary-2);
-  border-color: var(--primary-2);
-  box-shadow: 0 2px 6px rgba(49, 87, 232, .26);
+  background: var(--gradient-primary-hover);
+  border-color: transparent;
+  box-shadow: var(--shadow-primary-hover);
+  transform: translateY(-3px);
 }
 .input { background: var(--bg-2); }
 .user-chip { background: var(--bg-2); border: 1px solid var(--border); }
@@ -2320,13 +2379,16 @@ body {
 .side-icon[data-tone="indigo"]  { --st: var(--indigo-tint);  --sc: var(--indigo); }
 .side-icon[data-tone="ai"]      { --st: var(--ai-tint);      --sc: var(--ai); }
 
-/* Active row: soft cobalt pill + solid primary icon chip + left indicator (see base .side-link::before) */
-.side-link.active { background: var(--primary-tint); color: var(--primary); font-weight: 600; }
-.side-link.active .side-icon {
-  background: var(--primary); color: #fff;
-  box-shadow: 0 1px 3px rgba(49, 87, 232, .35);
+/* Active row: bold gradient pill against the dark rail, glowing icon chip */
+.side-link.active {
+  background: var(--gradient-primary);
+  color: #fff; font-weight: 700;
+  box-shadow: var(--shadow-primary);
 }
-.side-link.active:hover { background: var(--primary-tint); color: var(--primary-2); }
+.side-link.active .side-icon {
+  background: rgba(255, 255, 255, .22); color: #fff;
+}
+.side-link.active:hover { background: var(--gradient-primary-hover); color: #fff; transform: none; }
 
 .topbar-qitem {
   display: inline-flex; align-items: center; justify-content: center;
@@ -2353,17 +2415,26 @@ body {
 .dash-hero {
   position: relative; overflow: hidden;
   display: flex; align-items: center; justify-content: space-between; gap: 20px;
-  background: linear-gradient(100deg, var(--primary-tint), var(--bg-2) 72%);
+  background: var(--gradient-hero);
   border: 1px solid var(--border); border-radius: var(--radius-lg);
   padding: 22px 24px; margin-bottom: 18px;
+  box-shadow: var(--shadow);
 }
-.dash-hero-copy { min-width: 0; }
+/* Soft blurred accent orb -- a common "product launch" touch that reads as
+   depth rather than clutter since it sits behind everything, heavily blurred. */
+.dash-hero::after {
+  content: ''; position: absolute; top: -60px; right: -40px;
+  width: 220px; height: 220px; border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(49, 87, 232, .16), transparent);
+  filter: blur(4px); pointer-events: none;
+}
+.dash-hero-copy { min-width: 0; position: relative; z-index: 1; }
 .dash-hero-copy h2 {
-  margin: 0 0 4px; font-size: 21px; font-weight: 600; letter-spacing: -.01em; color: var(--text);
+  margin: 0 0 4px; font-size: 23px; font-weight: 700; letter-spacing: -.015em; color: var(--text);
 }
 .dash-hero-copy p { margin: 0; color: var(--muted); font-size: 13px; }
-.dash-hero-art { width: 220px; height: 96px; flex: none; }
-.dash-hero-actions { position: absolute; top: 16px; right: 20px; }
+.dash-hero-art { width: 220px; height: 96px; flex: none; position: relative; z-index: 1; }
+.dash-hero-actions { position: absolute; top: 16px; right: 20px; z-index: 2; }
 
 .metric-grid {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -2375,7 +2446,10 @@ body {
   background: var(--bg-2); border: 1px solid var(--border);
   border-radius: var(--radius-lg); padding: 16px 18px;
   box-shadow: var(--shadow);
+  transition: box-shadow .15s, transform .1s;
 }
+.metric-tile:hover { box-shadow: var(--shadow-hover); transform: translateY(-3px); }
+.metric-tile:hover .metric-icon { transform: scale(1.08); }
 .metric-tile[data-tone="primary"] { --mt: var(--primary-tint); --mc: var(--primary); }
 .metric-tile[data-tone="green"]   { --mt: var(--green-tint);   --mc: var(--green); }
 .metric-tile[data-tone="amber"]   { --mt: var(--amber-tint);   --mc: var(--amber); }
@@ -2389,11 +2463,14 @@ body {
   width: 44px; height: 44px; flex: none;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: 12px; background: var(--mt); color: var(--mc); font-size: 19px;
+  transition: transform .15s ease;
 }
 .metric-body { min-width: 0; flex: 1; }
 .metric-label { font-size: 12.5px; color: var(--muted); font-weight: 500; margin-bottom: 2px; }
 .metric-value {
-  font-size: 26px; font-weight: 600; letter-spacing: -.02em; color: var(--text); line-height: 1.15;
+  font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+  font-size: 27px; font-weight: 800; letter-spacing: -.02em; color: var(--text); line-height: 1.15;
+  font-variant-numeric: tabular-nums;
 }
 .metric-foot { display: flex; align-items: baseline; gap: 7px; margin-top: 5px; flex-wrap: wrap; }
 .metric-since { font-size: 11px; color: var(--muted); }

@@ -2,7 +2,7 @@
 // stat cards, badges, toasts and a tiny data-fetching hook.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { api, fmtDateTime, fmtMoney, getSession, saRole, tenantLoginPath } from './api';
 
 // ── Toasts ─────────────────────────────────────────────────────────────────
@@ -420,16 +420,18 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
   return (
     <aside className={`sidebar${open ? ' open' : ''}${collapsed ? ' collapsed' : ''}`}>
       <div className="brand">
-        {companyLogo
-          ? <img src={companyLogo} className="brand-logo" alt={`${company.name} logo`}
-              onError={(e) => { e.currentTarget.style.display = 'none'; }} />
-          : <>
-              <span className="brand-mark">{(company.name || 'F').charAt(0)}</span>
-              <div>
-                <strong>{company.name || 'FieldNet'}</strong>
-                <small>{company.code || ''}</small>
-              </div>
-            </>}
+        {collapsed
+          ? <span className="brand-mark">{(company.name || 'F').charAt(0)}</span>
+          : (companyLogo
+              ? <img src={companyLogo} className="brand-logo" alt={`${company.name} logo`}
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+              : <>
+                  <span className="brand-mark">{(company.name || 'F').charAt(0)}</span>
+                  <div>
+                    <strong>{company.name || 'FieldNet'}</strong>
+                    <small>{company.code || ''}</small>
+                  </div>
+                </>)}
         <SideCollapse collapsed={collapsed} onToggle={onToggleCollapse} />
       </div>
       <SideNav items={items.filter(canSee)} badges={badges} onNavigate={onNavigate} />
@@ -437,11 +439,11 @@ function TenantSidebar({ session, onLogout, stats, onNavigate, open, collapsed, 
   );
 }
 
-/* Grouped navigation list: renders a collapsible section header for every
-   group, so even single-page sections stay titled and tidy. Sections start
-   collapsed except the one containing the active page. */
+/* Grouped navigation list: a plain, always-visible section label above each
+   group's links -- no click-to-reveal, so a single-page group (e.g. "Company"
+   -> Company Profile) never makes the user open something just to see the
+   one link inside it. */
 function SideNav({ items, badges = {}, onNavigate }) {
-  const { pathname } = useLocation();
   const groups = [];
   for (const i of items) {
     const label = i.group || '';
@@ -449,14 +451,11 @@ function SideNav({ items, badges = {}, onNavigate }) {
     if (!last || last.label !== label) groups.push({ label, items: [i] });
     else last.items.push(i);
   }
-  const matchActive = (i) =>
-    (i.end ? pathname === i.to : pathname === i.to || (i.to.endsWith('/') && pathname.startsWith(i.to)) || pathname.startsWith(i.to + '/'));
   return (
     <nav>
       {groups.map((g) => (
         <SideGroup key={g.label} label={g.label} items={g.items}
-          badges={badges} onNavigate={onNavigate}
-          defaultOpen={g.items.some(matchActive)} />
+          badges={badges} onNavigate={onNavigate} />
       ))}
     </nav>
   );
@@ -473,15 +472,14 @@ function SideLink({ item, badge, onNavigate }) {
   );
 }
 
-function SideGroup({ label, items, badges, onNavigate, defaultOpen }) {
-  const [open, setOpen] = useState(defaultOpen);
+function SideGroup({ label, items, badges, onNavigate }) {
+  // A header over a single link organises nothing -- it just repeats what
+  // the link itself already says ("Company" -> "Company Profile"). Only
+  // label the section once there's more than one page under it.
+  const showLabel = label && items.length > 1;
   return (
-    <div className={`side-section ${open ? 'open' : 'closed'}`}>
-      <button type="button" className="side-group-btn" onClick={() => setOpen((o) => !o)}
-        aria-expanded={open} title={label}>
-        <span className="side-group-label">{label}</span>
-        <span className={`side-chevron${open ? ' open' : ''}`}>▾</span>
-      </button>
+    <div className="side-section">
+      {showLabel && <div className="side-group">{label}</div>}
       {items.map((i) => (
         <SideLink key={i.to} item={i} badge={badges[i.to]} onNavigate={onNavigate} />
       ))}
@@ -560,13 +558,15 @@ function SuperSidebar({ onNavigate, open, collapsed, onToggleCollapse }) {
   return (
     <aside className={`sidebar${open ? ' open' : ''}${collapsed ? ' collapsed' : ''}`}>
       <div className="brand">
-        {brand.has_logo
-          ? <img src="/api/v1/auth/platform-logo" alt={brand.platform_name} className="brand-logo" />
-          : <span className="brand-mark">{(brand.platform_name || 'F').charAt(0)}</span>}
+        {collapsed || !brand.has_logo
+          ? <span className="brand-mark">{(brand.platform_name || 'F').charAt(0)}</span>
+          : <img src="/api/v1/auth/platform-logo" alt={brand.platform_name} className="brand-logo" />}
         {/* The logo already carries the brand name -- avoid repeating it
             next to the image (matches the tenant sidebar's pattern). */}
-        <div><strong>{brand.has_logo ? 'Platform Console' : brand.platform_name}</strong>
-          {!brand.has_logo && <small>Platform Console</small>}</div>
+        {!collapsed && (
+          <div><strong>{brand.has_logo ? 'Platform Console' : brand.platform_name}</strong>
+            {!brand.has_logo && <small>Platform Console</small>}</div>
+        )}
         <SideCollapse collapsed={collapsed} onToggle={onToggleCollapse} />
       </div>
       <SideNav items={visible} badges={badges} onNavigate={onNavigate} />
