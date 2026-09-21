@@ -215,6 +215,53 @@ def main():
               r.status_code == 200 and r.json().get("status") == "active",
               f"{r.status_code} {r.text[:200]}")
 
+        # ── campaign "send back for changes" cycle (separate throwaway campaign) ──
+        r = client.post(f"{BASE}/campaigns", headers=ADM, json={
+            "name": "Send Back Test Campaign", "brand_id": brand_id,
+            "division": "Cardio", "start_date": "2026-01-01", "end_date": "2026-12-31",
+            "scheme_type": "cashback"})
+        check("create throwaway campaign for send-back test", r.status_code == 200, r.text[:200])
+        sb_campaign_id = r.json()["id"]
+        r = client.post(f"{BASE}/campaigns/{sb_campaign_id}/submit", headers=ADM, json={})
+        check("submit throwaway campaign", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
+        r = client.post(f"{BASE}/superadmin/divisions/{division['id']}/campaigns/{sb_campaign_id}/request-changes",
+                        headers=SA, json={"reason": "Please fix the terms & conditions"})
+        check("SA sends campaign back for changes",
+              r.status_code == 200 and r.json().get("status") == "changes_required",
+              f"{r.status_code} {r.text[:200]}")
+        r = client.get(f"{BASE}/campaigns", headers=ADM, params={"status": "changes_required"})
+        cr_items = r.json().get("items", []) if r.status_code == 200 else []
+        check("campaign shows up under changes_required with note",
+              any(c["id"] == sb_campaign_id and c.get("changes_required_note") for c in cr_items),
+              f"{r.status_code} {cr_items}")
+        r = client.post(f"{BASE}/campaigns/{sb_campaign_id}/request-changes", headers=ADM, json={"reason": "x"})
+        check("division admin cannot call request-changes (platform-only)", r.status_code in (403, 404, 405),
+              f"{r.status_code}")
+        r = client.put(f"{BASE}/campaigns/{sb_campaign_id}", headers=ADM, json={"status": "changes_required"})
+        check("division admin cannot directly set status=changes_required via PUT",
+              r.status_code == 403, f"{r.status_code} {r.text[:200]}")
+        r = client.post(f"{BASE}/campaigns/{sb_campaign_id}/submit", headers=ADM, json={})
+        check("division admin can resubmit a changes_required campaign",
+              r.status_code == 200 and r.json().get("status") == "pending_approval",
+              f"{r.status_code} {r.text[:200]}")
+        r = client.get(f"{BASE}/campaigns", headers=ADM, params={"status": "pending_approval"})
+        pa_items = r.json().get("items", []) if r.status_code == 200 else []
+        resubmitted = next((c for c in pa_items if c["id"] == sb_campaign_id), None)
+        check("resubmitted campaign's changes_required_note is cleared",
+              resubmitted is not None and not resubmitted.get("changes_required_note"),
+              resubmitted)
+        r = client.post(f"{BASE}/superadmin/divisions/{division['id']}/campaigns/{sb_campaign_id}/request-changes",
+                        headers=SA, json={"reason": ""})
+        check("SA request-changes requires a non-empty reason -> 400", r.status_code == 400,
+              f"{r.status_code} {r.text[:200]}")
+        r = client.post(f"{BASE}/superadmin/divisions/{division['id']}/campaigns/{sb_campaign_id}/approve",
+                        headers=SA, json={})
+        check("SA approves the resubmitted campaign", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
+        r = client.post(f"{BASE}/superadmin/divisions/{division['id']}/campaigns/{sb_campaign_id}/request-changes",
+                        headers=SA, json={"reason": "too late"})
+        check("request-changes rejected once campaign is no longer pending_approval -> 409",
+              r.status_code == 409, f"{r.status_code} {r.text[:200]}")
+
         r = client.post(f"{BASE}/products", headers=ADM, json={
             "campaign_id": campaign_id, "brand_id": brand_id, "sku": "ASKD-10",
             "name": "Asthakind 10", "composition": "Amlodipine 10mg", "strength": "10mg",

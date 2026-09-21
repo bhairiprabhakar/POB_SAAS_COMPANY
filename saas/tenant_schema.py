@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
     start_date DATE,
     end_date DATE,
     active BOOLEAN DEFAULT TRUE,
-    status TEXT DEFAULT 'draft',           -- draft | active | completed | paused
+    status TEXT DEFAULT 'draft',           -- draft | pending_approval | changes_required | scheduled | active | completed | paused | rejected
     scheme_type TEXT DEFAULT 'others',     -- from gratification_types
     invoice_verification_required BOOLEAN DEFAULT TRUE,
     logo_path TEXT,
@@ -2017,4 +2017,13 @@ ALTER TABLE uploads ADD COLUMN IF NOT EXISTS progress_stage TEXT;
 DELETE FROM role_permissions
 WHERE permission_code IN ('statement.view', 'statement.verify', 'statement.credits')
   AND role_id IN (SELECT id FROM roles WHERE name IN ('verifier', 'verification_agent'));
+
+-- ── Campaign "Send back for changes" (3.17.0) ────────────────────────────────
+-- A third approval outcome alongside approve/reject: the campaign admin can
+-- send a pending campaign back to the division admin with a reason, without
+-- it counting as an outright rejection. Mirrors the rejected_*/rejection_note
+-- columns above so the same audit-trail pattern applies to this status too.
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS changes_requested_at TIMESTAMP;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS changes_requested_by INTEGER;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS changes_required_note TEXT;
 """

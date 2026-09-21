@@ -30,7 +30,9 @@ log = logging.getLogger("saas.migrations")
 # 3.16.0: verifier/verification_agent are POB-only -- revoke the
 # statement.view/statement.verify/statement.credits grants they previously
 # picked up alongside the statement/credits portal wiring.
-SCHEMA_VERSION = "3.16.0"
+# 3.17.0: campaign "send back for changes" -- changes_requested_at/by and
+# changes_required_note columns for the new changes_required status.
+SCHEMA_VERSION = "3.17.0"
 
 # RLock: ensure_migrated re-enters via get_tenant_pool → _try_migrate path.
 _lock = threading.RLock()

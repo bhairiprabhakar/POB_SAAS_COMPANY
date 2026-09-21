@@ -708,7 +708,7 @@ def update_campaign(conn, actor: dict, cid: int, body: dict, request=None) -> No
     # draft/completed/paused; active/scheduled/pending_approval/rejected are
     # driven by the submit/approve/reject endpoints.
     pending_status = str(body.get("status") or "")
-    if pending_status in ("active", "scheduled", "pending_approval", "rejected") and actor.get("id"):
+    if pending_status in ("active", "scheduled", "pending_approval", "rejected", "changes_required") and actor.get("id"):
         raise HTTPException(
             403,
             "Status changes to the approval lifecycle go through Submit/Approve/Reject, not the edit form",

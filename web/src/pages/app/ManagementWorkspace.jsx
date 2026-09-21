@@ -170,6 +170,7 @@ export function CampaignsTab({ base }) {
   // draft → pending approval → scheduled → active → completed/rejected flow.
   const STATUS_TABS = canManage ? [
     ['', 'All'], ['draft', 'Draft'], ['pending_approval', 'Pending Approval'],
+    ['changes_required', 'Changes Requested'],
     ['scheduled', 'Scheduled'], ['active', 'Active'], ['completed', 'Completed'], ['rejected', 'Rejected'],
   ] : [
     ['', 'All'], ['active', 'Active'], ['completed', 'Completed'],
@@ -260,7 +261,7 @@ export function CampaignsTab({ base }) {
         const a = r.assignment || {};
         const count = a.assigned_count;
         if (a.open) return <span className="muted">All employees</span>;
-        if (r.status === 'draft' || r.status === 'pending_approval') return <span className="muted">{count || 0} employee(s)</span>;
+        if (r.status === 'draft' || r.status === 'pending_approval' || r.status === 'changes_required') return <span className="muted">{count || 0} employee(s)</span>;
         return <span>{count} employee(s)</span>;
       },
     },
@@ -270,6 +271,9 @@ export function CampaignsTab({ base }) {
         <StatusBadge value={r.status} />
         {r.status === 'rejected' && r.rejection_note && (
           <span className="muted" style={{ fontSize: 11 }} title={r.rejection_note}>Rejected: {r.rejection_note.slice(0, 48)}{r.rejection_note.length > 48 ? '…' : ''}</span>
+        )}
+        {r.status === 'changes_required' && r.changes_required_note && (
+          <span className="muted" style={{ fontSize: 11 }} title={r.changes_required_note}>Changes needed: {r.changes_required_note.slice(0, 48)}{r.changes_required_note.length > 48 ? '…' : ''}</span>
         )}
       </span>
     ) },
@@ -288,8 +292,8 @@ export function CampaignsTab({ base }) {
     ) },
     ...(canManage ? [{ key: '_a', label: '', thClass: 'actions-th', render: (r) => (
       <span className="row-actions">
-        {r.status === 'draft' || r.status === 'rejected' ? (
-          <button className="btn-link" onClick={() => submitForApproval(r)}>{r.status === 'rejected' ? 'Resubmit' : 'Submit'}</button>
+        {r.status === 'draft' || r.status === 'rejected' || r.status === 'changes_required' ? (
+          <button className="btn-link" onClick={() => submitForApproval(r)}>{r.status === 'draft' ? 'Submit' : 'Resubmit'}</button>
         ) : null}
         {r.status === 'pending_approval' && (
           <button className="btn-link" onClick={() => withdraw(r)}>Withdraw</button>

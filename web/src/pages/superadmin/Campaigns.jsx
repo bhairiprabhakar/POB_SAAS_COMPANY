@@ -9,6 +9,7 @@ import {
 const TABS = [
   { id: '', label: 'All' },
   { id: 'pending_approval', label: 'Pending Approval' },
+  { id: 'changes_required', label: 'Changes Requested' },
   { id: 'active', label: 'Active' },
   { id: 'completed', label: 'Completed' },
   { id: 'draft', label: 'Draft' },
@@ -27,6 +28,8 @@ export default function SuperCampaigns() {
 
   const [rejecting, setRejecting] = useState(null);
   const [reason, setReason] = useState('');
+  const [requestingChanges, setRequestingChanges] = useState(null);
+  const [changesReason, setChangesReason] = useState('');
   const counts = data?.counts || {};
 
   const rows = useMemo(() => {
@@ -54,6 +57,16 @@ export default function SuperCampaigns() {
         { method: 'POST', body: JSON.stringify({ reason }) });
       toast(`Campaign #${rejecting.id} rejected`, 'success');
       setRejecting(null); setReason(''); run();
+    } catch (e) { toast(e.message, 'error'); }
+  };
+
+  const doRequestChanges = async () => {
+    if (!changesReason.trim()) { toast('A reason is required', 'error'); return; }
+    try {
+      await api(`/api/v1/superadmin/divisions/${requestingChanges.division_id}/campaigns/${requestingChanges.id}/request-changes`,
+        { method: 'POST', body: JSON.stringify({ reason: changesReason }) });
+      toast(`Campaign #${requestingChanges.id} sent back for changes`, 'success');
+      setRequestingChanges(null); setChangesReason(''); run();
     } catch (e) { toast(e.message, 'error'); }
   };
 
@@ -87,17 +100,21 @@ export default function SuperCampaigns() {
     },
     {
       key: '_actions', label: '', render: (r) => r.status === 'pending_approval' ? (
-        <div className="row" style={{ gap: 6 }}>
+        <div className="row" style={{ gap: 6, flexWrap: 'wrap', maxWidth: 220 }}>
           <button className="btn btn-sm btn-primary" onClick={() => approve(r)}>Approve</button>
+          <button className="btn btn-sm" title="Send this campaign back to the division admin for changes"
+            onClick={() => setRequestingChanges(r)}>Send Back</button>
           <button className="btn btn-sm btn-danger" onClick={() => setRejecting(r)}>Reject</button>
         </div>
       ) : r.status === 'rejected' ? (
         <small className="muted" title={r.rejection_note || ''}>{r.rejection_note || 'Rejected'}</small>
+      ) : r.status === 'changes_required' ? (
+        <small className="muted" title={r.changes_required_note || ''}>{r.changes_required_note || 'Changes requested'}</small>
       ) : <span className="muted">—</span>,
     },
   ];
 
-  const total = ['draft', 'pending_approval', 'scheduled', 'active', 'completed', 'paused', 'rejected']
+  const total = ['draft', 'pending_approval', 'changes_required', 'scheduled', 'active', 'completed', 'paused', 'rejected']
     .reduce((s, k) => s + (Number(counts[k]) || 0), 0);
 
   const header = (
@@ -122,6 +139,7 @@ export default function SuperCampaigns() {
       <div className="stats-grid compact">
         <StatCard label="Total campaigns" value={total} />
         <StatCard label="Pending approval" value={counts.pending_approval || 0} tone="amber" />
+        <StatCard label="Changes requested" value={counts.changes_required || 0} tone="amber" />
         <StatCard label="Active" value={(counts.active || 0) + (counts.scheduled || 0)} tone="green" />
         <StatCard label="Rejected" value={counts.rejected || 0} tone="red" />
       </div>
@@ -139,6 +157,17 @@ export default function SuperCampaigns() {
         </>}>
         <Field label="Reason" required hint="The division admin will see this and can resubmit after fixing.">
           <TextArea value={reason} onChange={(e) => setReason(e.target.value)} rows={4} placeholder="Why is this campaign being sent back?" />
+        </Field>
+      </Modal>
+
+      <Modal open={!!requestingChanges} onClose={() => setRequestingChanges(null)}
+        title={`Send back campaign #${requestingChanges?.id} for changes`}
+        footer={<>
+          <button className="btn" onClick={() => setRequestingChanges(null)}>Cancel</button>
+          <button className="btn btn-primary" onClick={doRequestChanges} disabled={!changesReason.trim()}>Send back</button>
+        </>}>
+        <Field label="Reason" required hint="The division admin will see this, fix it, and resubmit for approval — this doesn't count as a rejection.">
+          <TextArea value={changesReason} onChange={(e) => setChangesReason(e.target.value)} rows={4} placeholder="What needs to change before this can be approved?" />
         </Field>
       </Modal>
     </div>

@@ -256,7 +256,7 @@ const TONES = {
   rejected: 'red', duplicate: 'red', inactive: 'gray', disabled: 'gray',
   draft: 'gray', paused: 'gray', provisioning: 'amber', trial: 'amber',
   submitted: 'amber', default: 'gray', green: 'green',
-  pending_approval: 'amber', scheduled: 'blue',
+  pending_approval: 'amber', scheduled: 'blue', changes_required: 'amber',
   // Identity entries so Badge/StatusBadge can also be called directly with
   // a color name (tone="indigo", tone="ai") rather than a status keyword.
   amber: 'amber', red: 'red', blue: 'blue', gray: 'gray',

@@ -744,7 +744,10 @@ def sa_approve_campaign(did: int, cid: int, request: Request = None,
 @router.post("/divisions/{did}/campaigns/{cid}/reject")
 def sa_reject_campaign(did: int, cid: int, body: dict = None, request: Request = None,
                        claims=Depends(require_superadmin)):
-    """pending_approval -> draft with a rejection reason the submitter can see."""
+    """pending_approval/scheduled -> rejected, with a reason the submitter can
+    see. A terminal decision -- resubmitting starts the review over from
+    scratch. Use /request-changes instead for a correction that should keep
+    the campaign's history as "sent back", not "rejected"."""
     body = body or {}
     conn = platform_db.get_db()
     tconn = None
@@ -768,6 +771,41 @@ def sa_reject_campaign(did: int, cid: int, body: dict = None, request: Request =
         notify_admins(tconn, "campaign.rejected", "Campaign rejected",
                       f"'{row[2]}' was rejected: {reason}", "campaign", cid)
         return {"ok": True, "status": "rejected", "rejection_note": reason}
+    finally:
+        if tconn:
+            tconn.close()
+        conn.close()
+
+
+@router.post("/divisions/{did}/campaigns/{cid}/request-changes")
+def sa_request_campaign_changes(did: int, cid: int, body: dict = None, request: Request = None,
+                                claims=Depends(require_superadmin)):
+    """pending_approval -> changes_required, with a mandatory reason. A softer
+    outcome than reject: the campaign goes back to the division admin to fix
+    and resubmit, without it counting as a rejection in its history."""
+    body = body or {}
+    conn = platform_db.get_db()
+    tconn = None
+    try:
+        tconn = _tenant_conn_for(conn, did)
+        reason = str(body.get("reason") or "").strip()
+        if not reason:
+            raise HTTPException(400, "reason is required")
+        c = tconn.cursor()
+        c.execute("SELECT id, status, name FROM campaigns WHERE id=%s", (cid,))
+        row = c.fetchone()
+        if not row:
+            raise HTTPException(404, "campaign not found")
+        if row[1] != "pending_approval":
+            raise HTTPException(409, f"Only campaigns awaiting approval can be sent back for changes (current: {row[1]})")
+        c.execute("UPDATE campaigns SET status='changes_required', changes_required_note=%s, "
+                  "changes_requested_at=CURRENT_TIMESTAMP, changes_requested_by=%s WHERE id=%s",
+                  (reason, claims.get("sub"), cid))
+        tconn.commit()
+        from ..notify import notify_admins
+        notify_admins(tconn, "campaign.changes_required", "Changes requested",
+                      f"'{row[2]}' needs changes: {reason}", "campaign", cid)
+        return {"ok": True, "status": "changes_required", "changes_required_note": reason}
     finally:
         if tconn:
             tconn.close()

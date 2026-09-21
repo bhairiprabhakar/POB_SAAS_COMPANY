@@ -359,7 +359,8 @@ def campaign_chemist_eligibility(cid: int, chemist_id: int,
 @router.post("/campaigns/{cid}/submit")
 def submit_campaign_for_approval(cid: int, request: Request = None,
                                  ctx: TenantContext = Depends(require_permission("campaign.manage"))):
-    """Draft -> pending_approval. The campaign is not executable until approved."""
+    """Draft/rejected/changes_required -> pending_approval. The campaign is not
+    executable until approved."""
     conn = ctx.conn
     c = conn.cursor()
     div = division_scope(conn, ctx)
@@ -369,10 +370,11 @@ def submit_campaign_for_approval(cid: int, request: Request = None,
     row = c.fetchone()
     if not row:
         raise HTTPException(404, "campaign not found")
-    if row[1] not in ("draft", "rejected"):
+    if row[1] not in ("draft", "rejected", "changes_required"):
         raise HTTPException(409, f"Only draft campaigns can be submitted for approval (current: {row[1]})")
     c.execute("UPDATE campaigns SET status='pending_approval', submitted_at=CURRENT_TIMESTAMP, "
-              "submitted_by=%s, rejected_at=NULL, rejected_by=NULL, rejection_note=NULL WHERE id=%s",
+              "submitted_by=%s, rejected_at=NULL, rejected_by=NULL, rejection_note=NULL, "
+              "changes_requested_at=NULL, changes_requested_by=NULL, changes_required_note=NULL WHERE id=%s",
               (ctx.user.get("id"), cid))
     conn.commit()
     log_action(conn, ctx.user.get("id"), "campaign.submit", "campaign", cid,
