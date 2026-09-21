@@ -26,7 +26,10 @@ def list_audit(action: str = "", user_id: int = None, entity_type: str = "",
                entity_id: int = None, q: str = "", limit: int = PageLimit(), offset: int = PageOffset(),
                ctx: TenantContext = Depends(require_permission("audit.view"))):
     c = ctx.conn.cursor()
-    where, params = ["user_id IS NOT NULL"], []
+    # Superadmin-driven actions (e.g. creating/editing a division admin from
+    # the platform console) carry no tenant user_id but do carry an actor
+    # username -- only fully-anonymous rows (neither) are excluded.
+    where, params = ["(user_id IS NOT NULL OR actor IS NOT NULL)"], []
     if action:
         where.append("action=%s")
         params.append(action)

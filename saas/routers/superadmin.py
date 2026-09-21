@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 
 from .. import platform_db, provision, storage
+from ..audit import log_action
 from ..db_utils import fetchall_dict, fetchone_dict
 from ..deps import require_owner, require_sa_path, require_sa_roles, require_superadmin
 from ..upload_validation import IMAGE_KINDS, UploadValidationError, validate_upload
@@ -325,7 +326,11 @@ def reset_admin_password(did: int, body: dict, claims=Depends(require_superadmin
             if cur.rowcount == 0:
                 tconn.rollback()
                 raise HTTPException(404, f"No user '{username}' in this division")
+            cur.execute("SELECT id FROM users WHERE username=%s", (username,))
+            target_uid = cur.fetchone()[0]
             tconn.commit()
+            log_action(tconn, None, "user.reset_password", "user", target_uid,
+                       {"username": username}, actor=claims.get("username"))
         finally:
             tconn.close()
         _audit(conn, claims, "division.reset_admin_password", "division", did)
@@ -2458,8 +2463,12 @@ PLATFORM_ROLES = (
     "campaign_admin",
     "finance_admin",
     "verification_admin",
-    "division_admin",
+    "platform_division_admin",
 )
+# 'full' is a legacy unrestricted role kept only so existing accounts that
+# already hold it keep working; the console no longer lets anyone assign it
+# to a new or existing admin -- delegate one of the specialised roles instead.
+_ASSIGNABLE_PLATFORM_ROLES = tuple(r for r in PLATFORM_ROLES if r != "full")
 
 
 def _platform_admin_row(row):
@@ -2484,19 +2493,20 @@ def list_platform_admins():
         conn.close()
 
 
-@router.post("/platform-admins", dependencies=[Depends(require_owner)])
-def create_platform_admin(body: dict):
+@router.post("/platform-admins")
+def create_platform_admin(body: dict, claims=Depends(require_owner)):
     username = str(body.get("username") or "").strip()
     password = body.get("password") or ""
     full_name = str(body.get("full_name") or "").strip()
     email = str(body.get("email") or "").strip()
-    role = str(body.get("role") or "full").strip()
+    role = str(body.get("role") or "").strip()
     if not username or not full_name:
         raise HTTPException(400, "Username and full name are required")
     if len(password) < 6:
         raise HTTPException(400, "Password must be at least 6 characters")
-    if role not in ("full", "campaign_admin", "finance_admin", "verification_admin", "division_admin"):
-        raise HTTPException(400, "Invalid platform role")
+    if role not in _ASSIGNABLE_PLATFORM_ROLES:
+        raise HTTPException(400, "Invalid platform role" if role not in PLATFORM_ROLES else
+                             "Full-access admins can no longer be created — assign a specialised role instead")
     conn = platform_db.get_db()
     try:
         c = conn.cursor()
@@ -2509,6 +2519,8 @@ def create_platform_admin(body: dict):
             (username, hash_pw(password), full_name, email, role))
         aid = c.fetchone()[0]
         conn.commit()
+        _audit(conn, claims, "platform_admin.create", "platform_admin", aid,
+               {"username": username, "role": role})
         return {"ok": True, "id": aid}
     finally:
         conn.close()
@@ -2529,8 +2541,10 @@ def update_platform_admin(aid: int, body: dict, request: Request = None,
         if target["owner"]:
             raise HTTPException(403, "The company owner account cannot be edited")
         role = str(body.get("role") or target["role"]).strip()
-        if role not in ("full", "campaign_admin", "finance_admin", "verification_admin", "division_admin"):
+        if role not in PLATFORM_ROLES:
             raise HTTPException(400, "Invalid platform role")
+        if role == "full" and target["role"] != "full":
+            raise HTTPException(400, "Full-access admins can no longer be assigned — choose a specialised role instead")
         status = str(body.get("status") or target["status"]).strip()
         if status not in ("active", "suspended"):
             raise HTTPException(400, "Invalid status")

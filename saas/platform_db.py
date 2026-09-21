@@ -209,6 +209,10 @@ UPDATE super_admins SET role='owner' WHERE owner_flag=TRUE AND role='full';
 ALTER TABLE divisions ADD COLUMN IF NOT EXISTS covered_regions TEXT[] NOT NULL DEFAULT '{}';
 ALTER TABLE ai_usage_log ADD COLUMN IF NOT EXISTS user_id INTEGER;
 ALTER TABLE ai_usage_log ADD COLUMN IF NOT EXISTS original_filename TEXT;
+-- Platform-console role 'division_admin' collided in name with the
+-- tenant-level 'division_admin' role (a different concept in a different
+-- database) -- renamed to platform_division_admin to remove the ambiguity.
+UPDATE super_admins SET role='platform_division_admin' WHERE role='division_admin';
 """
 
 

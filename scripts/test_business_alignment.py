@@ -687,6 +687,68 @@ def main():
     check("verification claim endpoint no longer exists", r.status_code in (404, 405),
           f"{r.status_code} {j(r)}")
 
+    section("23. Verification agent division isolation (explicit invariant)")
+    # Each division runs its OWN verification_agent (division-scoped role --
+    # distinct from the global 'verifier' role used above in section 8/15/16,
+    # which is intentionally company-wide). Prove an agent bound to one
+    # division can never act on another division's verification queue.
+    conn = provision_pool_conn(tenant_db1)
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM roles WHERE name='verification_agent'")
+    VA_ROLE = cur.fetchone()[0]
+    cur.execute("""INSERT INTO users (username, password, full_name, role_id, division_id, status)
+                   VALUES (%s,%s,%s,%s,%s,'active') RETURNING id""",
+                ("agent_align_a", _pw, "Agent Align A", VA_ROLE, admin_div))
+    VA1_ID = cur.fetchone()[0]
+    cur.execute("""INSERT INTO users (username, password, full_name, role_id, division_id, status)
+                   VALUES (%s,%s,%s,%s,%s,'active') RETURNING id""",
+                ("agent_align_a2", _pw, "Agent Align A2", VA_ROLE, DIV_A2))
+    VA2_ID = cur.fetchone()[0]
+    cur.execute("""INSERT INTO pob_activities (user_id, campaign_id, product_id, chemist_id,
+                   quantity, ptr, mrp, invoice_amount, pob_amount, status)
+                   VALUES (%s,%s,%s,%s,10,20,25,250,250,'pending_verification') RETURNING id""",
+                (MR_ID, C1, P2, CHEM_ID))
+    POB_VA_A = cur.fetchone()[0]
+    cur.execute("INSERT INTO pob_verifications (pob_id, status) VALUES (%s,'pending') RETURNING id", (POB_VA_A,))
+    VID_VA_A = cur.fetchone()[0]
+    cur.execute("""INSERT INTO pob_activities (user_id, campaign_id, product_id, chemist_id,
+                   quantity, ptr, mrp, invoice_amount, pob_amount, status)
+                   VALUES (%s,%s,%s,%s,10,15,18,180,180,'pending_verification') RETURNING id""",
+                (MR_A2_ID, C_A2, P_A2, CHEM_A2))
+    POB_VA_A2 = cur.fetchone()[0]
+    cur.execute("INSERT INTO pob_verifications (pob_id, status) VALUES (%s,'pending') RETURNING id", (POB_VA_A2,))
+    VID_VA_A2 = cur.fetchone()[0]
+    conn.commit()
+    conn.close()
+    _user_index.sync_user(tenant_db1, "agent_align_a2", VA2_ID, division_id=div1_id)
+
+    r = client.post("/api/v1/auth/login", json={
+        "division_slug": f"ADA{UUID}", "username": "agent_align_a", "password": PASSWD,
+    })
+    check("division A verification_agent login", ok(r), f"{r.status_code} {j(r)}")
+    TVA1 = {"Authorization": f"Bearer {j(r)['access_token']}"}
+    r = client.post("/api/v1/auth/login", json={"username": "agent_align_a2", "password": PASSWD})
+    check("division A2 verification_agent login", ok(r), f"{r.status_code} {j(r)}")
+    TVA2 = {"Authorization": f"Bearer {j(r)['access_token']}"}
+
+    r = client.post(f"/api/v1/verification/{VID_VA_A}/approve", headers=TVA2, json={"note": ""})
+    check("division A2 agent cannot approve division A verification -> 403", r.status_code == 403,
+          f"{r.status_code} {j(r)}")
+    r = client.post(f"/api/v1/verification/{VID_VA_A2}/approve", headers=TVA1, json={"note": ""})
+    check("division A agent cannot approve division A2 verification -> 403", r.status_code == 403,
+          f"{r.status_code} {j(r)}")
+    r = client.post(f"/api/v1/verification/{VID_VA_A}/reject", headers=TVA2, json={"reason": "x"})
+    check("division A2 agent cannot reject division A verification -> 403", r.status_code == 403,
+          f"{r.status_code} {j(r)}")
+    r = client.post(f"/api/v1/verification/{VID_VA_A}/duplicate", headers=TVA2, json={"reason": "x"})
+    check("division A2 agent cannot mark division A verification duplicate -> 403", r.status_code == 403,
+          f"{r.status_code} {j(r)}")
+
+    r = client.post(f"/api/v1/verification/{VID_VA_A}/approve", headers=TVA1, json={"note": ""})
+    check("division A agent CAN approve its own division's verification", ok(r), f"{r.status_code} {j(r)}")
+    r = client.post(f"/api/v1/verification/{VID_VA_A2}/approve", headers=TVA2, json={"note": ""})
+    check("division A2 agent CAN approve its own division's verification", ok(r), f"{r.status_code} {j(r)}")
+
     return finish(keep)
 
 

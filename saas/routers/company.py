@@ -55,7 +55,8 @@ def create_role(body: dict, ctx: TenantContext = Depends(require_permission("set
               (name, body.get("description"), bool(body.get("data_entry", False))))
     rid = c.fetchone()[0]
     _set_permissions(conn, rid, body.get("permissions") or [])
-    log_action(conn, ctx.user["id"], "role.create", "role", rid, {"name": name})
+    log_action(conn, ctx.user["id"], "role.create", "role", rid, {"name": name},
+               actor=ctx.user.get("username"))
     return {"ok": True, "id": rid}
 
 
@@ -75,7 +76,7 @@ def update_role(rid: int, body: dict, ctx: TenantContext = Depends(require_permi
     if "permissions" in body:
         _set_permissions(conn, rid, body["permissions"])
     conn.commit()
-    log_action(conn, ctx.user["id"], "role.update", "role", rid)
+    log_action(conn, ctx.user["id"], "role.update", "role", rid, actor=ctx.user.get("username"))
     return {"ok": True}
 
 
@@ -94,7 +95,7 @@ def delete_role(rid: int, ctx: TenantContext = Depends(require_permission("setti
         raise HTTPException(409, "role is assigned to users")
     c.execute("DELETE FROM roles WHERE id=%s", (rid,))
     conn.commit()
-    log_action(conn, ctx.user["id"], "role.delete", "role", rid)
+    log_action(conn, ctx.user["id"], "role.delete", "role", rid, actor=ctx.user.get("username"))
     return {"ok": True}
 
 
@@ -148,7 +149,8 @@ def create_level(body: dict, ctx: TenantContext = Depends(require_permission("hi
     )
     lid = c.fetchone()[0]
     conn.commit()
-    log_action(conn, ctx.user["id"], "hierarchy.create", "hierarchy_level", lid, {"name": name, "rank": rank})
+    log_action(conn, ctx.user["id"], "hierarchy.create", "hierarchy_level", lid, {"name": name, "rank": rank},
+               actor=ctx.user.get("username"))
     return {"ok": True, "id": lid}
 
 
@@ -187,7 +189,7 @@ def update_level(lid: int, body: dict, ctx: TenantContext = Depends(require_perm
                           (new_rank, old_rank, lid))
             c.execute("UPDATE hierarchy_levels SET rank=%s WHERE id=%s", (new_rank, lid))
     conn.commit()
-    log_action(conn, ctx.user["id"], "hierarchy.update", "hierarchy_level", lid)
+    log_action(conn, ctx.user["id"], "hierarchy.update", "hierarchy_level", lid, actor=ctx.user.get("username"))
     return {"ok": True}
 
 
@@ -209,7 +211,7 @@ def delete_level(lid: int, ctx: TenantContext = Depends(require_permission("hier
     c.execute("DELETE FROM hierarchy_levels WHERE id=%s", (lid,))
     c.execute("UPDATE hierarchy_levels SET rank = rank - 1 WHERE rank > %s", (del_rank,))
     conn.commit()
-    log_action(conn, ctx.user["id"], "hierarchy.delete", "hierarchy_level", lid)
+    log_action(conn, ctx.user["id"], "hierarchy.delete", "hierarchy_level", lid, actor=ctx.user.get("username"))
     return {"ok": True}
 
 
@@ -354,7 +356,8 @@ def create_user(body: dict, ctx: TenantContext = Depends(require_permission("use
     from ..user_index import sync_user
     sync_user(ctx.claims.get("tenant_db") or "", username, uid,
               email=body.get("email"), mobile=body.get("mobile"))
-    log_action(conn, ctx.user["id"], "user.create", "user", uid, {"username": username})
+    log_action(conn, ctx.user["id"], "user.create", "user", uid, {"username": username},
+               actor=ctx.user.get("username"))
     return get_user(uid, ctx)
 
 
@@ -457,7 +460,7 @@ def update_user(uid: int, body: dict, ctx: TenantContext = Depends(require_permi
     u = c.fetchone()
     if u:
         sync_user(ctx.claims.get("tenant_db") or "", u[0], uid, email=u[1], mobile=u[2])
-    log_action(conn, ctx.user["id"], "user.update", "user", uid)
+    log_action(conn, ctx.user["id"], "user.update", "user", uid, actor=ctx.user.get("username"))
     return get_user(uid, ctx)
 
 
@@ -488,7 +491,7 @@ def reset_user_password(uid: int, ctx: TenantContext = Depends(require_permissio
     revoke_all_for_user(conn, uid)
     conn.commit()
     log_action(conn, ctx.user["id"], "user.reset_password", "user", uid,
-               {"username": user.get("username")})
+               {"username": user.get("username")}, actor=ctx.user.get("username"))
     return {"ok": True, "temp_password": temp, "must_change_password": True}
 
 
@@ -506,7 +509,7 @@ def delete_user(uid: int, ctx: TenantContext = Depends(require_permission("user.
     c = conn.cursor()
     c.execute("UPDATE users SET status='inactive' WHERE id=%s", (uid,))
     conn.commit()
-    log_action(conn, ctx.user["id"], "user.deactivate", "user", uid)
+    log_action(conn, ctx.user["id"], "user.deactivate", "user", uid, actor=ctx.user.get("username"))
     return {"ok": True}
 
 
@@ -559,7 +562,8 @@ def offboard_user(uid: int, body: dict = None,
     c.execute("UPDATE users SET status='inactive' WHERE id=%s", (uid,))
     conn.commit()
     log_action(conn, ctx.user["id"], "user.offboard", "user", uid,
-              {"reassigned_reports": reassigned, "reassigned_to": reassign_to})
+              {"reassigned_reports": reassigned, "reassigned_to": reassign_to},
+              actor=ctx.user.get("username"))
     return {"ok": True, "reassigned": reassigned}
 
 
@@ -687,7 +691,8 @@ async def bulk_upload_users(file: UploadFile = File(...),
     for uname, uid in user_ids.items():
         email, mobile = user_contacts.get(uname, (None, None))
         sync_user(tenant_db, uname, uid, email=email, mobile=mobile)
-    log_action(conn, ctx.user["id"], "user.bulk_upload", "user", None, {"created": created, "errors": len(errors)})
+    log_action(conn, ctx.user["id"], "user.bulk_upload", "user", None, {"created": created, "errors": len(errors)},
+               actor=ctx.user.get("username"))
     return {"created": created, "errors": errors, "generated": generated}
 
 

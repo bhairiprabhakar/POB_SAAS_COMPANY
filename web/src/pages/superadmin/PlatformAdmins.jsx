@@ -8,22 +8,25 @@ import { saRole } from '../../api';
 
 const ROLE_LABELS = {
   owner: 'Owner',
-  full: 'Super Admin · full access',
+  full: 'Super Admin · full access (legacy)',
   campaign_admin: 'Campaign Admin · campaign approvals',
   finance_admin: 'Finance Admin · gratification & payments',
   verification_admin: 'Verification Admin · POB verification',
-  division_admin: 'Division Admin · create & manage divisions',
+  platform_division_admin: 'Division Admin · create & manage divisions',
 };
 
+// 'full' is intentionally left out here -- it's a legacy unrestricted role the
+// console no longer offers for new admins (see ROLE_LABELS.full and the
+// editing-only fallback in the role Select below, which keeps it visible only
+// for an admin who already has it).
 const ROLE_OPTIONS = [
-  { value: 'full', label: 'Full access' },
   { value: 'campaign_admin', label: 'Campaign Admin' },
   { value: 'finance_admin', label: 'Finance Admin' },
   { value: 'verification_admin', label: 'Verification Admin' },
-  { value: 'division_admin', label: 'Division Admin' },
+  { value: 'platform_division_admin', label: 'Division Admin' },
 ];
 
-const TONES = { full: 'blue', campaign_admin: 'teal', finance_admin: 'green', verification_admin: 'amber', division_admin: 'teal' };
+const TONES = { full: 'blue', campaign_admin: 'teal', finance_admin: 'green', verification_admin: 'amber', platform_division_admin: 'teal' };
 
 export default function PlatformAdmins() {
   const me = saRole();
@@ -32,10 +35,10 @@ export default function PlatformAdmins() {
 
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ role: 'full', status: 'active', username: '', password: '', full_name: '', email: '' });
+  const [form, setForm] = useState({ role: 'campaign_admin', status: 'active', username: '', password: '', full_name: '', email: '' });
   const [busy, setBusy] = useState(false);
 
-  const resetForm = () => setForm({ role: 'full', status: 'active', username: '', password: '', full_name: '', email: '' });
+  const resetForm = () => setForm({ role: 'campaign_admin', status: 'active', username: '', password: '', full_name: '', email: '' });
 
   const startCreate = () => { setEditing(null); resetForm(); setOpen(true); };
   const startEdit = (r) => {
@@ -155,10 +158,12 @@ export default function PlatformAdmins() {
           <TextInput type="email" value={form.email}
             onChange={(e) => setForm({ ...form, email: e.target.value })} />
         </Field>
-        <Field label="Role" hint="Specialised roles only see their own area of the console. Owners and full-access admins see everything.">
+        <Field label="Role" hint="Specialised roles only see their own area of the console.">
           <Select value={form.role} disabled={!!editing && form.role === 'owner'}
             onChange={(e) => setForm({ ...form, role: e.target.value })}
-            options={ROLE_OPTIONS.map((o) => ({ ...o }))} />
+            options={editing?.role === 'full'
+              ? [{ value: 'full', label: ROLE_LABELS.full }, ...ROLE_OPTIONS]
+              : ROLE_OPTIONS} />
         </Field>
         {!editing && (
           <Field label="Password" required hint="At least 6 characters. The admin can log in with this immediately.">

@@ -500,11 +500,11 @@ function SideCollapse({ collapsed, onToggle }) {
 
 function SuperSidebar({ onNavigate, open, collapsed, onToggleCollapse }) {
   const items = [
-    { to: '/superadmin', label: 'Dashboard', icon: <Icon name="grid" />, end: true, group: 'Overview', tone: 'primary', roles: ['owner', 'full', 'campaign_admin', 'finance_admin', 'verification_admin', 'division_admin'] },
+    { to: '/superadmin', label: 'Dashboard', icon: <Icon name="grid" />, end: true, group: 'Overview', tone: 'primary', roles: ['owner', 'full', 'campaign_admin', 'finance_admin', 'verification_admin', 'platform_division_admin'] },
 
     { to: '/superadmin/company', label: 'Company Profile', icon: <Icon name="building" />, group: 'Company', tone: 'blue', roles: ['owner', 'full'] },
 
-    { to: '/superadmin/divisions', label: 'All Divisions', icon: <Icon name="layers" />, group: 'Divisions', tone: 'blue', roles: ['owner', 'full', 'division_admin'] },
+    { to: '/superadmin/divisions', label: 'All Divisions', icon: <Icon name="layers" />, group: 'Divisions', tone: 'blue', roles: ['owner', 'full', 'platform_division_admin'] },
 
     { to: '/superadmin/users', label: 'All Employees', icon: <Icon name="users" />, group: 'Employees & Hierarchy', tone: 'blue', roles: ['owner', 'full'] },
 

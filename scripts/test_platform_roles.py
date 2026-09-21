@@ -125,7 +125,7 @@ def main():
     # ── 2. Owner creates platform admins ─────────────────────────────────────
     section("2. Platform admin CRUD (owner-only)")
 
-    for role in ("campaign_admin", "finance_admin", "verification_admin", "division_admin"):
+    for role in ("campaign_admin", "finance_admin", "verification_admin", "platform_division_admin"):
         r = client.post(f"{BASE}/platform-admins", headers=OA, json={
             "username": f"test_{role}", "password": PASSWD,
             "full_name": f"Test {role}", "email": f"{role}@test.local",
@@ -135,27 +135,41 @@ def main():
         if ok(r):
             created_admins[role] = j(r).get("id")
 
-    # Create a full-access admin too
+    # 'full' is a legacy role the console no longer lets anyone create --
+    # confirm the create endpoint rejects it explicitly.
     r = client.post(f"{BASE}/platform-admins", headers=OA, json={
-        "username": "test_full", "password": PASSWD,
-        "full_name": "Test Full", "email": "full@test.local",
-        "role": "full",
+        "username": "test_full_rejected", "password": PASSWD,
+        "full_name": "Should Not Exist", "role": "full",
     })
-    check("create full admin", ok(r), f"{r.status_code}")
-    if ok(r):
-        created_admins["full"] = j(r).get("id")
+    check("creating a full-access admin is rejected", r.status_code == 400, f"{r.status_code} {j(r)}")
+
+    # A 'full' account can still exist (legacy data) -- seed one directly,
+    # mirroring how a pre-existing account would look, to test that it keeps
+    # working and can still be edited (just not re-assigned TO 'full').
+    from saas.passwords import hash_pw as _hash_pw
+    pconn = platform_db.get_db()
+    try:
+        pc = pconn.cursor()
+        pc.execute(
+            "INSERT INTO super_admins (username, password, full_name, email, status, role, owner_flag, company_id) "
+            "VALUES (%s,%s,%s,%s,'active','full',FALSE,1) RETURNING id",
+            ("test_full", _hash_pw(PASSWD), "Test Full", "full@test.local"))
+        created_admins["full"] = pc.fetchone()[0]
+        pconn.commit()
+    finally:
+        pconn.close()
 
     # Duplicate username rejected
     r = client.post(f"{BASE}/platform-admins", headers=OA, json={
         "username": "test_full", "password": PASSWD,
-        "full_name": "Dup Full", "role": "full",
+        "full_name": "Dup Full", "role": "campaign_admin",
     })
     check("duplicate username rejected", r.status_code == 409, f"{r.status_code}")
 
     # Short password rejected
     r = client.post(f"{BASE}/platform-admins", headers=OA, json={
         "username": "shortpw", "password": "123", "full_name": "Short",
-        "role": "full",
+        "role": "campaign_admin",
     })
     check("short password rejected", r.status_code == 400, f"{r.status_code}")
 
@@ -165,6 +179,11 @@ def main():
         "role": "billing_admin",
     })
     check("invalid role rejected", r.status_code == 400, f"{r.status_code}")
+
+    # Promoting an existing (non-full) admin to 'full' is rejected too
+    r = client.put(f"{BASE}/platform-admins/{created_admins['campaign_admin']}", headers=OA,
+                   json={"role": "full"})
+    check("promoting an admin to full-access is rejected", r.status_code == 400, f"{r.status_code} {j(r)}")
 
     # List admins shows all created
     r = client.get(f"{BASE}/platform-admins", headers=OA)
@@ -208,7 +227,7 @@ def main():
     # ── 3. Role login returns correct role ────────────────────────────────────
     section("3. Role-based login and token claims")
     role_tokens = {}
-    for role in ("campaign_admin", "finance_admin", "verification_admin", "division_admin", "full"):
+    for role in ("campaign_admin", "finance_admin", "verification_admin", "platform_division_admin", "full"):
         r = client.post("/api/v1/auth/superadmin/login",
                          json={"username": f"test_{role}", "password": PASSWD})
         check(f"{role} login succeeds", ok(r), f"{r.status_code}")
@@ -273,30 +292,30 @@ def main():
     r = client.get(f"{BASE}/finance", headers=ROLE_TOKENS["verification_admin"])
     check("verification_admin -> /finance BLOCKED", r.status_code == 403, f"{r.status_code}")
 
-    # division_admin can reach /divisions (its own area) but nothing else
-    r = client.get(f"{BASE}/divisions", headers=ROLE_TOKENS["division_admin"])
-    check("division_admin -> /divisions OK", ok(r), f"{r.status_code}")
-    r = client.post(f"{BASE}/divisions", headers=ROLE_TOKENS["division_admin"], json={
+    # platform_division_admin can reach /divisions (its own area) but nothing else
+    r = client.get(f"{BASE}/divisions", headers=ROLE_TOKENS["platform_division_admin"])
+    check("platform_division_admin -> /divisions OK", ok(r), f"{r.status_code}")
+    r = client.post(f"{BASE}/divisions", headers=ROLE_TOKENS["platform_division_admin"], json={
         "name": f"DA-Created Div {UUID}", "code": f"DA{UUID}",
-        "description": "created by division_admin",
+        "description": "created by platform_division_admin",
     })
-    check("division_admin can create a division", ok(r), f"{r.status_code} {j(r)}")
-    r = client.get(f"{BASE}/analytics", headers=ROLE_TOKENS["division_admin"])
-    check("division_admin -> /analytics OK", ok(r), f"{r.status_code}")
+    check("platform_division_admin can create a division", ok(r), f"{r.status_code} {j(r)}")
+    r = client.get(f"{BASE}/analytics", headers=ROLE_TOKENS["platform_division_admin"])
+    check("platform_division_admin -> /analytics OK", ok(r), f"{r.status_code}")
     r = client.post(f"{BASE}/divisions/999999/gratification/999999/approve",
-                    headers=ROLE_TOKENS["division_admin"])
-    check("division_admin -> gratification approve BLOCKED (role gate)",
+                    headers=ROLE_TOKENS["platform_division_admin"])
+    check("platform_division_admin -> gratification approve BLOCKED (role gate)",
           r.status_code == 403, f"{r.status_code}")
-    r = client.get(f"{BASE}/platform-admins", headers=ROLE_TOKENS["division_admin"])
-    check("division_admin -> /platform-admins BLOCKED", r.status_code == 403, f"{r.status_code}")
-    r = client.get(f"{BASE}/finance", headers=ROLE_TOKENS["division_admin"])
-    check("division_admin -> /finance BLOCKED", r.status_code == 403, f"{r.status_code}")
-    r = client.get(f"{BASE}/campaigns", headers=ROLE_TOKENS["division_admin"])
-    check("division_admin -> /campaigns BLOCKED", r.status_code == 403, f"{r.status_code}")
-    r = client.get(f"{BASE}/pob", headers=ROLE_TOKENS["division_admin"])
-    check("division_admin -> /pob BLOCKED", r.status_code == 403, f"{r.status_code}")
-    r = client.get(f"{BASE}/gratification", headers=ROLE_TOKENS["division_admin"])
-    check("division_admin -> /gratification BLOCKED", r.status_code == 403, f"{r.status_code}")
+    r = client.get(f"{BASE}/platform-admins", headers=ROLE_TOKENS["platform_division_admin"])
+    check("platform_division_admin -> /platform-admins BLOCKED", r.status_code == 403, f"{r.status_code}")
+    r = client.get(f"{BASE}/finance", headers=ROLE_TOKENS["platform_division_admin"])
+    check("platform_division_admin -> /finance BLOCKED", r.status_code == 403, f"{r.status_code}")
+    r = client.get(f"{BASE}/campaigns", headers=ROLE_TOKENS["platform_division_admin"])
+    check("platform_division_admin -> /campaigns BLOCKED", r.status_code == 403, f"{r.status_code}")
+    r = client.get(f"{BASE}/pob", headers=ROLE_TOKENS["platform_division_admin"])
+    check("platform_division_admin -> /pob BLOCKED", r.status_code == 403, f"{r.status_code}")
+    r = client.get(f"{BASE}/gratification", headers=ROLE_TOKENS["platform_division_admin"])
+    check("platform_division_admin -> /gratification BLOCKED", r.status_code == 403, f"{r.status_code}")
 
     # Other specialised admins stay blocked on /divisions
     for rname in ("campaign_admin", "finance_admin", "verification_admin"):
