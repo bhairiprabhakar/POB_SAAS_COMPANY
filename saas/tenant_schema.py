@@ -590,29 +590,29 @@ DEFAULT_ROLES = {
                        if p[0] not in ("chemist.manage", "chemist.classification.manage")],
     "campaignos_admin": [p[0] for p in ALL_PERMISSIONS],
     "ho":  ["dashboard.view", "user.view", "hierarchy.view", "campaign.view", "product.view",
-            "brand.view", "chemist.view", "chemist.manage", "pob.view", "verification.view",
-            "verification.approve", "verification.reject", "report.view", "report.export",
-            "notification.view", "statement.view", "statement.upload", "statement.verify",
-            "statement.credits"],
-    "nsm": ["dashboard.view", "user.view", "hierarchy.view", "campaign.view", "product.view",
-            "brand.view", "chemist.view", "chemist.manage", "pob.view", "report.view",
+            "brand.view", "chemist.view", "chemist.manage", "chemist.classification.view", "pob.view",
+            "verification.view", "verification.approve", "verification.reject", "report.view",
             "report.export", "notification.view", "statement.view", "statement.upload",
+            "statement.verify", "statement.credits"],
+    "nsm": ["dashboard.view", "user.view", "hierarchy.view", "campaign.view", "product.view",
+            "brand.view", "chemist.view", "chemist.manage", "chemist.classification.view", "pob.view",
+            "report.view", "report.export", "notification.view", "statement.view", "statement.upload",
             "statement.credits"],
     "zsm": ["dashboard.view", "user.view", "hierarchy.view", "campaign.view", "product.view",
-            "brand.view", "chemist.view", "chemist.manage", "pob.view", "report.view",
-            "report.export", "notification.view", "statement.view", "statement.upload",
+            "brand.view", "chemist.view", "chemist.manage", "chemist.classification.view", "pob.view",
+            "report.view", "report.export", "notification.view", "statement.view", "statement.upload",
             "statement.credits"],
     "sm":  ["dashboard.view", "user.view", "hierarchy.view", "campaign.view", "product.view",
-            "brand.view", "chemist.view", "chemist.manage", "pob.view", "report.view",
-            "report.export", "notification.view", "statement.view", "statement.upload",
+            "brand.view", "chemist.view", "chemist.manage", "chemist.classification.view", "pob.view",
+            "report.view", "report.export", "notification.view", "statement.view", "statement.upload",
             "statement.credits"],
     "rsm": ["dashboard.view", "hierarchy.view", "campaign.view", "product.view", "brand.view",
-            "chemist.view", "chemist.manage", "pob.view", "report.view", "report.export",
-            "notification.view", "statement.view", "statement.upload", "statement.credits"],
+            "chemist.view", "chemist.manage", "chemist.classification.view", "pob.view", "report.view",
+            "report.export", "notification.view", "statement.view", "statement.upload", "statement.credits"],
     "asm": ["dashboard.view", "hierarchy.view", "campaign.view", "product.view",
-            "brand.view", "chemist.view", "chemist.manage", "pob.view", "verification.view",
-            "verification.approve", "report.view", "notification.view", "statement.view",
-            "statement.upload", "statement.verify", "statement.credits"],
+            "brand.view", "chemist.view", "chemist.manage", "chemist.classification.view", "pob.view",
+            "verification.view", "verification.approve", "report.view", "notification.view",
+            "statement.view", "statement.upload", "statement.verify", "statement.credits"],
     "mr":  ["dashboard.view", "pob.submit", "campaign.view", "product.view", "brand.view",
             "chemist.view", "chemist.manage", "chemist.classification.view", "gratification.view",
             "notification.view", "visit.view", "visit.manage", "statement.upload",
@@ -2026,4 +2026,18 @@ WHERE permission_code IN ('statement.view', 'statement.verify', 'statement.credi
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS changes_requested_at TIMESTAMP;
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS changes_requested_by INTEGER;
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS changes_required_note TEXT;
+
+-- ── Hierarchy management roles can view chemist classification masters (3.18.0) ──
+-- chemist.classification.view was only ever granted to mr/psr/division_admin/
+-- campaignos_admin when it was introduced -- the hierarchy roles in between
+-- (ho/nsm/zsm/sm/rsm/asm) were missed, even though they already hold the
+-- stronger chemist.manage and their own MR/PSR reports have this view right.
+-- The chemist edit form (GET /chemist-masters) needs it to populate the
+-- attachment-type / potential-category dropdowns; without it those dropdowns
+-- silently render empty for these roles.
+INSERT INTO role_permissions (role_id, permission_code)
+SELECT r.id, 'chemist.classification.view'
+FROM roles r
+WHERE r.name IN ('ho', 'nsm', 'zsm', 'sm', 'rsm', 'asm')
+ON CONFLICT (role_id, permission_code) DO NOTHING;
 """

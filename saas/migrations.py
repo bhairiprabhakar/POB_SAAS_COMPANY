@@ -32,7 +32,9 @@ log = logging.getLogger("saas.migrations")
 # picked up alongside the statement/credits portal wiring.
 # 3.17.0: campaign "send back for changes" -- changes_requested_at/by and
 # changes_required_note columns for the new changes_required status.
-SCHEMA_VERSION = "3.17.0"
+# 3.18.0: grant chemist.classification.view to ho/nsm/zsm/sm/rsm/asm (missed
+# when the permission was first introduced).
+SCHEMA_VERSION = "3.18.0"
 
 # RLock: ensure_migrated re-enters via get_tenant_pool → _try_migrate path.
 _lock = threading.RLock()

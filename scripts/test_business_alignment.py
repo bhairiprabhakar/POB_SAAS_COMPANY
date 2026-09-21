@@ -179,6 +179,13 @@ def main():
     cur.execute("""SELECT count(*) FROM chemist_potential_categories
                    WHERE code IN ('a_plus','a','b','c','new')""")
     check("potential category seeds = 5 FINAL codes", cur.fetchone()[0] == 5)
+    cur.execute("""SELECT r.name FROM roles r
+                   JOIN role_permissions rp ON rp.role_id=r.id
+                   WHERE rp.permission_code='chemist.classification.view'
+                   AND r.name IN ('ho','nsm','zsm','sm','rsm','asm')""")
+    has_view = {row[0] for row in cur.fetchall()}
+    check("ho/nsm/zsm/sm/rsm/asm all have chemist.classification.view",
+          has_view == {'ho', 'nsm', 'zsm', 'sm', 'rsm', 'asm'}, has_view)
     conn.close()
 
     section("4. Brand + product creation (brand REQUIRED)")
