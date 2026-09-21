@@ -2040,4 +2040,33 @@ SELECT r.id, 'chemist.classification.view'
 FROM roles r
 WHERE r.name IN ('ho', 'nsm', 'zsm', 'sm', 'rsm', 'asm')
 ON CONFLICT (role_id, permission_code) DO NOTHING;
+
+-- ── Campaign field templates / "Template Studio" (3.19.0) ───────────────────
+-- Division admins define their own extra campaign fields (text, currency,
+-- select, file upload, ...) instead of needing a code change every time --
+-- see saas/routers/masters.py's /campaign-field-templates endpoints and
+-- campaign_service._validate_custom_fields. entity_type is future-proofed
+-- for pointing the same engine at other entities (chemist, pob) later.
+CREATE TABLE IF NOT EXISTS field_templates (
+    id SERIAL PRIMARY KEY,
+    entity_type TEXT NOT NULL DEFAULT 'campaign',
+    division_id INTEGER REFERENCES divisions(id),
+    field_key TEXT NOT NULL,
+    label TEXT NOT NULL,
+    field_type TEXT NOT NULL,
+    options JSONB DEFAULT '[]',
+    required BOOLEAN DEFAULT FALSE,
+    help_text TEXT,
+    sort_order INTEGER DEFAULT 0,
+    active BOOLEAN DEFAULT TRUE,
+    created_by INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_field_templates_key
+    ON field_templates (entity_type, division_id, field_key);
+
+-- {field_key: value} for whatever templates are active in that campaign's
+-- division at save time. A file-type value is {"path","filename","url"}.
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS custom_fields JSONB DEFAULT '{}';
 """

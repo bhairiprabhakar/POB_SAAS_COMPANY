@@ -34,7 +34,8 @@ log = logging.getLogger("saas.migrations")
 # changes_required_note columns for the new changes_required status.
 # 3.18.0: grant chemist.classification.view to ho/nsm/zsm/sm/rsm/asm (missed
 # when the permission was first introduced).
-SCHEMA_VERSION = "3.18.0"
+# 3.19.0: field_templates table + campaigns.custom_fields -- Template Studio.
+SCHEMA_VERSION = "3.19.0"
 
 # RLock: ensure_migrated re-enters via get_tenant_pool → _try_migrate path.
 _lock = threading.RLock()

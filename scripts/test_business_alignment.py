@@ -17,6 +17,7 @@ the FINAL division-company model:
 
 Run:  venv/Scripts/python.exe scripts/test_business_alignment.py [--keep]
 """
+import base64
 import os
 import sys
 import uuid
@@ -755,6 +756,99 @@ def main():
     check("division A agent CAN approve its own division's verification", ok(r), f"{r.status_code} {j(r)}")
     r = client.post(f"/api/v1/verification/{VID_VA_A2}/approve", headers=TVA2, json={"note": ""})
     check("division A2 agent CAN approve its own division's verification", ok(r), f"{r.status_code} {j(r)}")
+
+    section("24. Campaign field templates (\"Template Studio\")")
+    PNG_1PX = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+
+    r = client.post("/api/v1/campaign-field-templates", headers=T1, json={
+        "field_key": "internal_ref", "label": "Internal Reference Code", "field_type": "short_text",
+    })
+    check("create short_text template", ok(r), f"{r.status_code} {j(r)}")
+    r = client.post("/api/v1/campaign-field-templates", headers=T1, json={
+        "field_key": "priority", "label": "Priority", "field_type": "select",
+        "options": [{"value": "low", "label": "Low"}, {"value": "high", "label": "High"}],
+    })
+    check("create select template", ok(r), f"{r.status_code} {j(r)}")
+    r = client.post("/api/v1/campaign-field-templates", headers=T1, json={
+        "field_key": "budget_cap", "label": "Budget Cap", "field_type": "currency",
+    })
+    check("create currency template", ok(r), f"{r.status_code} {j(r)}")
+    r = client.post("/api/v1/campaign-field-templates", headers=T1, json={
+        "field_key": "needs_approval", "label": "Requires Manager Approval", "field_type": "boolean",
+    })
+    check("create boolean template", ok(r), f"{r.status_code} {j(r)}")
+    r = client.post("/api/v1/campaign-field-templates", headers=T1, json={
+        "field_key": "ref_doc", "label": "Reference Document", "field_type": "file",
+    })
+    check("create file template", ok(r), f"{r.status_code} {j(r)}")
+    FILE_TID = j(r).get("id")
+
+    r = client.get("/api/v1/campaign-field-templates", headers=T1)
+    check("division A sees exactly its 5 templates", ok(r) and len(j(r).get("items", [])) == 5,
+          f"{r.status_code} {j(r)}")
+
+    r = client.post("/api/v1/campaigns", headers=T1, json={
+        "name": f"Template Test Campaign {UUID}", "brand_id": B1,
+        "start_date": "2026-01-01", "end_date": "2026-12-31", "scheme_type": "cashback",
+        "custom_fields": {"internal_ref": "REF-001", "priority": "high", "budget_cap": "50000",
+                          "needs_approval": True},
+        "eligible_states": ["Maharashtra", "Gujarat"],
+    })
+    check("create campaign with valid custom_fields", ok(r), f"{r.status_code} {j(r)}")
+    TFC_ID = j(r).get("id")
+    r = client.get(f"/api/v1/campaigns/{TFC_ID}", headers=T1)
+    check("eligible_states round-trips as a real array, not a JSON string",
+          ok(r) and j(r).get("eligible_states") == ["Maharashtra", "Gujarat"], f"{r.status_code} {j(r)}")
+    check("campaign custom_fields round-trip correctly",
+          ok(r) and j(r).get("custom_fields", {}).get("priority") == "high"
+          and j(r).get("custom_fields", {}).get("needs_approval") is True, f"{r.status_code} {j(r)}")
+
+    r = client.post("/api/v1/campaigns", headers=T1, json={
+        "name": "Bad Custom Field Campaign", "brand_id": B1,
+        "start_date": "2026-01-01", "end_date": "2026-12-31",
+        "custom_fields": {"totally_unknown_field": "x"},
+    })
+    check("unknown custom field_key on create -> 400", r.status_code == 400, f"{r.status_code} {j(r)}")
+
+    r = client.post(f"/api/v1/campaigns/{TFC_ID}/custom-fields/ref_doc/upload", headers=T1,
+                    files={"file": ("reference.png", PNG_1PX, "image/png")})
+    check("upload a file to the file-type custom field", ok(r), f"{r.status_code} {j(r)}")
+    r = client.get(f"/api/v1/campaigns/{TFC_ID}", headers=T1)
+    check("uploaded file custom_field value persisted",
+          ok(r) and j(r).get("custom_fields", {}).get("ref_doc", {}).get("filename") == "reference.png",
+          f"{r.status_code} {j(r)}")
+
+    r = client.post(f"/api/v1/campaigns/{TFC_ID}/custom-fields/priority/upload", headers=T1,
+                    files={"file": ("x.png", PNG_1PX, "image/png")})
+    check("upload rejected for a non-file-type field_key -> 400", r.status_code == 400, f"{r.status_code} {j(r)}")
+    r = client.post(f"/api/v1/campaigns/{C_A2}/custom-fields/ref_doc/upload", headers=T1,
+                    files={"file": ("x.png", PNG_1PX, "image/png")})
+    check("upload rejected against a cross-division campaign -> 404", r.status_code == 404, f"{r.status_code} {j(r)}")
+
+    r = client.get("/api/v1/campaign-field-templates", headers=T3)
+    check("division A2 does not see division A's templates",
+          ok(r) and not any(t["field_key"] == "priority" for t in j(r).get("items", [])), f"{r.status_code} {j(r)}")
+    r = client.post("/api/v1/campaigns", headers=T3, json={
+        "name": "A2 Cannot Use A Field", "brand_id": B_A2,
+        "start_date": "2026-01-01", "end_date": "2026-12-31",
+        "custom_fields": {"priority": "high"},
+    })
+    check("division A2 cannot use division A's field_key -> 400", r.status_code == 400, f"{r.status_code} {j(r)}")
+
+    r = client.put(f"/api/v1/campaign-field-templates/{FILE_TID}", headers=T1, json={"active": False})
+    check("deactivate a template", ok(r), f"{r.status_code} {j(r)}")
+    r = client.get("/api/v1/campaign-field-templates", headers=T1)
+    check("deactivated template no longer listed",
+          ok(r) and not any(t["id"] == FILE_TID for t in j(r).get("items", [])), f"{r.status_code} {j(r)}")
+    r = client.get("/api/v1/campaign-field-templates?include_inactive=true", headers=T1)
+    check("include_inactive=true surfaces the deactivated template",
+          ok(r) and any(t["id"] == FILE_TID and t["active"] is False for t in j(r).get("items", [])),
+          f"{r.status_code} {j(r)}")
+    r = client.get(f"/api/v1/campaigns/{TFC_ID}", headers=T1)
+    check("existing campaign's stored value for the deactivated field survives",
+          ok(r) and j(r).get("custom_fields", {}).get("ref_doc", {}).get("filename") == "reference.png",
+          f"{r.status_code} {j(r)}")
 
     return finish(keep)
 

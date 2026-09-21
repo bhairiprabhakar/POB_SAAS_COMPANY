@@ -1249,6 +1249,132 @@ export function TextArea(props) {
   return <textarea {...props} className={`input ${props.className || ''}`} />;
 }
 
+// ── Dynamic custom fields ("Template Studio") ───────────────────────────────
+// Renders one <Field> per active field_template, switching on field_type.
+// `values` is a plain {field_key: value} object; `onChange(nextValues)`
+// receives the whole object back (matches how CampaignModal's `f.custom_fields`
+// state is already threaded through the rest of the form).
+export function DynamicFieldsSection({ templates = [], values = {}, onChange, onFileSelect }) {
+  const setValue = (key, v) => onChange({ ...values, [key]: v });
+  const toggleMulti = (key, v, checked) => {
+    const cur = Array.isArray(values[key]) ? values[key] : [];
+    setValue(key, checked ? [...cur, v] : cur.filter((x) => x !== v));
+  };
+  if (!templates.length) return null;
+  return (
+    <div className="grid-2">
+      {templates.map((t) => {
+        const key = t.field_key;
+        const v = values[key];
+        if (t.field_type === 'section_header') {
+          return (
+            <div key={key} className="span-2" style={{ marginTop: 8 }}>
+              <h5 className="form-section">{t.label}</h5>
+              {t.help_text && <p className="muted" style={{ fontSize: 12 }}>{t.help_text}</p>}
+            </div>
+          );
+        }
+        const field = (children) => (
+          <Field key={key} label={t.label} required={t.required} hint={t.help_text}
+            className={['textarea', 'multiselect', 'checkbox_group', 'date_range'].includes(t.field_type) ? 'span-2' : undefined}>
+            {children}
+          </Field>
+        );
+        switch (t.field_type) {
+          case 'long_text':
+            return field(<TextArea rows={3} value={v || ''} onChange={(e) => setValue(key, e.target.value)} />);
+          case 'number':
+            return field(<TextInput type="number" value={v ?? ''} onChange={(e) => setValue(key, e.target.value)} />);
+          case 'currency':
+            return field(
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span className="muted">₹</span>
+                <TextInput type="number" min={t.options?.min} max={t.options?.max}
+                  value={v ?? ''} onChange={(e) => setValue(key, e.target.value)} />
+              </div>);
+          case 'percentage':
+            return field(
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <TextInput type="number" min={t.options?.min ?? 0} max={t.options?.max ?? 100}
+                  value={v ?? ''} onChange={(e) => setValue(key, e.target.value)} />
+                <span className="muted">%</span>
+              </div>);
+          case 'email':
+            return field(<TextInput type="email" value={v || ''} onChange={(e) => setValue(key, e.target.value)} />);
+          case 'phone':
+            return field(<TextInput type="tel" pattern="[0-9]{10}" maxLength={10}
+              value={v || ''} onChange={(e) => setValue(key, e.target.value.replace(/\D/g, '').slice(0, 10))} />);
+          case 'url':
+            return field(<TextInput type="url" value={v || ''} onChange={(e) => setValue(key, e.target.value)} />);
+          case 'date':
+            return field(<TextInput type="date" value={v || ''} onChange={(e) => setValue(key, e.target.value)} />);
+          case 'date_range':
+            return field(
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <TextInput type="date" value={v?.from || ''} onChange={(e) => setValue(key, { ...v, from: e.target.value })} />
+                <span className="muted">to</span>
+                <TextInput type="date" value={v?.to || ''} onChange={(e) => setValue(key, { ...v, to: e.target.value })} />
+              </div>);
+          case 'select':
+            return field(<Select value={v || ''} onChange={(e) => setValue(key, e.target.value)}
+              options={(t.options || []).map((o) => ({ value: o.value, label: o.label }))} />);
+          case 'radio':
+            return field(
+              <div className="seg">
+                {(t.options || []).map((o) => (
+                  <button key={o.value} type="button" className={`seg${v === o.value ? ' active' : ''}`}
+                    onClick={() => setValue(key, o.value)}>{o.label}</button>
+                ))}
+              </div>);
+          case 'multiselect':
+            return field(
+              <div className="seg" style={{ flexWrap: 'wrap' }}>
+                {(t.options || []).map((o) => (
+                  <button key={o.value} type="button"
+                    className={`seg${(Array.isArray(v) && v.includes(o.value)) ? ' active' : ''}`}
+                    onClick={() => toggleMulti(key, o.value, !(Array.isArray(v) && v.includes(o.value)))}>
+                    {o.label}
+                  </button>
+                ))}
+              </div>);
+          case 'checkbox_group':
+            return field(
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {(t.options || []).map((o) => (
+                  <label key={o.value} className="check">
+                    <input type="checkbox" checked={Array.isArray(v) && v.includes(o.value)}
+                      onChange={(e) => toggleMulti(key, o.value, e.target.checked)} /> {o.label}
+                  </label>
+                ))}
+              </div>);
+          case 'boolean':
+            return field(<label className="check"><input type="checkbox" checked={!!v}
+              onChange={(e) => setValue(key, e.target.checked)} /> Yes</label>);
+          case 'rating': {
+            const max = t.options?.max || 5;
+            return field(
+              <div className="seg">
+                {Array.from({ length: max }, (_, i) => i + 1).map((n) => (
+                  <button key={n} type="button" className={`seg${Number(v) === n ? ' active' : ''}`}
+                    onClick={() => setValue(key, n)}>{n}</button>
+                ))}
+              </div>);
+          }
+          case 'file':
+            return field(
+              <div>
+                {v?.filename && <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Attached: {v.filename}</div>}
+                <input type="file" onChange={(e) => onFileSelect && onFileSelect(key, e.target.files?.[0])} />
+              </div>);
+          case 'short_text':
+          default:
+            return field(<TextInput value={v || ''} onChange={(e) => setValue(key, e.target.value)} />);
+        }
+      })}
+    </div>
+  );
+}
+
 // ── Table ──────────────────────────────────────────────────────────────────
 
 export function Table({ cols, rows = [], keyOf, onRowClick, empty }) {

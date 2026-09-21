@@ -25,7 +25,7 @@ from ..deps import TenantContext, require_permission
 from ..notify import notify_admins
 from ..scoping import division_scope, user_division_id, visible_user_ids
 from ..upi import mask_upi_id
-from ..upload_validation import IMAGE_KINDS, SPREADSHEET_KINDS, UploadValidationError, validate_upload
+from ..upload_validation import DOCUMENT_KINDS, IMAGE_KINDS, SPREADSHEET_KINDS, UploadValidationError, validate_upload
 from ..pagination import PageLimit, PageOffset
 
 router = APIRouter(prefix="/api/v1", tags=["masters"])
@@ -161,6 +161,107 @@ def delete_division(did: int, ctx: TenantContext = Depends(require_permission("b
 @router.get("/campaigns/readiness")
 def campaign_readiness(ctx: TenantContext = Depends(require_permission("campaign.view"))):
     return campaign_service.campaign_readiness(ctx.conn)
+
+
+# ── Campaign field templates ("Template Studio") ────────────────────────────
+# Division admins define their own extra campaign fields instead of needing
+# a code change every time -- see campaign_service._validate_custom_fields
+# for how a campaign's custom_fields are checked against these on save.
+
+_FIELD_TEMPLATE_COLS = ("field_key", "label", "field_type", "options",
+                        "required", "help_text", "sort_order", "active")
+
+
+def _field_template_row(r: dict) -> dict:
+    r["options"] = _loads(r.get("options"))
+    return r
+
+
+def _loads(v):
+    import json
+    if isinstance(v, str):
+        try:
+            return json.loads(v)
+        except Exception:
+            return v
+    return v if v is not None else []
+
+
+@router.get("/campaign-field-templates")
+def list_campaign_field_templates(include_inactive: bool = False, ctx: TenantContext = Depends(require_permission("campaign.view"))):
+    conn = ctx.conn
+    c = conn.cursor()
+    div = user_division_id(conn, ctx)
+    sql = "SELECT * FROM field_templates WHERE entity_type='campaign'"
+    params = []
+    if not include_inactive:
+        sql += " AND active=TRUE"
+    if div:
+        sql += " AND division_id=%s"
+        params.append(div)
+    sql += " ORDER BY sort_order, id"
+    c.execute(sql, params)
+    return {"items": [_field_template_row(r) for r in fetchall_dict(c)]}
+
+
+@router.post("/campaign-field-templates")
+def create_campaign_field_template(body: dict, ctx: TenantContext = Depends(require_permission("campaign.manage"))):
+    import json
+    conn = ctx.conn
+    c = conn.cursor()
+    field_key = (body.get("field_key") or "").strip()
+    label = (body.get("label") or "").strip()
+    field_type = (body.get("field_type") or "").strip()
+    if not field_key or not label or not field_type:
+        raise HTTPException(400, "field_key, label and field_type are required")
+    div = division_scope(conn, ctx)
+    if not div:
+        div = body.get("division_id")
+    c.execute(
+        """INSERT INTO field_templates (entity_type, division_id, field_key, label, field_type,
+           options, required, help_text, sort_order, active, created_by)
+           VALUES ('campaign',%s,%s,%s,%s,%s,%s,%s,%s,TRUE,%s) RETURNING id""",
+        (div, field_key, label, field_type, json.dumps(body.get("options") or []),
+         bool(body.get("required")), body.get("help_text"), body.get("sort_order") or 0,
+         ctx.user.get("id")),
+    )
+    fid = c.fetchone()[0]
+    conn.commit()
+    log_action(conn, ctx.user.get("id"), "campaign_field_template.create", "field_template", fid,
+               {"field_key": field_key, "field_type": field_type})
+    return {"ok": True, "id": fid}
+
+
+@router.put("/campaign-field-templates/{tid}")
+def update_campaign_field_template(tid: int, body: dict,
+                                   ctx: TenantContext = Depends(require_permission("campaign.manage"))):
+    import json
+    conn = ctx.conn
+    c = conn.cursor()
+    c.execute("SELECT division_id FROM field_templates WHERE id=%s AND entity_type='campaign'", (tid,))
+    row = c.fetchone()
+    if not row:
+        raise HTTPException(404, "field template not found")
+    div = division_scope(conn, ctx)
+    if div and row[0] != div:
+        raise HTTPException(404, "field template not found")
+    fields = ["label", "field_type", "required", "help_text", "sort_order", "active"]
+    sets, params = [], []
+    for f in fields:
+        if f in body and body[f] is not None:
+            sets.append(f"{f}=%s")
+            params.append(body[f])
+    if "options" in body:
+        sets.append("options=%s")
+        params.append(json.dumps(body.get("options") or []))
+    if not sets:
+        raise HTTPException(400, "Nothing to update")
+    sets.append("updated_at=CURRENT_TIMESTAMP")
+    params.append(tid)
+    c.execute(f"UPDATE field_templates SET {', '.join(sets)} WHERE id=%s", params)
+    conn.commit()
+    log_action(conn, ctx.user.get("id"), "campaign_field_template.update", "field_template", tid)
+    return {"ok": True}
 
 
 @router.get("/campaigns")
@@ -485,6 +586,52 @@ async def upload_campaign_asset(cid: int, kind: str = "logo", file: UploadFile =
     notify_admins(conn, "campaign.asset", "Campaign asset updated",
                   f"Campaign #{cid} {kind} was updated.", "campaign", cid)
     return {"ok": True, "path": rel, "url": storage.public_url(rel)}
+
+
+@router.post("/campaigns/{cid}/custom-fields/{field_key}/upload")
+async def upload_campaign_custom_field_file(cid: int, field_key: str, file: UploadFile = File(...),
+                                            ctx: TenantContext = Depends(require_permission("campaign.manage"))):
+    """Attach a file to a `file`-type custom field. Needs the campaign to
+    already exist (a file has to attach to a real row) -- the frontend
+    stages the pick and calls this right after the campaign is first saved,
+    the same way logo/banner asset upload already works."""
+    import json
+    data = await file.read()
+    if len(data) > 2 * 1024 * 1024:
+        raise HTTPException(400, "File must be under 2 MB")
+    try:
+        validate_upload(data, filename=file.filename or "", allowed_kinds=IMAGE_KINDS | DOCUMENT_KINDS,
+                        max_size=2 * 1024 * 1024)
+    except UploadValidationError as exc:
+        raise HTTPException(400, str(exc))
+    conn = ctx.conn
+    div = division_scope(conn, ctx)
+    if div:
+        _assert_campaign_in_div(conn, cid, div)
+    c = conn.cursor()
+    c.execute("SELECT id FROM campaigns WHERE id=%s", (cid,))
+    if not c.fetchone():
+        raise HTTPException(404, "campaign not found")
+    template_div = div or user_division_id(conn, ctx)
+    c.execute(
+        "SELECT id FROM field_templates WHERE entity_type='campaign' AND field_key=%s "
+        "AND field_type='file' AND active=TRUE AND division_id=%s",
+        (field_key, template_div),
+    )
+    if not c.fetchone():
+        raise HTTPException(400, f"'{field_key}' is not an active file-type custom field")
+    tenant_db = ctx.claims.get("tenant_db") or "tenant"
+    rel = storage.save(data, tenant_db, "campaign-custom-fields", file.filename or "file")
+    value = {"path": rel, "filename": file.filename or "file", "url": storage.public_url(rel)}
+    c.execute(
+        "UPDATE campaigns SET custom_fields = jsonb_set(COALESCE(custom_fields, '{}'::jsonb), %s, %s::jsonb) "
+        "WHERE id=%s",
+        ([field_key], json.dumps(value), cid),
+    )
+    conn.commit()
+    log_action(conn, _actor(ctx).get("id"), "campaign.custom_field_upload", "campaign", cid,
+               {"field_key": field_key, "path": rel}, actor=_actor(ctx).get("name"))
+    return {"ok": True, "field_key": field_key, **value}
 
 
 # ── Products (division-scoped master catalogue for POB flows) ───────────────

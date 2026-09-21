@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../../api';
 import {
@@ -72,6 +72,33 @@ export default function SuperCampaigns() {
 
   const summary = (r) => r.assignment || null;
 
+  // Custom field labels are per-division -- fetched lazily, once per
+  // division actually shown, so resolving them here never blocks the list.
+  const [templatesByDiv, setTemplatesByDiv] = useState({});
+  useEffect(() => {
+    const dids = [...new Set((data?.items || []).map((r) => r.division_id)
+      .filter((d) => d && !(d in templatesByDiv)))];
+    if (!dids.length) return;
+    dids.forEach((did) => {
+      api(`/api/v1/superadmin/divisions/${did}/campaign-field-templates`)
+        .then((res) => setTemplatesByDiv((p) => ({ ...p, [did]: res.items || [] })))
+        .catch(() => setTemplatesByDiv((p) => ({ ...p, [did]: [] })));
+    });
+  }, [data]);
+
+  const customFieldsSummary = (r) => {
+    const cf = r.custom_fields || {};
+    const keys = Object.keys(cf);
+    if (!keys.length) return null;
+    const tpls = templatesByDiv[r.division_id] || [];
+    return keys.map((k) => {
+      const t = tpls.find((x) => x.field_key === k);
+      const v = cf[k];
+      const disp = v && typeof v === 'object' ? (v.filename || `${v.from || ''} → ${v.to || ''}`) : String(v ?? '');
+      return `${t?.label || k}: ${disp}`;
+    });
+  };
+
   const cols = [
     { key: 'id', label: 'ID', render: (r) => <strong>#{r.id}</strong> },
     { key: 'name', label: 'Campaign', render: (r) =>
@@ -97,6 +124,13 @@ export default function SuperCampaigns() {
           <div>{r.start_date || '—'} → {r.end_date || '…'}</div>
           {r.submitted_at && <small className="muted">submitted {String(r.submitted_at).slice(0, 10)}</small>}
         </>,
+    },
+    {
+      key: 'custom_fields', label: 'Custom fields', render: (r) => {
+        const lines = customFieldsSummary(r);
+        if (!lines) return <span className="muted">—</span>;
+        return <span className="chip" title={lines.join('\n')}>{lines.length} field{lines.length > 1 ? 's' : ''}</span>;
+      },
     },
     {
       key: '_actions', label: '', render: (r) => r.status === 'pending_approval' ? (

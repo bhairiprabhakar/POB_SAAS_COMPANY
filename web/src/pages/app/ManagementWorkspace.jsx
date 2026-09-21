@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, fmtDate, getSession } from '../../api';
 import {
-  Badge, ErrorBox, Field, Modal, PageHeader, SearchBox, Select, Spinner, StatusBadge,
-  Table, TextArea, TextInput, toast, useAsync, useFileUrl,
+  Badge, DynamicFieldsSection, ErrorBox, Field, Modal, PageHeader, SearchBox, Select, Spinner,
+  StatusBadge, Table, TextArea, TextInput, toast, useAsync, useFileUrl,
 } from '../../ui';
 import Users from './Users';
 import Hierarchy from './Hierarchy';
@@ -314,6 +314,7 @@ export function CampaignsTab({ base }) {
         subtitle={canManage ? "Create and manage the division's POB schemes" : 'Active and completed schemes available for execution'}
         actions={<>
           <SearchBox value={q} onChange={setQ} />
+          {canManage && <Link className="btn" to="/app/campaigns/fields">Manage custom fields</Link>}
           {canManage && <button className="btn btn-primary" onClick={openCreate}>+ New campaign</button>}
         </>} />
       <div className="tabs">
@@ -371,17 +372,20 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
   const readiness = useAsync(() => api(`${base}/campaigns/readiness`), [isEdit, base]);
   const chemistMasters = useAsync(() => api('/api/v1/chemist-masters'), [isEdit, base]);
   const gratTypes = useAsync(() => api('/api/v1/gratification/types'), [isEdit, base]);
+  const fieldTemplates = useAsync(() => api('/api/v1/campaign-field-templates'), [base]);
   const [f, setF] = useState({
     active: true, invoice_verification_required: true, status: 'draft', scheme_type: 'others',
     assignment: { mode: 'all', regions: [], employee_ids: [], manager_id: '' }, ...editing,
     eligible_states: [], eligible_chemist_attachment_types: [], eligible_chemist_potential_categories: [],
+    custom_fields: editing.custom_fields || {},
   });
   const [products, setProducts] = useState([]);
   const [busy, setBusy] = useState(false);
   const [files, setFiles] = useState({ logo: null, banner: null });
+  const [customFieldFiles, setCustomFieldFiles] = useState({});
   const loaded = useRef(false);
   const [step, setStep] = useState(0);
-  const STEPS = ['Details', 'Brand & Products', 'Rollout Scope', 'Timeline & Rules', 'Assignment', 'Branding & Submissions', 'Review'];
+  const STEPS = ['Details', 'Brand & Products', 'Rollout Scope', 'Timeline & Rules', 'Assignment', 'Branding & Submissions', 'Custom Fields', 'Review'];
   const lastStep = STEPS.length - 1;
 
   const nextStep = () => {
@@ -489,6 +493,16 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
     } catch (err) { toast(err.message, 'error'); }
   };
 
+  const uploadCustomFieldFile = async (campaignId, fieldKey, file) => {
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const r = await api(`${base}/campaigns/${campaignId}/custom-fields/${fieldKey}/upload`, { method: 'POST', body: fd });
+      setF((p) => ({ ...p, custom_fields: { ...p.custom_fields, [fieldKey]: { path: r.path, filename: r.filename, url: r.url } } }));
+    } catch (err) { toast(err.message, 'error'); }
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
@@ -506,6 +520,9 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
       else id = (await api(`${base}/campaigns`, { method: 'POST', body: payload })).id;
       if (files.logo) await uploadAsset(id, 'logo', files.logo);
       if (files.banner) await uploadAsset(id, 'banner', files.banner);
+      for (const [fieldKey, file] of Object.entries(customFieldFiles)) {
+        if (file) await uploadCustomFieldFile(id, fieldKey, file);
+      }
       toast(isEdit ? 'Campaign updated' : 'Campaign created', 'success');
       onDone();
     } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
@@ -884,6 +901,18 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
         )}
         {step === 6 && (
           <div>
+            <p className="muted" style={{ marginBottom: 14 }}>
+              Extra fields your division has set up for campaigns.{' '}
+              <Link to="/app/campaigns/fields">Manage custom fields</Link>
+            </p>
+            <DynamicFieldsSection templates={fieldTemplates.data?.items || []}
+              values={f.custom_fields || {}}
+              onChange={(v) => setF((p) => ({ ...p, custom_fields: v }))}
+              onFileSelect={(key, file) => setCustomFieldFiles((p) => ({ ...p, [key]: file }))} />
+          </div>
+        )}
+        {step === 7 && (
+          <div>
             <h3 className="sub-head">Review campaign</h3>
             <div className="kv-grid">
               <span>Campaign name<strong>{f.name || '—'}</strong></span>
@@ -907,6 +936,20 @@ function CampaignModal({ editing, base, brands, divisions, onClose, onDone }) {
               <span>Banner<strong>{files.banner ? 'Uploaded' : (f.banner_path ? 'Uploaded' : 'None')}</strong></span>
               <span>Terms & conditions<strong>{f.terms_conditions ? 'Included' : 'None'}</strong></span>
             </div>
+            {Object.keys(f.custom_fields || {}).length > 0 && (
+              <>
+                <h4 style={{ marginTop: 16, marginBottom: 8 }}>Custom fields</h4>
+                <div className="kv-grid">
+                  {Object.entries(f.custom_fields || {}).map(([key, val]) => {
+                    const tpl = (fieldTemplates.data?.items || []).find((t) => t.field_key === key);
+                    const display = val && typeof val === 'object'
+                      ? (val.filename || `${val.from || ''} → ${val.to || ''}`)
+                      : String(val ?? '—');
+                    return <span key={key}>{tpl?.label || key}<strong>{display}</strong></span>;
+                  })}
+                </div>
+              </>
+            )}
             <p className="ai-note">Review the details above — you can go back anytime to make changes before saving. After saving, submit the campaign for approval from the Campaigns page.</p>
           </div>
         )}

@@ -18,6 +18,26 @@ from .audit import log_action
 from .db_utils import fetchall_dict, fetchone_dict
 
 
+def _validate_custom_fields(conn, division_id, custom_fields: dict) -> None:
+    """Reject any custom_fields key that isn't an active campaign-field
+    template for this campaign's division -- defends against stale/garbage
+    field_keys (e.g. from a deactivated template) reaching the database.
+    Unscoped campaigns (no division_id) skip validation entirely, matching
+    the "legacy company-wide" permissiveness used elsewhere in this file."""
+    if not custom_fields or not division_id:
+        return
+    c = conn.cursor()
+    c.execute(
+        "SELECT field_key FROM field_templates "
+        "WHERE entity_type='campaign' AND division_id=%s AND active=TRUE",
+        (division_id,),
+    )
+    valid_keys = {r[0] for r in c.fetchall()}
+    unknown = [k for k in custom_fields if k not in valid_keys]
+    if unknown:
+        raise HTTPException(400, f"Unknown custom field(s): {', '.join(unknown)}")
+
+
 # ── Campaign readiness gate (perspective 7) ─────────────────────────────────
 
 def campaign_readiness(conn) -> dict:
@@ -554,7 +574,44 @@ def list_campaigns(conn, q: str = "", status: str = "", active: bool = None,
         r["brand_ids"] = _brand_ids_list(r)
         r["brand_names"] = _brand_names(conn, r["brand_ids"])
         r["assignment"] = assignment_summary(conn, r["id"])
+        r["custom_fields"] = _loads_custom_fields(r)
+        _loads_array_cols(r)
     return rows
+
+
+def _loads_custom_fields(row: dict) -> dict:
+    """fetchone_dict/fetchall_dict re-stringify JSONB columns back to JSON
+    text (db_utils._serialize) so callers that want the raw text keep
+    getting it; campaign consumers want the parsed object."""
+    import json
+    v = row.get("custom_fields")
+    if isinstance(v, str):
+        try:
+            return json.loads(v)
+        except Exception:
+            return {}
+    return v or {}
+
+
+_ARRAY_COLS = ("eligible_states", "eligible_chemist_attachment_types", "eligible_chemist_potential_categories")
+
+
+def _loads_array_cols(row: dict) -> None:
+    """Same re-stringification as _loads_custom_fields, but for the
+    campaigns table's native TEXT[] columns (db_utils._serialize json.dumps's
+    any list/dict it gets back from psycopg2, arrays included)."""
+    import json
+    for key in _ARRAY_COLS:
+        if key not in row:
+            continue
+        v = row[key]
+        if isinstance(v, str):
+            try:
+                row[key] = json.loads(v)
+            except Exception:
+                row[key] = []
+        elif v is None:
+            row[key] = []
 
 
 def _brand_ids_list(row: dict) -> list:
@@ -626,6 +683,8 @@ def get_campaign(conn, cid: int) -> dict | None:
         return None
     row["brand_ids"] = _brand_ids_list(row)
     row["brand_names"] = _brand_names(conn, row["brand_ids"])
+    row["custom_fields"] = _loads_custom_fields(row)
+    _loads_array_cols(row)
     c.execute("""SELECT cp.min_quantity, cp.min_pob, cp.max_pob, cp.scheme_eligibility,
                  p.*, b.name AS brand_name, b.division_id AS brand_division_id
                  FROM campaign_products cp
@@ -653,6 +712,7 @@ def create_campaign(conn, actor: dict, body: dict) -> int:
         c.execute("SELECT id FROM divisions WHERE id=%s", (body["division_id"],))
         if not c.fetchone():
             raise HTTPException(400, "invalid division_id")
+    _validate_custom_fields(conn, body.get("division_id"), body.get("custom_fields") or {})
     brand_ids = _normalize_brand_ids(conn, body)
     primary = _primary_brand_id(body)
     c.execute(
@@ -663,8 +723,8 @@ def create_campaign(conn, actor: dict, body: dict) -> int:
            auto_verify, auto_verify_confidence, pob_required, notification_rules,
            period_type, grace_days, grace_months, pre_grace_days,
            eligible_chemist_attachment_types, eligible_chemist_potential_categories,
-           eligible_states)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+           eligible_states, custom_fields)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
         (name, primary, ",".join(map(str, brand_ids)),
          body.get("division_id"),
          body.get("division"), body.get("start_date"), body.get("end_date"), body.get("active", True),
@@ -682,7 +742,8 @@ def create_campaign(conn, actor: dict, body: dict) -> int:
          body.get("grace_months") or 0, body.get("pre_grace_days") or 0,
          body.get("eligible_chemist_attachment_types") or [],
          body.get("eligible_chemist_potential_categories") or [],
-         body.get("eligible_states") or []),
+         body.get("eligible_states") or [],
+         json.dumps(body.get("custom_fields") or {})),
     )
     cid = c.fetchone()[0]
     _sync_campaign_rules(conn, cid, body.get("rules"), actor)
@@ -717,6 +778,9 @@ def update_campaign(conn, actor: dict, cid: int, body: dict, request=None) -> No
         c.execute("SELECT id FROM divisions WHERE id=%s", (body["division_id"],))
         if not c.fetchone():
             raise HTTPException(400, "invalid division_id")
+    if "custom_fields" in body:
+        _validate_custom_fields(conn, body.get("division_id") or before.get("division_id"),
+                                body.get("custom_fields") or {})
     # brand_id is deliberately NOT in this list: the brand_ids block below owns
     # it (and validates it against the brands table). Setting it in both places
     # emitted "SET brand_id=%s, ... , brand_id=%s", which Postgres rejects with
@@ -729,13 +793,13 @@ def update_campaign(conn, actor: dict, cid: int, body: dict, request=None) -> No
               "payout_month_day", "auto_verify", "auto_verify_confidence", "pob_required", "notification_rules",
               "period_type", "grace_days", "grace_months", "pre_grace_days",
               "eligible_chemist_attachment_types", "eligible_chemist_potential_categories",
-              "eligible_states"]
+              "eligible_states", "custom_fields"]
     sets, params = [], []
     for f in fields:
         if f in body and body[f] is not None:
             sets.append(f"{f}=%s")
             val = body[f]
-            if f == "notification_rules":
+            if f in ("notification_rules", "custom_fields"):
                 import json
                 val = json.dumps(val or {})
             if f.startswith("eligible_"):

@@ -49,6 +49,7 @@ import Regions from './pages/app/Regions';
 import Gifts from './pages/app/Gifts';
 import ErrorBoundary from './ErrorBoundary';
 import ManageCampaigns from './pages/app/ManageCampaigns';
+import CampaignFieldTemplates from './pages/app/CampaignFieldTemplates';
 import Catalog from './pages/app/Catalog';
 import UserManagement from './pages/app/UserManagement';
 import Statements from './pages/app/Statements';
@@ -286,6 +287,9 @@ export default function App() {
         } />
         <Route path="/app/campaigns" element={
           <ProtectedTenant><AppShell kind="tenant"><ManageCampaigns /></AppShell></ProtectedTenant>
+        } />
+        <Route path="/app/campaigns/fields" element={
+          <ProtectedTenant><AppShell kind="tenant"><CampaignFieldTemplates /></AppShell></ProtectedTenant>
         } />
         <Route path="/app/brands" element={<Navigate to="/app/catalog?tab=brands" replace />} />
         <Route path="/app/user-management" element={

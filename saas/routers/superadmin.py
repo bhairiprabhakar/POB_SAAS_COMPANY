@@ -683,6 +683,33 @@ def sa_get_campaign(did: int, campaign_id: int, claims=Depends(require_sa_roles(
         conn.close()
 
 
+@router.get("/divisions/{did}/campaign-field-templates")
+def sa_list_campaign_field_templates(did: int, claims=Depends(require_sa_roles("campaign_admin"))):
+    """Every active campaign field-template in this tenant, for resolving
+    custom_fields keys to labels when the platform console displays a
+    campaign's captured values. Not filtered by the tenant's internal
+    division_id -- a tenant with a single internal division (the common
+    case) only ever has one division's worth anyway."""
+    conn = platform_db.get_db()
+    tconn = None
+    try:
+        tconn = _tenant_conn_for(conn, did)
+        c = tconn.cursor()
+        c.execute(
+            "SELECT id, division_id, field_key, label, field_type, options "
+            "FROM field_templates WHERE entity_type='campaign' AND active=TRUE ORDER BY sort_order, id")
+        items = fetchall_dict(c)
+        import json
+        for it in items:
+            v = it.get("options")
+            it["options"] = json.loads(v) if isinstance(v, str) else (v or [])
+        return {"items": items}
+    finally:
+        if tconn:
+            tconn.close()
+        conn.close()
+
+
 @router.post("/divisions/{did}/campaigns")
 def sa_create_campaign(did: int, body: dict, request: Request = None,
                        claims=Depends(require_sa_roles())):
