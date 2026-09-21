@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { api, fmtDateTime } from '../../api';
+import { api, fmtDateTime, saRole } from '../../api';
 import {
   Badge, ErrorBox, Field, Modal, PageHeader, SearchBox, Select, Skeleton, StatCard,
   StatSkeleton, StatusBadge, Table, TableSkeleton, Tabs, TextArea, TextInput, toast, useAsync,
@@ -21,8 +21,13 @@ const initialsOf = (a) => (a.full_name || a.username || '?').trim()
 export default function DivisionDetail() {
   const { did } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
+  // platform_division_admin's backend access is limited to division
+  // lifecycle + admins (see saas/routers/superadmin.py) -- the Users/Roles/
+  // Credits tabs would just 403, so don't offer them for this role.
+  const visibleTabs = saRole() === 'platform_division_admin'
+    ? TABS.filter((t) => t.value === 'overview') : TABS;
   const requested = searchParams.get('tab');
-  const [tab, setTab] = useState(TABS.some((t) => t.value === requested) ? requested : 'overview');
+  const [tab, setTab] = useState(visibleTabs.some((t) => t.value === requested) ? requested : 'overview');
   const [editOpen, setEditOpen] = useState(false);
   const { data, loading, error, run } = useAsync(() => api(`/api/v1/superadmin/divisions/${did}`), [did]);
 
@@ -103,7 +108,7 @@ export default function DivisionDetail() {
           </>
         } />
 
-      <Tabs items={TABS} active={tab} onChange={changeTab} />
+      <Tabs items={visibleTabs} active={tab} onChange={changeTab} />
 
       {tab === 'overview' && (
         <>

@@ -16,7 +16,7 @@ from openpyxl import Workbook
 from .. import platform_db, provision, storage
 from ..audit import log_action
 from ..db_utils import fetchall_dict, fetchone_dict
-from ..deps import require_owner, require_sa_path, require_sa_roles, require_superadmin
+from ..deps import require_owner, require_sa_roles, require_superadmin
 from ..upload_validation import IMAGE_KINDS, UploadValidationError, validate_upload
 from ..pagination import PageLimit, PageOffset
 from saas.passwords import hash_pw
@@ -24,7 +24,14 @@ from saas.passwords import hash_pw
 log = logging.getLogger("saas.superadmin")
 
 router = APIRouter(prefix="/api/v1/superadmin", tags=["superadmin"],
-                   dependencies=[Depends(require_superadmin), Depends(require_sa_path)])
+                   dependencies=[Depends(require_superadmin)])
+
+# Every specialized platform role (owner/full always pass require_sa_roles
+# regardless) -- used on the handful of shared overview endpoints
+# (analytics/metrics/notifications/queue-counts) every role's landing
+# dashboard needs, so each role's own explicit dependency doesn't have to
+# repeat the full tuple.
+_ALL_SA_ROLES = ("campaign_admin", "finance_admin", "verification_admin", "platform_division_admin")
 
 
 def _audit(conn, claims, action, entity_type=None, entity_id=None, detail=None):
@@ -68,7 +75,8 @@ def _gen_code(name: str) -> str:
 # -- Divisions --
 
 @router.get("/divisions")
-def list_divisions(q: str = "", status: str = ""):
+def list_divisions(q: str = "", status: str = "",
+                   claims=Depends(require_sa_roles("platform_division_admin"))):
     conn = platform_db.get_db()
     try:
         c = conn.cursor()
@@ -95,7 +103,7 @@ def list_divisions(q: str = "", status: str = ""):
 
 
 @router.get("/divisions/{did}")
-def get_division(did: int):
+def get_division(did: int, claims=Depends(require_sa_roles("platform_division_admin"))):
     conn = platform_db.get_db()
     try:
         c = conn.cursor()
@@ -125,7 +133,7 @@ def get_division(did: int):
 
 
 @router.post("/divisions")
-def create_division(body: dict, claims=Depends(require_superadmin)):
+def create_division(body: dict, claims=Depends(require_sa_roles("platform_division_admin"))):
     name = (body.get("name") or "").strip()
     if not name:
         raise HTTPException(400, "Division name is required")
@@ -201,7 +209,7 @@ def _provision_division(conn, cid, code, claims, body):
 
 
 @router.post("/divisions/{did}/provision")
-def provision_division(did: int, body: dict, claims=Depends(require_superadmin)):
+def provision_division(did: int, body: dict, claims=Depends(require_sa_roles("platform_division_admin"))):
     conn = platform_db.get_db()
     try:
         c = conn.cursor()
@@ -219,7 +227,7 @@ def provision_division(did: int, body: dict, claims=Depends(require_superadmin))
 
 
 @router.put("/divisions/{did}")
-def update_division(did: int, body: dict, claims=Depends(require_superadmin)):
+def update_division(did: int, body: dict, claims=Depends(require_sa_roles("platform_division_admin"))):
     conn = platform_db.get_db()
     try:
         c = conn.cursor()
@@ -259,27 +267,27 @@ _TRANSITIONS = {
 
 
 @router.post("/divisions/{did}/deactivate")
-def deactivate_division(did: int, claims=Depends(require_superadmin)):
+def deactivate_division(did: int, claims=Depends(require_sa_roles("platform_division_admin"))):
     return _set_status(did, "inactive", claims, allowed_from=_TRANSITIONS["deactivate"])
 
 
 @router.post("/divisions/{did}/activate")
-def activate_division(did: int, claims=Depends(require_superadmin)):
+def activate_division(did: int, claims=Depends(require_sa_roles("platform_division_admin"))):
     return _set_status(did, "active", claims, allowed_from=_TRANSITIONS["activate"])
 
 
 @router.post("/divisions/{did}/suspend")
-def suspend_division(did: int, claims=Depends(require_superadmin)):
+def suspend_division(did: int, claims=Depends(require_sa_roles("platform_division_admin"))):
     return _set_status(did, "suspended", claims, allowed_from=_TRANSITIONS["suspend"])
 
 
 @router.post("/divisions/{did}/resume")
-def resume_division(did: int, claims=Depends(require_superadmin)):
+def resume_division(did: int, claims=Depends(require_sa_roles("platform_division_admin"))):
     return _set_status(did, "active", claims, allowed_from=_TRANSITIONS["resume"])
 
 
 @router.post("/divisions/{did}/archive")
-def archive_division(did: int, claims=Depends(require_superadmin)):
+def archive_division(did: int, claims=Depends(require_sa_roles("platform_division_admin"))):
     return _set_status(did, "archived", claims, allowed_from=_TRANSITIONS["archive"])
 
 
@@ -303,7 +311,7 @@ def _set_status(did, status, claims, allowed_from=None):
 
 
 @router.post("/divisions/{did}/reset-admin-password")
-def reset_admin_password(did: int, body: dict, claims=Depends(require_superadmin)):
+def reset_admin_password(did: int, body: dict, claims=Depends(require_sa_roles("platform_division_admin"))):
     username = (body.get("username") or "division_admin").strip().lower()
     password = body.get("new_password") or ""
     if len(password) < 6:
@@ -385,62 +393,62 @@ def _org(claims, did, fn):
 
 
 @router.get("/divisions/{did}/permissions")
-def sa_permissions(did: int, claims=Depends(require_superadmin)):
+def sa_permissions(did: int, claims=Depends(require_sa_roles())):
     return _org(claims, did, lambda company, ctx: company.permissions(ctx=ctx))
 
 
 @router.get("/divisions/{did}/roles")
-def sa_roles(did: int, claims=Depends(require_superadmin)):
+def sa_roles(did: int, claims=Depends(require_sa_roles())):
     return _org(claims, did, lambda company, ctx: company.roles(ctx=ctx))
 
 
 @router.post("/divisions/{did}/roles")
-def sa_create_role(did: int, body: dict, claims=Depends(require_superadmin)):
+def sa_create_role(did: int, body: dict, claims=Depends(require_sa_roles())):
     return _org(claims, did, lambda company, ctx: company.create_role(body, ctx=ctx))
 
 
 @router.put("/divisions/{did}/roles/{rid}")
-def sa_update_role(did: int, rid: int, body: dict, claims=Depends(require_superadmin)):
+def sa_update_role(did: int, rid: int, body: dict, claims=Depends(require_sa_roles())):
     return _org(claims, did, lambda company, ctx: company.update_role(rid, body, ctx=ctx))
 
 
 @router.delete("/divisions/{did}/roles/{rid}")
-def sa_delete_role(did: int, rid: int, claims=Depends(require_superadmin)):
+def sa_delete_role(did: int, rid: int, claims=Depends(require_sa_roles())):
     return _org(claims, did, lambda company, ctx: company.delete_role(rid, ctx=ctx))
 
 
 @router.get("/divisions/{did}/hierarchy/levels")
-def sa_hierarchy_levels(did: int, claims=Depends(require_superadmin)):
+def sa_hierarchy_levels(did: int, claims=Depends(require_sa_roles())):
     return _org(claims, did, lambda company, ctx: company.hierarchy_levels(ctx=ctx))
 
 
 @router.post("/divisions/{did}/hierarchy/levels")
-def sa_create_level(did: int, body: dict, claims=Depends(require_superadmin)):
+def sa_create_level(did: int, body: dict, claims=Depends(require_sa_roles())):
     return _org(claims, did, lambda company, ctx: company.create_level(body, ctx=ctx))
 
 
 @router.put("/divisions/{did}/hierarchy/levels/{lid}")
-def sa_update_level(did: int, lid: int, body: dict, claims=Depends(require_superadmin)):
+def sa_update_level(did: int, lid: int, body: dict, claims=Depends(require_sa_roles())):
     return _org(claims, did, lambda company, ctx: company.update_level(lid, body, ctx=ctx))
 
 
 @router.delete("/divisions/{did}/hierarchy/levels/{lid}")
-def sa_delete_level(did: int, lid: int, claims=Depends(require_superadmin)):
+def sa_delete_level(did: int, lid: int, claims=Depends(require_sa_roles())):
     return _org(claims, did, lambda company, ctx: company.delete_level(lid, ctx=ctx))
 
 
 @router.get("/divisions/{did}/hierarchy/tree")
-def sa_hierarchy_tree(did: int, claims=Depends(require_superadmin)):
+def sa_hierarchy_tree(did: int, claims=Depends(require_sa_roles())):
     return _org(claims, did, lambda company, ctx: company.hierarchy_tree(ctx=ctx))
 
 
 @router.get("/divisions/{did}/hierarchy/bulk-template")
-def sa_bulk_template(did: int, claims=Depends(require_superadmin)):
+def sa_bulk_template(did: int, claims=Depends(require_sa_roles())):
     return _org(claims, did, lambda company, ctx: company.bulk_template(ctx=ctx))
 
 
 @router.get("/divisions/{did}/admins")
-def sa_division_admins(did: int, claims=Depends(require_superadmin)):
+def sa_division_admins(did: int, claims=Depends(require_sa_roles("platform_division_admin"))):
     """List the division's admin users (roles division_admin / campaignos_admin).
 
     Division admins hold every permission within their division. The platform
@@ -471,32 +479,32 @@ def sa_division_admins(did: int, claims=Depends(require_superadmin)):
 @router.get("/divisions/{did}/users")
 def sa_list_users(did: int, q: str = "", level_id: int = None, role_id: int = None,
                   status: str = "", limit: int = PageLimit(default=200), offset: int = PageOffset(),
-                  claims=Depends(require_superadmin)):
+                  claims=Depends(require_sa_roles())):
     return _org(claims, did, lambda company, ctx: company.list_users(q, level_id, role_id, status, limit, offset, ctx=ctx))
 
 
 @router.get("/divisions/{did}/users/{uid}")
-def sa_get_user(did: int, uid: int, claims=Depends(require_superadmin)):
+def sa_get_user(did: int, uid: int, claims=Depends(require_sa_roles())):
     return _org(claims, did, lambda company, ctx: company.get_user(uid, ctx=ctx))
 
 
 @router.post("/divisions/{did}/users")
-def sa_create_user(did: int, body: dict, claims=Depends(require_superadmin)):
+def sa_create_user(did: int, body: dict, claims=Depends(require_sa_roles("platform_division_admin"))):
     return _org(claims, did, lambda company, ctx: company.create_user(body, ctx=ctx))
 
 
 @router.put("/divisions/{did}/users/{uid}")
-def sa_update_user(did: int, uid: int, body: dict, claims=Depends(require_superadmin)):
+def sa_update_user(did: int, uid: int, body: dict, claims=Depends(require_sa_roles("platform_division_admin"))):
     return _org(claims, did, lambda company, ctx: company.update_user(uid, body, ctx=ctx))
 
 
 @router.delete("/divisions/{did}/users/{uid}")
-def sa_delete_user(did: int, uid: int, claims=Depends(require_superadmin)):
+def sa_delete_user(did: int, uid: int, claims=Depends(require_sa_roles())):
     return _org(claims, did, lambda company, ctx: company.delete_user(uid, ctx=ctx))
 
 
 @router.post("/divisions/{did}/users/bulk-upload")
-async def sa_bulk_upload_users(did: int, file: UploadFile = File(...), claims=Depends(require_superadmin)):
+async def sa_bulk_upload_users(did: int, file: UploadFile = File(...), claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     tconn = None
     try:
@@ -513,7 +521,7 @@ async def sa_bulk_upload_users(did: int, file: UploadFile = File(...), claims=De
 
 @router.get("/divisions/{did}/divisions")
 def sa_internal_list_divisions(did: int, q: str = "", status: str = "",
-                               claims=Depends(require_superadmin)):
+                               claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     tconn = None
     try:
@@ -527,7 +535,7 @@ def sa_internal_list_divisions(did: int, q: str = "", status: str = "",
 
 
 @router.post("/divisions/{did}/divisions")
-def sa_internal_create_division(did: int, body: dict, claims=Depends(require_superadmin)):
+def sa_internal_create_division(did: int, body: dict, claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     tconn = None
     try:
@@ -542,7 +550,7 @@ def sa_internal_create_division(did: int, body: dict, claims=Depends(require_sup
 
 
 @router.put("/divisions/{did}/divisions/{idv}")
-def sa_internal_update_division(did: int, idv: int, body: dict, claims=Depends(require_superadmin)):
+def sa_internal_update_division(did: int, idv: int, body: dict, claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     tconn = None
     try:
@@ -557,7 +565,7 @@ def sa_internal_update_division(did: int, idv: int, body: dict, claims=Depends(r
 
 
 @router.delete("/divisions/{did}/divisions/{idv}")
-def sa_internal_delete_division(did: int, idv: int, claims=Depends(require_superadmin)):
+def sa_internal_delete_division(did: int, idv: int, claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     tconn = None
     try:
@@ -573,7 +581,7 @@ def sa_internal_delete_division(did: int, idv: int, claims=Depends(require_super
 
 @router.get("/divisions/{did}/brands")
 def sa_list_brands(did: int, q: str = "", status: str = "", division_id: int = None,
-                   claims=Depends(require_superadmin)):
+                   claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     tconn = None
     try:
@@ -587,7 +595,7 @@ def sa_list_brands(did: int, q: str = "", status: str = "", division_id: int = N
 
 
 @router.post("/divisions/{did}/brands")
-def sa_create_brand(did: int, body: dict, claims=Depends(require_superadmin)):
+def sa_create_brand(did: int, body: dict, claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     tconn = None
     try:
@@ -605,7 +613,7 @@ def sa_create_brand(did: int, body: dict, claims=Depends(require_superadmin)):
 
 
 @router.put("/divisions/{did}/brands/{bid}")
-def sa_update_brand(did: int, bid: int, body: dict, claims=Depends(require_superadmin)):
+def sa_update_brand(did: int, bid: int, body: dict, claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     tconn = None
     try:
@@ -623,7 +631,7 @@ def sa_update_brand(did: int, bid: int, body: dict, claims=Depends(require_super
 
 
 @router.delete("/divisions/{did}/brands/{bid}")
-def sa_delete_brand(did: int, bid: int, claims=Depends(require_superadmin)):
+def sa_delete_brand(did: int, bid: int, claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     tconn = None
     try:
@@ -645,7 +653,7 @@ def sa_delete_brand(did: int, bid: int, claims=Depends(require_superadmin)):
 @router.get("/divisions/{did}/campaigns")
 def sa_list_campaigns(did: int, q: str = "", status: str = "", active: bool = None,
                       brand_id: int = None, division_id: int = None,
-                      claims=Depends(require_superadmin)):
+                      claims=Depends(require_sa_roles("campaign_admin"))):
     conn = platform_db.get_db()
     tconn = None
     try:
@@ -659,7 +667,7 @@ def sa_list_campaigns(did: int, q: str = "", status: str = "", active: bool = No
 
 
 @router.get("/divisions/{did}/campaigns/{campaign_id}")
-def sa_get_campaign(did: int, campaign_id: int, claims=Depends(require_superadmin)):
+def sa_get_campaign(did: int, campaign_id: int, claims=Depends(require_sa_roles("campaign_admin"))):
     conn = platform_db.get_db()
     tconn = None
     try:
@@ -677,7 +685,7 @@ def sa_get_campaign(did: int, campaign_id: int, claims=Depends(require_superadmi
 
 @router.post("/divisions/{did}/campaigns")
 def sa_create_campaign(did: int, body: dict, request: Request = None,
-                       claims=Depends(require_superadmin)):
+                       claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     tconn = None
     try:
@@ -705,7 +713,7 @@ def sa_create_campaign(did: int, body: dict, request: Request = None,
 
 @router.post("/divisions/{did}/campaigns/{cid}/approve")
 def sa_approve_campaign(did: int, cid: int, request: Request = None,
-                        claims=Depends(require_superadmin)):
+                        claims=Depends(require_sa_roles("campaign_admin"))):
     """pending_approval -> scheduled -> active. The daily sweep is what
     normally flips scheduled campaigns to active once their start window
     opens, but that sweep only runs once per calendar day — an approval
@@ -743,7 +751,7 @@ def sa_approve_campaign(did: int, cid: int, request: Request = None,
 
 @router.post("/divisions/{did}/campaigns/{cid}/reject")
 def sa_reject_campaign(did: int, cid: int, body: dict = None, request: Request = None,
-                       claims=Depends(require_superadmin)):
+                       claims=Depends(require_sa_roles("campaign_admin"))):
     """pending_approval/scheduled -> rejected, with a reason the submitter can
     see. A terminal decision -- resubmitting starts the review over from
     scratch. Use /request-changes instead for a correction that should keep
@@ -779,7 +787,7 @@ def sa_reject_campaign(did: int, cid: int, body: dict = None, request: Request =
 
 @router.post("/divisions/{did}/campaigns/{cid}/request-changes")
 def sa_request_campaign_changes(did: int, cid: int, body: dict = None, request: Request = None,
-                                claims=Depends(require_superadmin)):
+                                claims=Depends(require_sa_roles("campaign_admin"))):
     """pending_approval -> changes_required, with a mandatory reason. A softer
     outcome than reject: the campaign goes back to the division admin to fix
     and resubmit, without it counting as a rejection in its history."""
@@ -814,7 +822,7 @@ def sa_request_campaign_changes(did: int, cid: int, body: dict = None, request: 
 
 @router.put("/divisions/{did}/campaigns/{campaign_id}")
 def sa_update_campaign(did: int, campaign_id: int, body: dict, request: Request = None,
-                       claims=Depends(require_superadmin)):
+                       claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     tconn = None
     try:
@@ -834,7 +842,7 @@ def sa_update_campaign(did: int, campaign_id: int, body: dict, request: Request 
 
 @router.post("/divisions/{did}/campaigns/{campaign_id}/extend")
 def sa_extend_campaign(did: int, campaign_id: int, body: dict, request: Request = None,
-                       claims=Depends(require_superadmin)):
+                       claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     tconn = None
     try:
@@ -848,7 +856,7 @@ def sa_extend_campaign(did: int, campaign_id: int, body: dict, request: Request 
 
 
 @router.delete("/divisions/{did}/campaigns/{campaign_id}")
-def sa_delete_campaign(did: int, campaign_id: int, claims=Depends(require_superadmin)):
+def sa_delete_campaign(did: int, campaign_id: int, claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     tconn = None
     try:
@@ -866,7 +874,7 @@ def sa_delete_campaign(did: int, campaign_id: int, claims=Depends(require_supera
 
 
 @router.patch("/divisions/{did}/campaigns/{campaign_id}/toggle-active")
-def sa_toggle_campaign_active(did: int, campaign_id: int, claims=Depends(require_superadmin)):
+def sa_toggle_campaign_active(did: int, campaign_id: int, claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     tconn = None
     try:
@@ -892,7 +900,7 @@ def sa_toggle_campaign_active(did: int, campaign_id: int, claims=Depends(require
 
 @router.post("/divisions/{did}/campaigns/{campaign_id}/asset")
 async def sa_upload_campaign_asset(did: int, campaign_id: int, kind: str = "logo",
-                                   file: UploadFile = File(...), claims=Depends(require_superadmin)):
+                                   file: UploadFile = File(...), claims=Depends(require_sa_roles())):
     data = await file.read()
     if len(data) > 2 * 1024 * 1024:
         raise HTTPException(400, "File must be under 2 MB")
@@ -939,7 +947,7 @@ async def sa_upload_campaign_asset(did: int, campaign_id: int, kind: str = "logo
 
 @router.post("/divisions/{did}/logo")
 async def sa_upload_division_logo(did: int, file: UploadFile = File(...),
-                                 claims=Depends(require_superadmin)):
+                                 claims=Depends(require_sa_roles())):
     data = await file.read()
     if len(data) > 2 * 1024 * 1024:
         raise HTTPException(400, "Logo must be under 2 MB")
@@ -969,7 +977,7 @@ async def sa_upload_division_logo(did: int, file: UploadFile = File(...),
 
 
 @router.delete("/divisions/{did}/logo")
-def sa_delete_division_logo(did: int, claims=Depends(require_superadmin)):
+def sa_delete_division_logo(did: int, claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     try:
         c = conn.cursor()
@@ -989,7 +997,7 @@ def sa_delete_division_logo(did: int, claims=Depends(require_superadmin)):
 
 
 @router.get("/divisions/{did}/roles/names")
-def sa_list_role_names(did: int, claims=Depends(require_superadmin)):
+def sa_list_role_names(did: int, claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     tconn = None
     try:
@@ -1006,7 +1014,8 @@ def sa_list_role_names(did: int, claims=Depends(require_superadmin)):
 # -- Audit + metrics --
 
 @router.get("/audit-logs")
-def audit_logs(limit: int = PageLimit(), offset: int = PageOffset()):
+def audit_logs(limit: int = PageLimit(), offset: int = PageOffset(),
+               claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     try:
         c = conn.cursor()
@@ -1019,7 +1028,7 @@ def audit_logs(limit: int = PageLimit(), offset: int = PageOffset()):
 
 
 @router.get("/metrics")
-def platform_metrics():
+def platform_metrics(claims=Depends(require_sa_roles(*_ALL_SA_ROLES))):
     conn = platform_db.get_db()
     try:
         c = conn.cursor()
@@ -1056,7 +1065,7 @@ def _direct_tenant_conn(tenant_db: str):
 
 
 @router.get("/analytics")
-def platform_analytics(days: int = 0, claims=Depends(require_superadmin)):
+def platform_analytics(days: int = 0, claims=Depends(require_sa_roles(*_ALL_SA_ROLES))):
     import time as _time
     now = _time.time()
     if (_analytics_cache["data"] is not None and _analytics_cache["days"] == days
@@ -1191,7 +1200,7 @@ def _costing_where(days: int, model: str, division_id: int = 0):
 
 @router.get("/costing")
 def platform_costing(days: int = 0, division_id: int = 0, model: str = "",
-                     claims=Depends(require_superadmin)):
+                     claims=Depends(require_sa_roles())):
     """Aggregate Gemini invoice-extraction spend (Batch 2: ai_usage_log).
 
     Reads the platform control-plane ai_usage_log -- the merged, tenant-
@@ -1413,7 +1422,7 @@ def platform_costing(days: int = 0, division_id: int = 0, model: str = "",
 
 @router.get("/costing/export")
 def platform_costing_export(days: int = 0, division_id: int = 0, model: str = "",
-                            claims=Depends(require_superadmin)):
+                            claims=Depends(require_sa_roles())):
     """Export the AI Costing report as Excel: summary + by division + by
     user + daily trend + the full per-extraction detail (not capped at 200).
     Ported from legacy sa_ai_costing_export, sourced from ai_usage_log."""
@@ -1545,7 +1554,7 @@ def platform_costing_export(days: int = 0, division_id: int = 0, model: str = ""
 # -- AI model routing + pricing (platform-wide superadmin config) --
 
 @router.get("/ai-models")
-def sa_ai_models(claims=Depends(require_superadmin)):
+def sa_ai_models(claims=Depends(require_sa_roles())):
     """Model Settings: which Gemini model handles each file category, plus the
     editable per-model USD pricing table (see saas/ai/model_registry.py)."""
     from ..ai import model_registry
@@ -1559,7 +1568,7 @@ def sa_ai_models(claims=Depends(require_superadmin)):
 
 
 @router.post("/ai-models/routing")
-def sa_ai_models_routing_save(body: dict, claims=Depends(require_superadmin)):
+def sa_ai_models_routing_save(body: dict, claims=Depends(require_sa_roles())):
     """Save the per-category model overrides. An empty choice deletes that
     category's override so it follows .env again."""
     from ..ai import model_registry
@@ -1575,7 +1584,7 @@ def sa_ai_models_routing_save(body: dict, claims=Depends(require_superadmin)):
 
 
 @router.post("/ai-models/pricing")
-def sa_ai_models_pricing_save(body: dict, claims=Depends(require_superadmin)):
+def sa_ai_models_pricing_save(body: dict, claims=Depends(require_sa_roles())):
     """Save the pricing table rows plus an optional new-model entry. A blank
     price falls back to default pricing."""
     from ..ai import model_registry
@@ -1603,7 +1612,7 @@ def sa_ai_models_pricing_save(body: dict, claims=Depends(require_superadmin)):
 
 
 @router.post("/ai-models/pricing/delete")
-def sa_ai_models_pricing_delete(body: dict, claims=Depends(require_superadmin)):
+def sa_ai_models_pricing_delete(body: dict, claims=Depends(require_sa_roles())):
     """Remove a model from pricing. Refuses if the model is currently selected
     in any routing category (see model_registry.delete_pricing)."""
     from ..ai import model_registry
@@ -1619,7 +1628,7 @@ def sa_ai_models_pricing_delete(body: dict, claims=Depends(require_superadmin)):
 # -- Tenant credits admin (statement wallet; superadmin review) --
 
 @router.get("/divisions/{did}/credits")
-def sa_tenant_credits(did: int, claims=Depends(require_superadmin)):
+def sa_tenant_credits(did: int, claims=Depends(require_sa_roles())):
     """Tenant statement-credit wallet + pending requests + ledger (the merged
     home of the legacy /superadmin/credits page)."""
     from .. import credits
@@ -1641,7 +1650,7 @@ def sa_tenant_credits(did: int, claims=Depends(require_superadmin)):
 
 
 @router.post("/divisions/{did}/credits/allocate")
-def sa_tenant_credits_allocate(did: int, body: dict, claims=Depends(require_superadmin)):
+def sa_tenant_credits_allocate(did: int, body: dict, claims=Depends(require_sa_roles())):
     """Allocate credits to a tenant wallet (legacy /superadmin/credits/allocate)."""
     from .. import credits
     amount = int((body or {}).get("amount") or 0)
@@ -1666,7 +1675,7 @@ def sa_tenant_credits_allocate(did: int, body: dict, claims=Depends(require_supe
 
 @router.post("/divisions/{did}/credits/requests/{rid}/approve")
 def sa_tenant_credits_approve(did: int, rid: int, body: dict = None,
-                              claims=Depends(require_superadmin)):
+                              claims=Depends(require_sa_roles())):
     """Approve a tenant credit request. reviewed_by stays NULL because the
     platform superadmin is not a tenant users(id) FK; the actor is recorded in
     platform_audit_logs by the platform-side _audit helper."""
@@ -1690,7 +1699,7 @@ def sa_tenant_credits_approve(did: int, rid: int, body: dict = None,
 
 @router.post("/divisions/{did}/credits/requests/{rid}/reject")
 def sa_tenant_credits_reject(did: int, rid: int, body: dict = None,
-                             claims=Depends(require_superadmin)):
+                             claims=Depends(require_sa_roles())):
     """Reject a tenant credit request (reviewed_by=NULL; actor in audit log)."""
     from .. import credits
     conn = platform_db.get_db()
@@ -1724,7 +1733,7 @@ def _provisioned_divisions(conn) -> list[dict]:
 
 @router.get("/campaigns")
 def sa_all_campaigns(q: str = "", status: str = "", limit: int = 300,
-                     claims=Depends(require_superadmin)):
+                     claims=Depends(require_sa_roles("campaign_admin"))):
     """Cross-division campaign list. `status` filters the list; `counts` is the
     full status histogram so the sidebar tabs can show live badges."""
     from .. import campaign_service
@@ -1786,7 +1795,7 @@ def _assert_is_verification_agent(tconn, uid: int) -> None:
 
 
 @router.get("/verification-agents")
-def sa_list_verification_agents(status: str = "", claims=Depends(require_superadmin)):
+def sa_list_verification_agents(status: str = "", claims=Depends(require_sa_roles("verification_admin"))):
     """Every verification_agent across every provisioned division, with their
     approve/reject/duplicate counts and average turnaround time."""
     conn = platform_db.get_db()
@@ -1847,7 +1856,7 @@ def sa_list_verification_agents(status: str = "", claims=Depends(require_superad
 
 
 @router.post("/verification-agents")
-def sa_create_verification_agent(body: dict, claims=Depends(require_superadmin)):
+def sa_create_verification_agent(body: dict, claims=Depends(require_sa_roles("verification_admin"))):
     """Create a verification_agent bound to a division. `division_id` (the
     platform's division id) picks the tenant; a tenant with exactly one
     internal division is auto-assigned, otherwise pass `internal_division_id`
@@ -1890,7 +1899,7 @@ def sa_create_verification_agent(body: dict, claims=Depends(require_superadmin))
 
 
 @router.get("/verification-agents/{did}/{uid}")
-def sa_verification_agent_detail(did: int, uid: int, claims=Depends(require_superadmin)):
+def sa_verification_agent_detail(did: int, uid: int, claims=Depends(require_sa_roles("verification_admin"))):
     """A single agent's profile plus their most recent verification decisions."""
     conn = platform_db.get_db()
     tconn = None
@@ -1920,7 +1929,7 @@ def sa_verification_agent_detail(did: int, uid: int, claims=Depends(require_supe
 
 
 @router.put("/verification-agents/{did}/{uid}")
-def sa_update_verification_agent(did: int, uid: int, body: dict, claims=Depends(require_superadmin)):
+def sa_update_verification_agent(did: int, uid: int, body: dict, claims=Depends(require_sa_roles("verification_admin"))):
     """Edit profile / status / password / internal division assignment. Only
     ever touches users who already hold the verification_agent role."""
     conn = platform_db.get_db()
@@ -1940,7 +1949,7 @@ def sa_update_verification_agent(did: int, uid: int, body: dict, claims=Depends(
 
 
 @router.get("/pob")
-def sa_all_pob(status: str = "", limit: int = 200, claims=Depends(require_superadmin)):
+def sa_all_pob(status: str = "", limit: int = 200, claims=Depends(require_sa_roles("verification_admin"))):
     """Cross-division POB operations: per-status totals per division plus a
     unified list of the most recent records (optionally filtered by status)."""
     conn = platform_db.get_db()
@@ -1999,7 +2008,7 @@ def sa_all_pob(status: str = "", limit: int = 200, claims=Depends(require_supera
 
 @router.get("/gratification")
 def sa_all_gratification(status: str = "", limit: int = 200,
-                         claims=Depends(require_superadmin)):
+                         claims=Depends(require_sa_roles("finance_admin"))):
     """Cross-division gratification pipeline: per-status/per-type totals plus a
     unified recent list (optionally filtered by status)."""
     conn = platform_db.get_db()
@@ -2060,7 +2069,7 @@ _PAYOUT_STAGES = ("eligible", "approved", "paid", "dispatched", "delivered", "co
 
 
 @router.get("/finance")
-def platform_finance(days: int = 0, claims=Depends(require_superadmin)):
+def platform_finance(days: int = 0, claims=Depends(require_sa_roles("finance_admin"))):
     """Owner-finance aggregation across every division tenant.
 
     Money owed and money actually out come from the gratification pipeline
@@ -2450,7 +2459,7 @@ def sa_campaign_roi(days: int = 0, limit: int = 400,
 
 
 @router.get("/users")
-def sa_all_users(q: str = "", limit: int = 2000, claims=Depends(require_superadmin)):
+def sa_all_users(q: str = "", limit: int = 2000, claims=Depends(require_sa_roles())):
     """Cross-division employee directory: every tenant user with its division,
     role, region, status and who they report to."""
     conn = platform_db.get_db()
@@ -2504,13 +2513,13 @@ def sa_all_users(q: str = "", limit: int = 2000, claims=Depends(require_superadm
 # -- Backups --
 
 @router.get("/backups")
-def list_backups(claims=Depends(require_superadmin)):
+def list_backups(claims=Depends(require_sa_roles())):
     from .. import backup
     return {"items": backup.list_backups()}
 
 
 @router.post("/backup")
-def run_backup(claims=Depends(require_superadmin)):
+def run_backup(claims=Depends(require_sa_roles())):
     from .. import backup
     summary = backup.run_backup_all()
     conn = platform_db.get_db()
@@ -2526,7 +2535,7 @@ def run_backup(claims=Depends(require_superadmin)):
 # -- Platform settings (own branding: name + logo) --
 
 @router.get("/platform-settings")
-def sa_get_platform_settings(claims=Depends(require_superadmin)):
+def sa_get_platform_settings(claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     try:
         c = conn.cursor()
@@ -2541,7 +2550,7 @@ def sa_get_platform_settings(claims=Depends(require_superadmin)):
 
 
 @router.put("/platform-settings")
-def sa_update_platform_settings(payload: dict, claims=Depends(require_superadmin)):
+def sa_update_platform_settings(payload: dict, claims=Depends(require_sa_roles())):
     name = (payload.get("platform_name") or "").strip()
     if not name or len(name) > 60:
         raise HTTPException(400, "Platform name must be 1–60 characters")
@@ -2564,7 +2573,7 @@ def sa_update_platform_settings(payload: dict, claims=Depends(require_superadmin
 
 @router.post("/platform-settings/logo")
 async def sa_upload_platform_logo(file: UploadFile = File(...),
-                                  claims=Depends(require_superadmin)):
+                                  claims=Depends(require_sa_roles())):
     data = await file.read()
     if len(data) > 2 * 1024 * 1024:
         raise HTTPException(400, "Logo must be under 2 MB")
@@ -2594,7 +2603,7 @@ async def sa_upload_platform_logo(file: UploadFile = File(...),
 
 
 @router.delete("/platform-settings/logo")
-def sa_delete_platform_logo(claims=Depends(require_superadmin)):
+def sa_delete_platform_logo(claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     try:
         c = conn.cursor()
@@ -2619,7 +2628,7 @@ _COMPANY_PROFILE_COLS = ("legal_name", "display_name", "address", "city", "state
 
 
 @router.get("/company-profile")
-def sa_get_company_profile():
+def sa_get_company_profile(claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     try:
         c = conn.cursor()
@@ -2639,7 +2648,7 @@ def sa_get_company_profile():
 
 
 @router.put("/company-profile")
-def sa_update_company_profile(body: dict, claims=Depends(require_superadmin)):
+def sa_update_company_profile(body: dict, claims=Depends(require_sa_roles())):
     conn = platform_db.get_db()
     try:
         c = conn.cursor()
@@ -2923,7 +2932,7 @@ _QUEUE_STATUS = {
 
 
 @router.get("/queue-counts")
-def sa_queue_counts(claims=Depends(require_superadmin)):
+def sa_queue_counts(claims=Depends(require_sa_roles(*_ALL_SA_ROLES))):
     """Light per-division pending counts for the console sidebar badges:
     campaigns awaiting approval, POBs pending verification, gratifications
     eligible for payout. Returns an aggregate histogram of each one."""
@@ -2960,7 +2969,7 @@ def sa_queue_counts(claims=Depends(require_superadmin)):
 
 @router.get("/notifications")
 def sa_list_notifications(limit: int = PageLimit(default=50),
-                          claims=Depends(require_superadmin)):
+                          claims=Depends(require_sa_roles(*_ALL_SA_ROLES))):
     conn = platform_db.get_db()
     try:
         c = conn.cursor()
@@ -2977,7 +2986,7 @@ def sa_list_notifications(limit: int = PageLimit(default=50),
 
 
 @router.get("/notifications/unread-count")
-def sa_notification_unread(claims=Depends(require_superadmin)):
+def sa_notification_unread(claims=Depends(require_sa_roles(*_ALL_SA_ROLES))):
     conn = platform_db.get_db()
     try:
         c = conn.cursor()
@@ -2989,7 +2998,7 @@ def sa_notification_unread(claims=Depends(require_superadmin)):
 
 
 @router.post("/notifications/{nid}/read")
-def sa_mark_notification_read(nid: int, claims=Depends(require_superadmin)):
+def sa_mark_notification_read(nid: int, claims=Depends(require_sa_roles(*_ALL_SA_ROLES))):
     conn = platform_db.get_db()
     try:
         c = conn.cursor()
@@ -3002,7 +3011,7 @@ def sa_mark_notification_read(nid: int, claims=Depends(require_superadmin)):
 
 
 @router.post("/notifications/read-all")
-def sa_mark_notifications_read_all(claims=Depends(require_superadmin)):
+def sa_mark_notifications_read_all(claims=Depends(require_sa_roles(*_ALL_SA_ROLES))):
     conn = platform_db.get_db()
     try:
         c = conn.cursor()

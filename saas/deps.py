@@ -100,37 +100,6 @@ def require_owner(claims: dict = Depends(require_superadmin)) -> dict:
     return claims
 
 
-# Restricted platform roles are confined to their function's area of the
-# console. The path gate below runs at the router level (in addition to
-# require_superadmin) so a campaign_admin cannot, for example, reach the
-# gratification or POB endpoints. owner/full bypass the gate entirely.
-# The shared overview endpoints (analytics/metrics) stay readable for every
-# specialised role so their landing dashboard renders; notifications and the
-# queue badge counters are role-scoped read-only endpoints every role needs.
-_SA_ROLE_VIEW = ("/analytics", "/metrics", "/notifications", "/queue-counts")
-_SA_PATH_ALLOW = {
-    "campaign_admin": ("/campaigns",) + _SA_ROLE_VIEW,
-    "finance_admin": ("/gratification", "/finance") + _SA_ROLE_VIEW,
-    "verification_admin": ("/pob", "/verification") + _SA_ROLE_VIEW,
-    "platform_division_admin": ("/divisions",) + _SA_ROLE_VIEW,
-}
-
-
-def require_sa_path(request: Request, claims: dict = Depends(require_superadmin)) -> dict:
-    """Router-level gate: restrict specialised roles to their own function's paths."""
-    role = claims.get("sa_role") or "full"
-    if role in _FULL_ROLES:
-        return claims
-    path = request.url.path
-    allowed = _SA_PATH_ALLOW.get(role, ())
-    if any(seg in path for seg in allowed):
-        return claims
-    raise HTTPException(
-        status.HTTP_403_FORBIDDEN,
-        detail="Not authorized for this platform area",
-    )
-
-
 # ── Tenant scope ────────────────────────────────────────────────────────────
 
 @dataclass

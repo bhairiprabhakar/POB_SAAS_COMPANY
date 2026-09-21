@@ -377,7 +377,104 @@ def main():
     check("finance_admin -> gratification approve allowed (404 not 403)",
           r.status_code in (404, 500), f"{r.status_code}")
 
-    # ── 6. Summary ─────────────────────────────────────────────────────────────
+    # ── 6. Security regression: direct API calls on the nested campaign surface ──
+    # Every check above only ever exercised top-level paths (/campaigns,
+    # /divisions, /gratification, /pob) -- none of them touch the nested
+    # /divisions/{did}/campaigns/... routes, which is exactly where the old
+    # substring path-gate let platform_division_admin reach full campaign
+    # CRUD + approve/reject by accident (both "/divisions" and "/campaigns"
+    # are substrings of that path). This section provisions a real tenant so
+    # the positive case (campaign_admin approving a real campaign) can be
+    # asserted as a genuine 200, not just "not 403".
+    section("6. Security regression -- nested /divisions/{did}/campaigns/... direct API calls")
+
+    r = client.post(f"{BASE}/divisions", headers=OA, json={
+        "name": f"RBAC Test Division {UUID}", "code": f"RBD{UUID}",
+        "provision": True, "admin_username": "rbac_admin",
+        "admin_password": PASSWD, "admin_email": "rbac@test.local",
+        "admin_full_name": "RBAC Test Admin",
+    })
+    check("provision RBAC test division", ok(r), f"{r.status_code} {j(r)}")
+    rbac_div = j(r)
+    RBAC_DID = rbac_div.get("id")
+    RBAC_TENANT_DB = rbac_div.get("tenant_db_name")
+
+    from saas import db_utils as _db_utils
+    _conn = _db_utils.get_conn(RBAC_TENANT_DB)
+    _cur = _conn.cursor()
+    _cur.execute("UPDATE users SET must_change_password=FALSE, mfa_setup_required=FALSE, "
+                "profile_pending=FALSE WHERE username='rbac_admin'")
+    _conn.commit()
+    _conn.close()
+
+    r = client.post("/api/v1/auth/login", json={
+        "division_slug": f"RBD{UUID}", "username": "rbac_admin", "password": PASSWD,
+    })
+    check("RBAC division admin login", ok(r), f"{r.status_code} {j(r)}")
+    RBAC_ADM = {"Authorization": f"Bearer {j(r)['access_token']}"}
+
+    r = client.post("/api/v1/brands", headers=RBAC_ADM, json={"name": "RBAC Brand", "code": f"RB{UUID}"})
+    check("RBAC test brand created", ok(r), f"{r.status_code} {j(r)}")
+    RBAC_BRAND = j(r).get("id")
+
+    r = client.post("/api/v1/campaigns", headers=RBAC_ADM, json={
+        "name": "RBAC Test Campaign", "brand_id": RBAC_BRAND,
+        "start_date": "2026-01-01", "end_date": "2026-12-31", "scheme_type": "cashback",
+    })
+    check("RBAC test campaign created", ok(r), f"{r.status_code} {j(r)}")
+    RBAC_CID = j(r).get("id")
+    r = client.post(f"/api/v1/campaigns/{RBAC_CID}/submit", headers=RBAC_ADM, json={})
+    check("RBAC test campaign submitted for approval", ok(r), f"{r.status_code} {j(r)}")
+
+    CAMP_BASE = f"{BASE}/divisions/{RBAC_DID}/campaigns"
+
+    # The 6 cases from the spec, verbatim:
+    r = client.post(CAMP_BASE, headers=ROLE_TOKENS["campaign_admin"], json={"name": "Should Not Exist"})
+    check("campaign_admin POST .../campaigns -> 403", r.status_code == 403, f"{r.status_code}")
+    r = client.put(f"{CAMP_BASE}/{RBAC_CID}", headers=ROLE_TOKENS["campaign_admin"], json={"name": "Hijack"})
+    check("campaign_admin PUT .../campaigns/{id} -> 403", r.status_code == 403, f"{r.status_code}")
+    r = client.post(f"{CAMP_BASE}/{RBAC_CID}/approve", headers=ROLE_TOKENS["campaign_admin"], json={})
+    check("campaign_admin POST .../campaigns/{id}/approve -> succeeds", ok(r), f"{r.status_code} {j(r)}")
+
+    # Re-provision a second pending campaign for the remaining approve-based checks
+    r = client.post("/api/v1/campaigns", headers=RBAC_ADM, json={
+        "name": "RBAC Test Campaign 2", "brand_id": RBAC_BRAND,
+        "start_date": "2026-01-01", "end_date": "2026-12-31", "scheme_type": "cashback",
+    })
+    RBAC_CID2 = j(r).get("id")
+    client.post(f"/api/v1/campaigns/{RBAC_CID2}/submit", headers=RBAC_ADM, json={})
+
+    r = client.post(f"{CAMP_BASE}/{RBAC_CID2}/approve", headers=ROLE_TOKENS["finance_admin"], json={})
+    check("finance_admin POST .../campaigns/{id}/approve -> 403", r.status_code == 403, f"{r.status_code}")
+    r = client.post(f"{BASE}/divisions/{RBAC_DID}/gratification/1/pay",
+                    headers=ROLE_TOKENS["verification_admin"], json={})
+    check("verification_admin POST .../gratification/{id}/pay -> 403", r.status_code == 403, f"{r.status_code}")
+    r = client.post(CAMP_BASE, headers=ROLE_TOKENS["platform_division_admin"], json={"name": "Should Not Exist"})
+    check("platform_division_admin POST .../campaigns -> 403 (the bug fix)", r.status_code == 403, f"{r.status_code}")
+
+    # Extra coverage: the rest of the campaign mutation surface, and the
+    # tenant-administrator surface platform_division_admin must not reach.
+    r = client.delete(f"{CAMP_BASE}/{RBAC_CID2}", headers=ROLE_TOKENS["platform_division_admin"])
+    check("platform_division_admin DELETE .../campaigns/{id} -> 403", r.status_code == 403, f"{r.status_code}")
+    r = client.put(f"{CAMP_BASE}/{RBAC_CID2}", headers=ROLE_TOKENS["platform_division_admin"], json={"name": "x"})
+    check("platform_division_admin PUT .../campaigns/{id} -> 403", r.status_code == 403, f"{r.status_code}")
+    r = client.post(f"{CAMP_BASE}/{RBAC_CID2}/extend", headers=ROLE_TOKENS["platform_division_admin"], json={"days": 30})
+    check("platform_division_admin POST .../campaigns/{id}/extend -> 403", r.status_code == 403, f"{r.status_code}")
+    r = client.patch(f"{CAMP_BASE}/{RBAC_CID2}/toggle-active", headers=ROLE_TOKENS["platform_division_admin"])
+    check("platform_division_admin PATCH .../campaigns/{id}/toggle-active -> 403", r.status_code == 403, f"{r.status_code}")
+    r = client.get(f"{BASE}/divisions/{RBAC_DID}/roles", headers=ROLE_TOKENS["platform_division_admin"])
+    check("platform_division_admin GET .../roles -> 403", r.status_code == 403, f"{r.status_code}")
+    r = client.get(f"{BASE}/divisions/{RBAC_DID}/hierarchy/tree", headers=ROLE_TOKENS["platform_division_admin"])
+    check("platform_division_admin GET .../hierarchy/tree -> 403", r.status_code == 403, f"{r.status_code}")
+    r = client.get(f"{BASE}/divisions/{RBAC_DID}/credits", headers=ROLE_TOKENS["platform_division_admin"])
+    check("platform_division_admin GET .../credits -> 403", r.status_code == 403, f"{r.status_code}")
+    for rname in ("campaign_admin", "finance_admin", "verification_admin"):
+        r = client.post(f"{BASE}/divisions/{RBAC_DID}/users", headers=ROLE_TOKENS[rname], json={
+            "username": f"should_not_exist_{rname}", "password": PASSWD, "full_name": "x",
+        })
+        check(f"{rname} POST .../users (division-admin creation) -> 403", r.status_code == 403, f"{r.status_code}")
+
+    # ── 7. Summary ─────────────────────────────────────────────────────────────
     section("Results")
     print(f"\n  Passed: {len(PASSED)}")
     print(f"  Failed: {len(FAILED)}")

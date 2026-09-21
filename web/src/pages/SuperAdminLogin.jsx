@@ -34,7 +34,7 @@ export default function SuperAdminLogin() {
         user: d.user,
       });
       const role = d.user?.role || 'full';
-      const home = { campaign_admin: '/superadmin/campaigns', finance_admin: '/superadmin/gratification', verification_admin: '/superadmin/pob' };
+      const home = { campaign_admin: '/superadmin/campaigns', finance_admin: '/superadmin/gratification', verification_admin: '/superadmin/pob', platform_division_admin: '/superadmin/divisions' };
       nav(home[role] || '/superadmin', { replace: true });
     } catch (err) {
       setError(err.message);
