@@ -1762,6 +1762,183 @@ def sa_all_campaigns(q: str = "", status: str = "", limit: int = 300,
     return {"items": items, "counts": counts, "unreachable": unreachable}
 
 
+# -- Verification agent management (verification_admin's own area) --
+# The tenant-side verification_agent role is where POB decisions actually
+# happen (division-scoped, see saas/routers/verification.py); this section
+# gives the platform verification_admin a cross-division view to add/assign/
+# activate those agents and see their performance, WITHOUT granting them
+# direct access to the tenant's full /divisions/{did}/users surface (which
+# would also expose creating/editing division admins and every other role).
+
+def _verification_agent_role_id(tconn) -> int | None:
+    c = tconn.cursor()
+    c.execute("SELECT id FROM roles WHERE name='verification_agent'")
+    row = c.fetchone()
+    return row[0] if row else None
+
+
+def _assert_is_verification_agent(tconn, uid: int) -> None:
+    c = tconn.cursor()
+    c.execute("SELECT r.name FROM users u JOIN roles r ON r.id=u.role_id WHERE u.id=%s", (uid,))
+    row = c.fetchone()
+    if not row or row[0] != "verification_agent":
+        raise HTTPException(404, "verification agent not found")
+
+
+@router.get("/verification-agents")
+def sa_list_verification_agents(status: str = "", claims=Depends(require_superadmin)):
+    """Every verification_agent across every provisioned division, with their
+    approve/reject/duplicate counts and average turnaround time."""
+    conn = platform_db.get_db()
+    items, unreachable = [], []
+    try:
+        divisions = _provisioned_divisions(conn)
+    finally:
+        conn.close()
+    for div in divisions:
+        tconn = None
+        try:
+            tconn = _direct_tenant_conn(div["tenant_db_name"])
+            tc = tconn.cursor()
+            tc.execute(
+                """SELECT u.id, u.username, u.full_name, u.email, u.mobile, u.status,
+                          u.division_id, d.name AS internal_division_name, u.created_at
+                   FROM users u JOIN roles r ON r.id=u.role_id
+                   LEFT JOIN divisions d ON d.id=u.division_id
+                   WHERE r.name='verification_agent' ORDER BY u.id""")
+            agents = fetchall_dict(tc)
+            if agents:
+                ids = [a["id"] for a in agents]
+                tc.execute(
+                    """SELECT v.verifier_id,
+                              count(*) FILTER (WHERE v.status='approved') AS approved,
+                              count(*) FILTER (WHERE v.status='rejected') AS rejected,
+                              count(*) FILTER (WHERE v.status='duplicate') AS duplicate,
+                              count(*) AS total,
+                              avg(EXTRACT(EPOCH FROM (v.verified_at - v.started_at)) / 3600.0)
+                                FILTER (WHERE v.verified_at IS NOT NULL AND v.started_at IS NOT NULL) AS avg_tat_hours
+                       FROM pob_verifications v
+                       WHERE v.verifier_id = ANY(%s)
+                       GROUP BY v.verifier_id""", (ids,))
+                perf = {r["verifier_id"]: r for r in fetchall_dict(tc)}
+                for a in agents:
+                    p = perf.get(a["id"], {})
+                    a["verified_total"] = p.get("total") or 0
+                    a["approved"] = p.get("approved") or 0
+                    a["rejected"] = p.get("rejected") or 0
+                    a["duplicate"] = p.get("duplicate") or 0
+                    a["avg_tat_hours"] = round(p["avg_tat_hours"], 1) if p.get("avg_tat_hours") is not None else None
+                    a["division_id"] = div["id"]
+                    a["division_name"] = div["name"]
+                    a["division_code"] = div["code"]
+            if status:
+                agents = [a for a in agents if a["status"] == status]
+            items.extend(agents)
+        except Exception as exc:
+            unreachable.append({"division_id": div["id"], "name": div["name"],
+                                "error": str(exc).strip().split("\n")[0][:200]})
+        finally:
+            if tconn:
+                try:
+                    tconn.close()
+                except Exception:
+                    pass
+    return {"items": items, "unreachable": unreachable}
+
+
+@router.post("/verification-agents")
+def sa_create_verification_agent(body: dict, claims=Depends(require_superadmin)):
+    """Create a verification_agent bound to a division. `division_id` (the
+    platform's division id) picks the tenant; a tenant with exactly one
+    internal division is auto-assigned, otherwise pass `internal_division_id`
+    explicitly."""
+    division_id = body.get("division_id")
+    if not division_id:
+        raise HTTPException(400, "division_id is required")
+    conn = platform_db.get_db()
+    tconn = None
+    try:
+        tconn = _tenant_conn_for(conn, division_id)
+        role_id = _verification_agent_role_id(tconn)
+        if not role_id:
+            raise HTTPException(500, "verification_agent role is not configured for this division")
+        c = tconn.cursor()
+        internal_division_id = body.get("internal_division_id")
+        if not internal_division_id:
+            c.execute("SELECT id FROM divisions ORDER BY id")
+            rows = c.fetchall()
+            if len(rows) == 1:
+                internal_division_id = rows[0][0]
+            elif len(rows) > 1:
+                raise HTTPException(400, "This company has multiple internal divisions -- specify internal_division_id")
+        from . import company
+        user_body = {
+            "username": body.get("username"), "password": body.get("password"),
+            "full_name": body.get("full_name"), "email": body.get("email"),
+            "mobile": body.get("mobile"), "employee_id": body.get("employee_id"),
+            "role_id": role_id, "division_id": internal_division_id,
+        }
+        result = company.create_user(user_body, ctx=_org_ctx(tconn, claims, _tenant_db_name(conn, division_id)))
+        _audit(conn, claims, "verification_agent.create", "user", result.get("id"),
+               {"division_id": division_id, "username": body.get("username")})
+        result["division_id"] = division_id
+        return result
+    finally:
+        if tconn:
+            tconn.close()
+        conn.close()
+
+
+@router.get("/verification-agents/{did}/{uid}")
+def sa_verification_agent_detail(did: int, uid: int, claims=Depends(require_superadmin)):
+    """A single agent's profile plus their most recent verification decisions."""
+    conn = platform_db.get_db()
+    tconn = None
+    try:
+        tconn = _tenant_conn_for(conn, did)
+        _assert_is_verification_agent(tconn, uid)
+        c = tconn.cursor()
+        c.execute("SELECT * FROM users WHERE id=%s", (uid,))
+        row = fetchone_dict(c)
+        row.pop("password", None)
+        row.pop("mfa_secret", None)
+        c.execute(
+            """SELECT v.id, v.status, v.reason, v.started_at, v.verified_at,
+                      pa.id AS pob_id, pa.invoice_number, pa.pob_amount,
+                      cmp.name AS campaign_name, ch.name AS chemist_name
+               FROM pob_verifications v
+               JOIN pob_activities pa ON pa.id=v.pob_id
+               LEFT JOIN campaigns cmp ON cmp.id=pa.campaign_id
+               LEFT JOIN chemists ch ON ch.id=pa.chemist_id
+               WHERE v.verifier_id=%s ORDER BY v.id DESC LIMIT 25""", (uid,))
+        row["recent_activity"] = fetchall_dict(c)
+        return row
+    finally:
+        if tconn:
+            tconn.close()
+        conn.close()
+
+
+@router.put("/verification-agents/{did}/{uid}")
+def sa_update_verification_agent(did: int, uid: int, body: dict, claims=Depends(require_superadmin)):
+    """Edit profile / status / password / internal division assignment. Only
+    ever touches users who already hold the verification_agent role."""
+    conn = platform_db.get_db()
+    tconn = None
+    try:
+        tconn = _tenant_conn_for(conn, did)
+        _assert_is_verification_agent(tconn, uid)
+        from . import company
+        result = company.update_user(uid, body, ctx=_org_ctx(tconn, claims, _tenant_db_name(conn, did)))
+        _audit(conn, claims, "verification_agent.update", "user", uid,
+               {k: body[k] for k in ("status", "division_id") if k in body})
+        return result
+    finally:
+        if tconn:
+            tconn.close()
+        conn.close()
+
+
 @router.get("/pob")
 def sa_all_pob(status: str = "", limit: int = 200, claims=Depends(require_superadmin)):
     """Cross-division POB operations: per-status totals per division plus a

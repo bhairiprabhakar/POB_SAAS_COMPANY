@@ -365,6 +365,78 @@ def main():
         r = client.get(f"{BASE}/reports/duplicate", headers=ADM)
         check("duplicate report", r.status_code == 200 and r.content[:2] == b"PK")
 
+        # ── verification agent management (superadmin console) ──────────────
+        r = client.post(f"{BASE}/superadmin/verification-agents", headers=SA, json={
+            "full_name": "Agent Priya", "username": "agent.priya", "password": "Ag@12345",
+        })
+        check("create verification agent -> 400 without division_id", r.status_code == 400, f"{r.status_code} {r.text[:200]}")
+        r = client.post(f"{BASE}/superadmin/verification-agents", headers=SA, json={
+            "division_id": division["id"], "full_name": "Agent Priya", "username": "agent.priya",
+            "password": "Ag@12345", "email": "priya@acme.in",
+        })
+        check("create verification agent", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
+        agent_uid = r.json()["id"]
+
+        r = client.get(f"{BASE}/superadmin/verification-agents", headers=SA)
+        check("list verification agents", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
+        agents = r.json().get("items", [])
+        agent_row = next((a for a in agents if a["id"] == agent_uid), None)
+        check("new agent appears in cross-division list with correct division",
+              agent_row is not None and agent_row["division_id"] == division["id"]
+              and agent_row["status"] == "active" and agent_row["verified_total"] == 0,
+              agent_row)
+
+        pool = __import__("saas.db_utils", fromlist=["make_pool"]).make_pool(
+            tenant_db, minconn=1, maxconn=2)
+        c = pool.get_conn()
+        cur = c.cursor()
+        cur.execute("UPDATE users SET must_change_password=FALSE, mfa_setup_required=FALSE, "
+                    "profile_pending=FALSE WHERE username='agent.priya'")
+        c.commit()
+        pool.close_all()
+        r = client.post(f"{BASE}/auth/login", json={
+            "division_slug": division["code"], "username": "agent.priya", "password": "Ag@12345"})
+        check("new verification agent can log in", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
+        AGENT = auth_header(r.json()["access_token"])
+
+        r = client.post(f"{BASE}/pob/submit", headers=MR,
+                        data={"campaign_id": campaign_id, "product_id": product_id, "chemist_id": chemist_id,
+                              "quantity": 2, "ptr": 185.0, "invoice_amount": 370.0, "pob_amount": 370.0,
+                              "invoice_number": "INV-9001", "invoice_date": "2026-07-03"},
+                        files={"invoice": ("inv9001.pdf", _min_pdf("inv-9001"), "application/pdf")})
+        agent_pob_id = r.json()["pob_id"]
+        r = client.get(f"{BASE}/verification/queue?status=pending", headers=AGENT)
+        agent_vid = next(i["verification_id"] for i in r.json()["items"] if i["pob_id"] == agent_pob_id)
+        r = client.post(f"{BASE}/verification/{agent_vid}/approve", headers=AGENT, json={})
+        check("new agent can approve a POB", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
+
+        r = client.get(f"{BASE}/superadmin/verification-agents", headers=SA)
+        agent_row = next((a for a in r.json()["items"] if a["id"] == agent_uid), None)
+        check("agent's performance reflects the approval",
+              agent_row is not None and agent_row["verified_total"] == 1 and agent_row["approved"] == 1,
+              agent_row)
+
+        r = client.get(f"{BASE}/superadmin/verification-agents/{division['id']}/{agent_uid}", headers=SA)
+        check("agent detail includes recent activity", r.status_code == 200
+              and len(r.json().get("recent_activity", [])) == 1, f"{r.status_code} {r.text[:200]}")
+
+        r = client.get(f"{BASE}/superadmin/verification-agents/{division['id']}/{mr_id}", headers=SA)
+        check("detail endpoint rejects a non-agent user id -> 404", r.status_code == 404, f"{r.status_code}")
+        r = client.put(f"{BASE}/superadmin/verification-agents/{division['id']}/{mr_id}", headers=SA,
+                       json={"status": "inactive"})
+        check("update endpoint rejects a non-agent user id -> 404", r.status_code == 404, f"{r.status_code}")
+
+        r = client.put(f"{BASE}/superadmin/verification-agents/{division['id']}/{agent_uid}", headers=SA,
+                       json={"status": "inactive"})
+        check("deactivate verification agent", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
+        r = client.post(f"{BASE}/auth/login", json={
+            "division_slug": division["code"], "username": "agent.priya", "password": "Ag@12345"})
+        check("deactivated agent can no longer log in", r.status_code == 403, f"{r.status_code}")
+        r = client.put(f"{BASE}/superadmin/verification-agents/{division['id']}/{agent_uid}", headers=SA,
+                       json={"status": "active"})
+        check("reactivate verification agent", r.status_code == 200 and r.json().get("status") == "active",
+              f"{r.status_code} {r.text[:200]}")
+
         # ── notifications to MR ─────────────────────────────────────────────
         r = client.post(f"{BASE}/auth/login", json={
             "division_slug": division["code"], "username": "mr.ashok", "password": "Mr@12345"})

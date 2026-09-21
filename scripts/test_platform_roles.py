@@ -286,6 +286,17 @@ def main():
     r = client.get(f"{BASE}/campaigns", headers=ROLE_TOKENS["verification_admin"])
     check("verification_admin -> /campaigns BLOCKED", r.status_code == 403, f"{r.status_code}")
 
+    # verification_admin can reach the agent-management console (substring of
+    # the already-allowed "/verification" path); other specialised roles can't
+    r = client.get(f"{BASE}/verification-agents", headers=ROLE_TOKENS["verification_admin"])
+    check("verification_admin -> /verification-agents OK", ok(r), f"{r.status_code}")
+    r = client.post(f"{BASE}/verification-agents", headers=ROLE_TOKENS["verification_admin"], json={})
+    check("verification_admin -> POST /verification-agents reaches the handler (400, not 403)",
+          r.status_code == 400, f"{r.status_code}")
+    for rname in ("campaign_admin", "finance_admin"):
+        r = client.get(f"{BASE}/verification-agents", headers=ROLE_TOKENS[rname])
+        check(f"{rname} -> /verification-agents BLOCKED", r.status_code == 403, f"{r.status_code}")
+
     # campaign_admin cannot read the finance overview
     r = client.get(f"{BASE}/finance", headers=ROLE_TOKENS["campaign_admin"])
     check("campaign_admin -> /finance BLOCKED", r.status_code == 403, f"{r.status_code}")
@@ -316,6 +327,8 @@ def main():
     check("platform_division_admin -> /pob BLOCKED", r.status_code == 403, f"{r.status_code}")
     r = client.get(f"{BASE}/gratification", headers=ROLE_TOKENS["platform_division_admin"])
     check("platform_division_admin -> /gratification BLOCKED", r.status_code == 403, f"{r.status_code}")
+    r = client.get(f"{BASE}/verification-agents", headers=ROLE_TOKENS["platform_division_admin"])
+    check("platform_division_admin -> /verification-agents BLOCKED", r.status_code == 403, f"{r.status_code}")
 
     # Other specialised admins stay blocked on /divisions
     for rname in ("campaign_admin", "finance_admin", "verification_admin"):

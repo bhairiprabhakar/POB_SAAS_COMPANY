@@ -123,7 +123,7 @@ export default function SuperCampaigns() {
       actions={
         <>
           <SearchBox value={q} onChange={setQ} placeholder="Search name / division…" />
-          <Tabs items={TABS.map((t) => ({ ...t, badge: counts[t.id] }))} active={tab} onChange={setTab} />
+          <Tabs items={TABS.map((t) => ({ ...t, value: t.id, badge: counts[t.id] }))} active={tab} onChange={setTab} />
         </>
       } />
   );

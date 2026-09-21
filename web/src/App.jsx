@@ -40,6 +40,7 @@ import PlatformSettings from './pages/superadmin/PlatformSettings';
 import CompanyProfile from './pages/superadmin/CompanyProfile';
 import SuperCampaigns from './pages/superadmin/Campaigns';
 import PobOperations from './pages/superadmin/PobOperations';
+import VerificationAgents from './pages/superadmin/VerificationAgents';
 import SuperGratification from './pages/superadmin/Gratification';
 import SuperUsers from './pages/superadmin/Users';
 import PlatformAdmins from './pages/superadmin/PlatformAdmins';
@@ -93,6 +94,7 @@ function ProtectedSuper({ children }) {
     if (role === 'campaign_admin') allowed.push('/superadmin/analytics');
     if (role === 'finance_admin') allowed.push('/superadmin/finance');
     if (role === 'platform_division_admin') allowed.push('/superadmin/divisions');
+    if (role === 'verification_admin') allowed.push('/superadmin/verification-agents');
     if (!allowed.includes(path) && !allowed.some((a) => path.startsWith(a + '/'))) return <Navigate to={home} replace />;
   }
   return children;
@@ -177,6 +179,9 @@ export default function App() {
         } />
         <Route path="/superadmin/pob" element={
           <ProtectedSuper><AppShell kind="sa"><PobOperations /></AppShell></ProtectedSuper>
+        } />
+        <Route path="/superadmin/verification-agents" element={
+          <ProtectedSuper><AppShell kind="sa"><VerificationAgents /></AppShell></ProtectedSuper>
         } />
         <Route path="/superadmin/gratification" element={
           <ProtectedSuper><AppShell kind="sa"><SuperGratification /></AppShell></ProtectedSuper>

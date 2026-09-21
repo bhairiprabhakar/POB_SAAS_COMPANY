@@ -510,6 +510,7 @@ function SuperSidebar({ onNavigate, open, collapsed, onToggleCollapse }) {
 
     { to: '/superadmin/campaigns', label: 'Campaigns', icon: <Icon name="megaphone" />, group: 'Campaigns', tone: 'teal', roles: ['campaign_admin'] },
 
+    { to: '/superadmin/verification-agents', label: 'Verification Agents', icon: <Icon name="users" />, group: 'POB Operations', tone: 'teal', roles: ['verification_admin'] },
     { to: '/superadmin/pob', label: 'POB Operations', icon: <Icon name="clipboard" />, group: 'POB Operations', tone: 'blue', roles: ['verification_admin'] },
 
     { to: '/superadmin/gratification', label: 'Gratification', icon: <Icon name="gift" />, group: 'Gratification', tone: 'amber', roles: ['owner', 'full', 'finance_admin'] },
