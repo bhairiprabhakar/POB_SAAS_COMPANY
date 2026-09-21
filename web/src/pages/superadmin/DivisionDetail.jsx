@@ -175,7 +175,6 @@ export default function DivisionDetail() {
           </div>
 
           <div className="card" style={{ marginTop: 12 }}>
-            <h4 className="section-title">Division admins</h4>
             <AdminsCard did={c.id} />
           </div>
         </>
@@ -262,6 +261,7 @@ function AdminsCard({ did }) {
   const { data, loading, error, run } = useAsync(() => api(`/api/v1/superadmin/divisions/${did}/admins`));
   const [editing, setEditing] = useState(null);
   const [resetting, setResetting] = useState(null);
+  const [adding, setAdding] = useState(false);
   if (loading) return <div style={{ padding: '8px 0' }}><Skeleton h={40} w="100%" /></div>;
   if (error) return <ErrorBox error={error} onRetry={run} />;
   const admins = data?.items || [];
@@ -279,6 +279,14 @@ function AdminsCard({ did }) {
 
   return (
     <div>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 8 }}>
+        <h4 className="section-title" style={{ flex: 1, marginBottom: 12 }}>Division admins</h4>
+        <button className="btn btn-sm btn-primary" style={{ marginBottom: 12 }} onClick={() => setAdding(true)}
+          disabled={admins.length === 0}
+          title={admins.length === 0 ? 'No existing admin to base the new account on yet' : undefined}>
+          + Add admin
+        </button>
+      </div>
       {admins.length === 0 && (
         <div className="admin-empty">
           <p>No admin users yet</p>
@@ -320,7 +328,96 @@ function AdminsCard({ did }) {
         <ResetAdminPasswordModal admin={resetting} did={did}
           onClose={() => setResetting(null)} onDone={() => setResetting(null)} />
       )}
+      {adding && (
+        <NewAdminModal did={did} template={admins[0]}
+          onClose={() => setAdding(false)} onDone={() => { setAdding(false); run(); }} />
+      )}
     </div>
+  );
+}
+
+function genPassword() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  let out = '';
+  for (let i = 0; i < 12; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
+}
+
+function NewAdminModal({ did, template, onClose, onDone }) {
+  const [f, setF] = useState({ full_name: '', username: '', email: '', mobile: '', employee_id: '' });
+  const [password, setPassword] = useState(genPassword());
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF((p) => ({ ...p, [k]: e.target.value }));
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    if (!f.full_name.trim() || !f.username.trim()) {
+      const msg = 'Full name and username are required';
+      setError(msg); toast(msg, 'error');
+      return;
+    }
+    if (password.length < 6) {
+      const msg = 'Password must be at least 6 characters';
+      setError(msg); toast(msg, 'error');
+      return;
+    }
+    setBusy(true);
+    try {
+      await api(`/api/v1/superadmin/divisions/${did}/users`, {
+        method: 'POST',
+        body: {
+          ...f,
+          password,
+          role_id: template?.role_id,
+          division_id: template?.division_id,
+        },
+      });
+      toast(`Admin account created for ${f.full_name}`, 'success');
+      onDone();
+    } catch (err) {
+      const msg = err.message || 'Create failed';
+      setError(msg); toast(msg, 'error');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Modal open wide title="Add a new division admin" onClose={onClose}
+      footer={<>
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" form="admin-new-form" disabled={busy}>{busy ? 'Creating…' : 'Create admin'}</button>
+      </>}>
+      <form id="admin-new-form" onSubmit={submit}>
+        {error && <ErrorBox error={error} />}
+        <p className="muted" style={{ marginBottom: 12 }}>
+          Creates a separate {template?.role_name || 'division_admin'} account with its own sign-in — the
+          departing admin's account is untouched. Deactivate it from the list once the handover is done.
+        </p>
+        <h5 className="form-section">Profile</h5>
+        <div className="grid-2">
+          <Field label="Full name" required>
+            <TextInput value={f.full_name} onChange={set('full_name')} required autoFocus />
+          </Field>
+          <Field label="Username" required hint="Used to sign in — cannot be changed later">
+            <TextInput value={f.username} onChange={set('username')} required />
+          </Field>
+          <Field label="Email"><TextInput type="email" value={f.email} onChange={set('email')} /></Field>
+          <Field label="Mobile"><TextInput value={f.mobile} onChange={set('mobile')} /></Field>
+          <Field label="Employee ID"><TextInput value={f.employee_id} onChange={set('employee_id')} /></Field>
+        </div>
+
+        <h5 className="form-section">Password</h5>
+        <div className="grid-2">
+          <Field label="Initial password" required hint="Share this with the new admin — min 6 characters">
+            <div style={{ display: 'flex', gap: 8 }}>
+              <TextInput value={password} onChange={(e) => setPassword(e.target.value)} required />
+              <button type="button" className="btn btn-sm" onClick={() => setPassword(genPassword())}>Regenerate</button>
+            </div>
+          </Field>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
