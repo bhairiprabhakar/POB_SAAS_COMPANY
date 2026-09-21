@@ -897,9 +897,9 @@ def list_chemists(q: str = "", city: str = "", state: str = "", status: str = ""
     if status:
         where.append("c.status=%s")
         params.append(status)
-    div = division_scope(conn, ctx)
+    div = user_division_id(conn, ctx)
     if div:
-        where.append("(c.division_id=%s OR c.division_id IS NULL)")
+        where.append("c.division_id=%s")
         params.append(div)
     if where:
         sql += " WHERE " + " AND ".join(where)
@@ -986,8 +986,8 @@ def chemist_detail(cid: int,
     row = fetchone_dict(c)
     if not row:
         raise HTTPException(404, "chemist not found")
-    div = division_scope(conn, ctx)
-    if div and row.get("division_id") not in (None, div):
+    div = user_division_id(conn, ctx)
+    if div and row.get("division_id") != div:
         raise HTTPException(404, "chemist not found")
 
     c.execute("""
@@ -1110,7 +1110,7 @@ def create_chemist(body: dict, ctx: TenantContext = Depends(require_permission("
         enabled = {x for x in checks if x in ("mobile", "shop_pincode", "dl", "gst")}
     else:
         enabled = {"mobile", "shop_pincode", "dl", "gst"}
-    scoped_div = division_scope(conn, ctx)
+    scoped_div = user_division_id(conn, ctx)
     dup_rules = []
     mobile = (body.get("mobile") or "").strip()
     if mobile and "mobile" in enabled:
@@ -1156,7 +1156,13 @@ def create_chemist(body: dict, ctx: TenantContext = Depends(require_permission("
     vals[0] = name
     if not vals[20]:
         vals[20] = "active"
-    division_id = body.get("division_id") or division_scope(conn, ctx)
+    if scoped_div:
+        submitted_div = body.get("division_id")
+        if submitted_div and int(submitted_div) != scoped_div:
+            raise HTTPException(403, "division_id does not match your division")
+        division_id = scoped_div
+    else:
+        division_id = body.get("division_id")
     if division_id:
         cols.append("division_id")
         vals.append(division_id)
@@ -1182,6 +1188,13 @@ def create_chemist(body: dict, ctx: TenantContext = Depends(require_permission("
 def update_chemist(cid: int, body: dict, ctx: TenantContext = Depends(require_permission("chemist.manage"))):
     conn = ctx.conn
     c = conn.cursor()
+    c.execute("SELECT division_id FROM chemists WHERE id=%s", (cid,))
+    row = c.fetchone()
+    if not row:
+        raise HTTPException(404, "chemist not found")
+    div = user_division_id(conn, ctx)
+    if div and row[0] != div:
+        raise HTTPException(404, "chemist not found")
     fields = ["name", "shop_name", "gst", "dl_number", "owner_name", "mobile", "alternate_mobile",
               "email", "address", "city", "district", "state", "pin", "latitude", "longitude",
               "ocid", "doctor_name", "category", "area", "upi_id", "status",
@@ -1207,6 +1220,13 @@ def update_chemist(cid: int, body: dict, ctx: TenantContext = Depends(require_pe
 def delete_chemist(cid: int, ctx: TenantContext = Depends(require_permission("chemist.manage"))):
     conn = ctx.conn
     c = conn.cursor()
+    c.execute("SELECT division_id FROM chemists WHERE id=%s", (cid,))
+    row = c.fetchone()
+    if not row:
+        raise HTTPException(404, "chemist not found")
+    div = user_division_id(conn, ctx)
+    if div and row[0] != div:
+        raise HTTPException(404, "chemist not found")
     c.execute("SELECT id FROM pob_activities WHERE chemist_id=%s LIMIT 1", (cid,))
     if c.fetchone():
         raise HTTPException(409, "chemist has POB activities")

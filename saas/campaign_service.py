@@ -756,7 +756,8 @@ def update_campaign(conn, actor: dict, cid: int, body: dict, request=None) -> No
         params.append(cid)
         c.execute(f"UPDATE campaigns SET {', '.join(sets)} WHERE id=%s", params)
     _sync_campaign_rules(conn, cid, body.get("rules"), actor)
-    _sync_products(conn, cid, body.get("products"), division_id=body.get("division_id"),
+    _sync_products(conn, cid, body.get("products"),
+                   division_id=body.get("division_id") or before.get("division_id"),
                    actor_id=actor.get("id"))
     if body.get("assignment") is not None:
         set_campaign_assignments(conn, cid, body, actor)
@@ -890,6 +891,8 @@ def _sync_products(conn, cid: int, products, division_id: int = None, actor_id: 
         pid = p.get("id") if isinstance(p, dict) else p
         if not pid:
             continue
+        if division_id:
+            _assert_product_in_division(c, pid, division_id)
         linked.add(pid)
         # Existing products are only ever linked with this campaign's own
         # constraints (min/max POB, scheme eligibility) -- the master row
@@ -899,6 +902,24 @@ def _sync_products(conn, cid: int, products, division_id: int = None, actor_id: 
         _link_product(c, cid, pid, p if isinstance(p, dict) else {}, list(existing))
     for pid in existing - linked:
         c.execute("DELETE FROM campaign_products WHERE campaign_id=%s AND product_id=%s", (cid, pid))
+
+
+def _assert_product_in_division(c, pid: int, division_id: int) -> None:
+    """An existing product attached to a campaign by id must belong to the
+    campaign's own division (directly, or via its brand) -- never attachable
+    across divisions through a manipulated request."""
+    c.execute("SELECT division_id, brand_id FROM products WHERE id=%s", (pid,))
+    row = c.fetchone()
+    if not row:
+        raise HTTPException(400, f"Product {pid} not found")
+    p_division_id, brand_id = row
+    if p_division_id == division_id:
+        return
+    if brand_id:
+        c.execute("SELECT id FROM brands WHERE id=%s AND division_id=%s", (brand_id, division_id))
+        if c.fetchone():
+            return
+    raise HTTPException(400, f"Product {pid} does not belong to this campaign's division")
 
 
 def _link_product(c, cid: int, pid: int, p: dict, existing: list) -> None:

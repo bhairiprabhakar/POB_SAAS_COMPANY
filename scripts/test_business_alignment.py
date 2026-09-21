@@ -526,6 +526,167 @@ def main():
                      "verification.reject", "pob.view", "report.view", "notification.view"):
         check(f"verifier has {required}", required in vperms, vperms)
 
+    section("17. Intra-tenant division isolation -- set up Division A2")
+    # Division A (admin_div / T1 / TM) and a second internal division inside
+    # the SAME tenant (tenant_db1), to test chemist.division_id / POB / campaign
+    # product isolation between two divisions sharing one company.
+    conn = provision_pool_conn(tenant_db1)
+    cur = conn.cursor()
+    cur.execute("INSERT INTO divisions (name, code, status) VALUES (%s,%s,'active') RETURNING id",
+                (f"Align Div A2 {UUID}", f"ADA2{UUID}"))
+    DIV_A2 = cur.fetchone()[0]
+    cur.execute("SELECT id FROM roles WHERE name='division_admin'")
+    DA_ROLE = cur.fetchone()[0]
+    cur.execute("SELECT password FROM users WHERE username='division_admin'")
+    _pw2 = cur.fetchone()[0]
+    cur.execute("""INSERT INTO users (username, password, full_name, role_id, division_id, status,
+                   must_change_password, mfa_setup_required, profile_pending)
+                   VALUES (%s,%s,%s,%s,%s,'active',FALSE,FALSE,FALSE) RETURNING id""",
+                ("division_admin_a2", _pw2, "Division A2 Administrator", DA_ROLE, DIV_A2))
+    DA2_UID = cur.fetchone()[0]
+    cur.execute("""INSERT INTO users (username, password, full_name, role_id, division_id, status,
+                   must_change_password, mfa_setup_required, profile_pending)
+                   VALUES (%s,%s,%s,%s,%s,'active',FALSE,FALSE,FALSE) RETURNING id""",
+                ("mr_align_a2", _pw2, "MR Align A2", MR_ROLE, DIV_A2))
+    MR_A2_ID = cur.fetchone()[0]
+    conn.commit()
+    conn.close()
+    check("division A2 created inside tenant 1", bool(DIV_A2), DIV_A2)
+
+    # division A2 is a SECOND internal division inside the same tenant, not a
+    # separate platform-provisioned division, so it has no division-slug login
+    # link of its own -- route these logins by (globally unique) username
+    # instead, via the same cross-tenant index provisioning itself uses.
+    from saas import user_index as _user_index
+    _user_index.sync_user(tenant_db1, "division_admin_a2", DA2_UID, division_id=div1_id)
+    _user_index.sync_user(tenant_db1, "mr_align_a2", MR_A2_ID, division_id=div1_id)
+
+    r = client.post("/api/v1/auth/login", json={"username": "division_admin_a2", "password": PASSWD})
+    check("division A2 admin login (same tenant)", ok(r), f"{r.status_code} {j(r)}")
+    T3 = {"Authorization": f"Bearer {j(r)['access_token']}"}
+    r = client.post("/api/v1/auth/login", json={"username": "mr_align_a2", "password": PASSWD})
+    check("division A2 MR login (same tenant)", ok(r), f"{r.status_code} {j(r)}")
+    TM2 = {"Authorization": f"Bearer {j(r)['access_token']}"}
+
+    r = client.post("/api/v1/brands", headers=T3, json={"name": f"Align Brand A2 {UUID}", "code": f"ABA2{UUID}"})
+    check("division A2 admin creates own brand", ok(r), f"{r.status_code} {j(r)}")
+    B_A2 = j(r).get("id")
+    r = client.post("/api/v1/products", headers=T3, json={
+        "name": f"Align Product A2 {UUID}", "brand_id": B_A2, "sku": "PA2-1",
+        "ptr": 15, "pts": 13, "mrp": 18, "gst": 12,
+    })
+    check("division A2 admin creates own product", ok(r), f"{r.status_code} {j(r)}")
+    P_A2 = j(r).get("id")
+
+    conn = provision_pool_conn(tenant_db1)
+    cur = conn.cursor()
+    cur.execute("""INSERT INTO campaigns (name, division_id, start_date, end_date, active, status)
+                   VALUES (%s,%s,current_date,current_date+30,TRUE,'active') RETURNING id""",
+                (f"Align Camp A2 {UUID}", DIV_A2))
+    C_A2 = cur.fetchone()[0]
+    cur.execute("""INSERT INTO campaign_products (campaign_id, product_id, sort_order,
+                   min_quantity, min_pob, scheme_eligibility)
+                   VALUES (%s,%s,0,1,0,TRUE)""", (C_A2, P_A2))
+    cur.execute("""INSERT INTO chemists (name, shop_name, mobile, division_id, status)
+                   VALUES (%s,%s,%s,%s,'active') RETURNING id""",
+                (f"Align Chemist A2 {UUID}", "Align Pharmacy A2", "9812399999", DIV_A2))
+    CHEM_A2 = cur.fetchone()[0]
+    # A legacy chemist with no division at all (pre-division-model data).
+    cur.execute("""INSERT INTO chemists (name, shop_name, mobile, division_id, status)
+                   VALUES (%s,%s,%s,NULL,'active') RETURNING id""",
+                (f"Align Chemist Legacy {UUID}", "Legacy Pharmacy", "9812388888"))
+    CHEM_LEGACY = cur.fetchone()[0]
+    conn.commit()
+    conn.close()
+    check("division A2 campaign + product + chemist seeded", all([C_A2, P_A2, CHEM_A2, CHEM_LEGACY]))
+
+    section("18. Chemist division isolation + CRUD security (items 1-4)")
+    r = client.get(f"/api/v1/chemists/{CHEM_ID}", headers=T3)
+    check("division A2 cannot view division A chemist -> 404", r.status_code == 404, f"{r.status_code} {j(r)}")
+    r = client.put(f"/api/v1/chemists/{CHEM_ID}", headers=TM2, json={"name": "Hijack"})
+    check("division A2 cannot update division A chemist -> 404", r.status_code == 404, f"{r.status_code} {j(r)}")
+    r = client.delete(f"/api/v1/chemists/{CHEM_ID}", headers=TM2)
+    check("division A2 cannot delete division A chemist -> 404", r.status_code == 404, f"{r.status_code} {j(r)}")
+    r = client.get("/api/v1/chemists", headers=T3)
+    check("division A2 chemist list excludes division A chemist",
+          ok(r) and not any(c["id"] == CHEM_ID for c in j(r).get("items", [])), f"{r.status_code} {j(r)}")
+
+    r = client.get(f"/api/v1/chemists/{CHEM_A2}", headers=T1)
+    check("division A cannot view division A2 chemist -> 404", r.status_code == 404, f"{r.status_code} {j(r)}")
+    r = client.put(f"/api/v1/chemists/{CHEM_A2}", headers=TM, json={"name": "Hijack"})
+    check("division A cannot update division A2 chemist -> 404", r.status_code == 404, f"{r.status_code} {j(r)}")
+    r = client.delete(f"/api/v1/chemists/{CHEM_A2}", headers=TM)
+    check("division A cannot delete division A2 chemist -> 404", r.status_code == 404, f"{r.status_code} {j(r)}")
+    r = client.get("/api/v1/chemists", headers=T1)
+    check("division A chemist list excludes division A2 chemist",
+          ok(r) and not any(c["id"] == CHEM_A2 for c in j(r).get("items", [])), f"{r.status_code} {j(r)}")
+
+    r = client.post("/api/v1/chemists", headers=TM, json={
+        "name": "Cross Division Chemist", "mobile": "9800011122", "division_id": DIV_A2,
+    })
+    check("division A MR cannot create a chemist for division A2 -> 403", r.status_code == 403,
+          f"{r.status_code} {j(r)}")
+
+    r = client.get("/api/v1/chemists", headers=T1)
+    check("legacy NULL-division chemist excluded from division A list",
+          ok(r) and not any(c["id"] == CHEM_LEGACY for c in j(r).get("items", [])), f"{r.status_code} {j(r)}")
+    r = client.get("/api/v1/chemists", headers=T3)
+    check("legacy NULL-division chemist excluded from division A2 list",
+          ok(r) and not any(c["id"] == CHEM_LEGACY for c in j(r).get("items", [])), f"{r.status_code} {j(r)}")
+    r = client.get(f"/api/v1/chemists/{CHEM_LEGACY}", headers=T1)
+    check("legacy NULL-division chemist not viewable by division A -> 404", r.status_code == 404,
+          f"{r.status_code} {j(r)}")
+
+    section("19. UPI security (item 5)")
+    r = client.post(f"/api/v1/chemists/{CHEM_ID}/upi/decode", headers=TM2,
+                    json={"payload": "shop@upi"})
+    check("division A2 cannot decode UPI for division A chemist -> 403", r.status_code == 403,
+          f"{r.status_code} {j(r)}")
+    r = client.post(f"/api/v1/chemists/{CHEM_ID}/upi", headers=TM2, json={
+        "upi_id": "hijack@upi", "source": "manual", "confirmed": True,
+    })
+    check("division A2 cannot save UPI for division A chemist -> 403", r.status_code == 403,
+          f"{r.status_code} {j(r)}")
+
+    section("20. POB cross-division validation (item 12) + product/campaign link (item 13)")
+    r = client.post("/api/v1/pob/submit", headers=TM, data={
+        "campaign_id": C_A2, "product_id": P_A2, "chemist_id": CHEM_ID,
+        "quantity": 5, "invoice_amount": 100, "pob_amount": 100,
+    })
+    check("division A MR cannot submit POB against division A2 campaign -> 403", r.status_code == 403,
+          f"{r.status_code} {j(r)}")
+    r = client.post("/api/v1/pob/submit", headers=TM, data={
+        "campaign_id": C1, "product_id": P2, "chemist_id": CHEM_A2,
+        "quantity": 5, "invoice_amount": 100, "pob_amount": 100,
+    })
+    check("division A MR cannot submit POB against division A2 chemist -> 403", r.status_code == 403,
+          f"{r.status_code} {j(r)}")
+
+    r = client.put(f"/api/v1/campaigns/{C1}", headers=T1, json={"products": [{"id": P_A2}]})
+    check("division A cannot link division A2's product into its campaign -> 400",
+          r.status_code == 400, f"{r.status_code} {j(r)}")
+
+    section("21. POB list pagination count (item 11)")
+    r = client.get("/api/v1/pob", headers=T1)
+    check("POB list (unfiltered) call ok", ok(r), f"{r.status_code} {j(r)}")
+    total_all = j(r).get("total")
+    r = client.get("/api/v1/pob", headers=T1, params={"status": "verified"})
+    check("POB list (status=verified) call ok", ok(r), f"{r.status_code} {j(r)}")
+    items_verified = j(r).get("items", [])
+    total_verified = j(r).get("total")
+    check("filtered POB total matches the number of matching rows, not the global count",
+          total_verified is not None and total_verified < total_all, (total_verified, total_all))
+    check("filtered POB total matches returned items (single page)",
+          total_verified == len(items_verified), (total_verified, len(items_verified)))
+
+    section("22. Verification decision integrity + dead claim endpoint (items 8-9)")
+    r = client.post(f"/api/v1/verification/{VID}/duplicate", headers=TV, json={"reason": "late dup check"})
+    check("cannot mark an already-approved verification as duplicate -> 409", r.status_code == 409,
+          f"{r.status_code} {j(r)}")
+    r = client.post(f"/api/v1/verification/{VID}/claim", headers=TV)
+    check("verification claim endpoint no longer exists", r.status_code in (404, 405),
+          f"{r.status_code} {j(r)}")
+
     return finish(keep)
 
 

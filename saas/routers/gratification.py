@@ -157,6 +157,7 @@ def _grat_query(extra="", params=()):
       SELECT g.*, pa.user_id AS mr_id, u.full_name AS mr_name,
              cmp.name AS campaign_name, ch.name AS chemist_name, ch.shop_name,
              ch.id AS chemist_id, ch.upi_id AS chemist_upi_id,
+             ch.upi_confirmed AS chemist_upi_confirmed,
              gift.name AS gift_name, gift.image_path AS gift_image
       FROM gratifications g
       JOIN pob_activities pa ON pa.id=g.pob_id
@@ -212,26 +213,6 @@ def get_gratification(gid: int, ctx: TenantContext = Depends(require_permission(
     c.execute("SELECT * FROM gratification_events WHERE gratification_id=%s ORDER BY id", (gid,))
     row["events"] = fetchall_dict(c)
     return _mask_payment_fields(ctx, [row])[0]
-
-
-def _transition(conn, gid, event, detail, actor_id, new_status=None, updates=None):
-    c = conn.cursor()
-    c.execute("SELECT * FROM gratifications WHERE id=%s", (gid,))
-    g = fetchone_dict(c)
-    if not g:
-        raise HTTPException(404, "gratification not found")
-    visible = visible_user_ids(conn, ctx)
-    if updates:
-        sets = ", ".join(f"{k}=%s" for k in updates)
-        params = list(updates.values())
-        params.append(gid)
-        c.execute(f"UPDATE gratifications SET {sets} WHERE id=%s", params)
-    if new_status:
-        c.execute("UPDATE gratifications SET status=%s WHERE id=%s", (new_status, gid))
-    c.execute("INSERT INTO gratification_events (gratification_id, event, detail, actor_id) "
-              "VALUES (%s,%s,%s,%s)", (gid, event, detail, actor_id))
-    conn.commit()
-    return g
 
 
 def _scoped_gratification(conn, ctx, gid):

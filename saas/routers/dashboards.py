@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..db_utils import fetchall_dict, fetchone_dict
 from ..deps import TenantContext, require_permission
-from ..scoping import visible_user_ids
+from ..scoping import user_division_id, visible_user_ids
 
 router = APIRouter(prefix="/api/v1/dashboards", tags=["dashboards"])
 
@@ -133,13 +133,15 @@ def company_dashboard(days: int = 0, ctx: TenantContext = Depends(require_permis
         "count(*) FILTER (WHERE g.status='completed')", win)
     previous["prev_gratifications"] = grat_kpi("count(*)", prev)
 
+    chem_div = user_division_id(conn, ctx)
     totals = {
         "users": _kpi(conn, "SELECT count(*) FROM users"),
         "active_users": _kpi(conn, "SELECT count(*) FROM users WHERE status='active'"),
         "campaigns": _kpi(conn, "SELECT count(*) FROM campaigns"),
         "active_campaigns": _kpi(conn, "SELECT count(*) FROM campaigns WHERE active=TRUE AND status='active'"),
         "products": _kpi(conn, "SELECT count(*) FROM products"),
-        "chemists": _kpi(conn, "SELECT count(*) FROM chemists"),
+        "chemists": _kpi(conn, "SELECT count(*) FROM chemists WHERE division_id=%s" if chem_div else "SELECT count(*) FROM chemists",
+                          (chem_div,) if chem_div else ()),
         "visits": _kpi(conn, f"SELECT count(*) FROM chemist_visits cv{' WHERE cv.user_id = ANY(%s)' if gw else ''}", gp),
         "followups_due": _kpi(conn, f"""SELECT count(*) FROM chemists ch
              JOIN pob_activities pa ON pa.chemist_id=ch.id AND pa.status='verified'

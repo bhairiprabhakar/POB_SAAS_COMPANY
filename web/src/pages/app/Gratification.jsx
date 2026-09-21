@@ -136,14 +136,17 @@ function GratificationDetail({ gid, onClose, onDone }) {
               <div className="card" style={{ marginTop: 12 }}>
                 <h4 style={{ marginBottom: 6 }}>Chemist UPI (for payout)</h4>
                 <p className="muted" style={{ marginBottom: 8 }}>
-                  Existing verified UPI: <strong>{g.chemist_upi_id || 'None saved yet'}</strong>
+                  Verified UPI: <strong>{g.chemist_upi_id || 'None saved yet'}</strong>
+                  {g.chemist_upi_id && (
+                    <> — <strong>{g.chemist_upi_confirmed ? 'Confirmed' : 'Not confirmed'}</strong></>
+                  )}
                 </p>
                 {perms.has('chemist.manage') && (
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <button className="btn" title="Payout will use this confirmed address"
-                      disabled={!g.chemist_upi_id}
-                      onClick={() => toast('Use existing UPI: payout will run against this confirmed address', 'success')}>
-                      Use existing UPI
+                      disabled={!g.chemist_upi_id || !g.chemist_upi_confirmed}
+                      onClick={() => toast('Use verified UPI: payout will run against this confirmed address', 'success')}>
+                      Use verified UPI
                     </button>
                     <button className="btn btn-primary" onClick={() => setUpiOpen(true)}>
                       Scan new UPI QR

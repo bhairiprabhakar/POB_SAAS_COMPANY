@@ -426,6 +426,13 @@ function InlineAction({ chemist, campaignId, campaigns, action, onClose, onDone 
   );
 }
 
+function upiMatchLabel(score) {
+  if (score == null) return null;
+  if (score >= 0.8) return 'Good match';
+  if (score >= 0.6) return 'Please verify payee name carefully';
+  return 'Payee name does not closely match the chemist';
+}
+
 function UpiScanForm({ chemist, onDone }) {
   const [payload, setPayload] = useState('');
   const [decoded, setDecoded] = useState(null);
@@ -522,6 +529,9 @@ function UpiScanForm({ chemist, onDone }) {
             <span>Valid <strong>{decoded.valid ? 'Yes' : 'No'}</strong></span>
             <span>Name match {decoded.name_score != null ? <strong>{Math.round(decoded.name_score * 100)}%</strong> : <strong>—</strong>}</span>
           </div>
+          {decoded.name_score != null && (
+            <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>{upiMatchLabel(decoded.name_score)}</p>
+          )}
           {decoded.valid ? (
             <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <button type="button" className="btn btn-primary" onClick={confirm} disabled={saving}>
@@ -529,8 +539,8 @@ function UpiScanForm({ chemist, onDone }) {
                   ? 'Confirm & replace existing UPI'
                   : 'Confirm & save'}
               </button>
-              {(decoded.name_score ?? 0) < 0.6 && (
-                <span className="muted" style={{ fontSize: 12 }}>Payee name doesn't strongly match — only save if you verified it with the shop.</span>
+              {(decoded.name_score ?? 0) < 0.8 && (
+                <span className="muted" style={{ fontSize: 12 }}>Only save if you verified the payee name with the shop.</span>
               )}
             </div>
           ) : (

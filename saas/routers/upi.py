@@ -27,7 +27,7 @@ def _resolve_chemist(conn, ctx: TenantContext, cid: int):
     if not chem:
         raise HTTPException(404, "chemist not found")
     div = user_division_id(conn, ctx)
-    if div and chem.get("division_id") not in (None, div):
+    if div and chem.get("division_id") != div:
         raise HTTPException(403, "not allowed to modify this chemist")
     return chem
 

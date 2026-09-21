@@ -20,7 +20,7 @@ from ..audit import log_action
 from ..db_utils import fetchall_dict, fetchone_dict
 from ..deps import TenantContext, get_tenant_context, require_permission
 from ..notify import notify_from_template
-from ..scoping import scope_filter, visible_user_ids
+from ..scoping import scope_filter, user_division_id, visible_user_ids
 from ..upload_validation import DOCUMENT_KINDS, IMAGE_KINDS, UploadValidationError, validate_upload
 from ..pagination import PageLimit, PageOffset
 from ..usage import record_ocr_usage
@@ -58,6 +58,22 @@ def _check_assignment(conn, ctx: TenantContext, campaign_id: int) -> None:
             "You are not assigned to this campaign. Contact your division admin "
             "to be added to its executing audience before submitting POBs.",
         )
+
+
+def _assert_pob_same_division(conn, ctx: TenantContext, campaign: dict, chemist: dict, product: dict = None) -> None:
+    """A POB may only reference a campaign, chemist and product that all belong
+    to the caller's own division. Frontend dropdown filtering is not trusted --
+    this is the server-side backstop against a manipulated request."""
+    div = user_division_id(conn, ctx)
+    if not div:
+        return
+    if campaign and campaign.get("division_id") != div:
+        raise HTTPException(403, "campaign does not belong to your division")
+    if chemist and chemist.get("division_id") != div:
+        raise HTTPException(403, "chemist does not belong to your division")
+    if product is not None:
+        from .masters import _assert_product_in_div
+        _assert_product_in_div(conn, product, div)
 
 
 def _coerce_int(value):
@@ -636,6 +652,8 @@ async def submit_pob(
     if not chemist:
         raise HTTPException(400, "Chemist not found")
 
+    _assert_pob_same_division(conn, ctx, campaign, chemist, product)
+
     # Campaign eligible-chemist segment: when the campaign targets specific
     # attachment types / potential categories, the chemist must match or the
     # POB is rejected before it reaches the OCR pipeline.
@@ -913,8 +931,11 @@ async def submit_invoice_only(
             raise HTTPException(403, f"Role '{role_name}' not allowed for this campaign")
 
     c.execute("SELECT * FROM chemists WHERE id=%s", (chemist_id,))
-    if not c.fetchone():
+    chemist = fetchone_dict(c)
+    if not chemist:
         raise HTTPException(400, "Chemist not found")
+
+    _assert_pob_same_division(conn, ctx, campaign, chemist)
 
     # Read and validate invoice
     data = await invoice.read()
@@ -1253,8 +1274,11 @@ def submit_visit(body: dict, request: Request = None,
             raise HTTPException(403, f"Role '{role_name}' is not allowed to upload for this campaign (allowed: {', '.join(sorted(allowed))})")
 
     c.execute("SELECT * FROM chemists WHERE id=%s", (chemist_id,))
-    if not c.fetchone():
+    chemist = fetchone_dict(c)
+    if not chemist:
         raise HTTPException(400, "Chemist not found")
+
+    _assert_pob_same_division(conn, ctx, campaign, chemist)
 
     group = str(uuid.uuid4())
     total = 0.0
@@ -1387,9 +1411,12 @@ async def upload_invoice_proof(
     campaign = fetchone_dict(c)
     if not campaign:
         raise HTTPException(404, "Campaign not found")
-    c.execute("SELECT id FROM chemists WHERE id=%s", (chemist_id,))
-    if not c.fetchone():
+    c.execute("SELECT * FROM chemists WHERE id=%s", (chemist_id,))
+    chemist = fetchone_dict(c)
+    if not chemist:
         raise HTTPException(400, "Chemist not found")
+
+    _assert_pob_same_division(conn, ctx, campaign, chemist)
 
     c.execute(
         "SELECT id FROM pob_activities WHERE user_id=%s AND campaign_id=%s AND chemist_id=%s "
@@ -1557,13 +1584,13 @@ def list_pob(status: str = "", user_id: int = None, campaign_id: int = None,
         params.extend([f"%{q}%"] * 3)
     if where:
         sql += " WHERE " + " AND ".join(where)
+    count_sql = f"SELECT count(*) FROM ({sql}) AS _counted"
     sql += " ORDER BY pa.id DESC LIMIT %s OFFSET %s"
-    params.extend([limit, offset])
-    c.execute(sql, params)
+    c.execute(sql, params + [limit, offset])
     items = fetchall_dict(c)
     _attach_hierarchy(conn, items)
     _attach_proof_lag(items)
-    c.execute("SELECT count(*) FROM pob_activities")
+    c.execute(count_sql, params)
     return {"items": items, "total": c.fetchone()[0]}
 
 

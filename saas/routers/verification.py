@@ -276,24 +276,6 @@ def _pob_lines(conn, row):
     return fetchall_dict(c)
 
 
-@router.post("/{vid}/claim")
-def claim_verification(vid: int, ctx: TenantContext = Depends(require_permission("verification.view"))):
-    conn = ctx.conn
-    c = conn.cursor()
-    c.execute("SELECT * FROM pob_verifications WHERE id=%s FOR UPDATE", (vid,))
-    v = fetchone_dict(c)
-    if not v:
-        raise HTTPException(404, "verification not found")
-    _assert_scope(conn, ctx, vid)
-    if v["status"] != "pending":
-        raise HTTPException(409, "only pending items can be claimed")
-    c.execute("UPDATE pob_verifications SET verifier_id=%s, started_at=CURRENT_TIMESTAMP WHERE id=%s",
-              (ctx.user["id"], vid))
-    conn.commit()
-    log_action(conn, ctx.user["id"], "verification.claim", "pob_verification", vid)
-    return {"ok": True}
-
-
 @router.post("/{vid}/approve")
 def approve_verification(vid: int, body: dict = None, request: Request = None,
                          ctx: TenantContext = Depends(require_permission("verification.approve"))):
@@ -453,10 +435,12 @@ def mark_duplicate(vid: int, body: dict,
                    ctx: TenantContext = Depends(require_permission("verification.reject"))):
     conn = ctx.conn
     c = conn.cursor()
-    c.execute("SELECT * FROM pob_verifications WHERE id=%s", (vid,))
+    c.execute("SELECT * FROM pob_verifications WHERE id=%s FOR UPDATE", (vid,))
     v = fetchone_dict(c)
     if not v:
         raise HTTPException(404, "verification not found")
+    if v["status"] != "pending":
+        raise HTTPException(409, f"item is already {v['status']}")
     _assert_scope(conn, ctx, vid)
     c.execute("UPDATE pob_verifications SET status='duplicate', verifier_id=%s, "
               "verified_at=CURRENT_TIMESTAMP, reason=%s, duplicate_of=%s WHERE id=%s",
