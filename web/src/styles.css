@@ -340,8 +340,9 @@ a.user-chip:hover { background: var(--bg-3); text-decoration: none; }
 .pw-wrap .input { padding-right: 38px; }
 .pw-eye {
   position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
-  border: none; background: none; cursor: pointer; font-size: 15px;
-  padding: 2px 6px; border-radius: 6px; color: var(--muted);
+  border: none; background: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  padding: 5px; border-radius: 6px; color: var(--muted);
 }
 .pw-eye:hover { background: var(--bg-3); color: var(--text); }
 .pw-eye:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }

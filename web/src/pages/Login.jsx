@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { api, getSession, setSession } from '../api';
+import { Icon } from '../ui';
 
 export default function Login() {
   const nav = useNavigate();
@@ -155,7 +156,7 @@ export default function Login() {
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => setShowPw((v) => !v)}
                   aria-label={showPw ? 'Hide password' : 'Show password'}>
-                  {showPw ? '🙈' : '👁'}
+                  <Icon name={showPw ? 'eye-off' : 'eye'} size={17} />
                 </button>
               </div>
             </label>

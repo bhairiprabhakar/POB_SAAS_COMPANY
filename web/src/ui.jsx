@@ -234,6 +234,16 @@ const ICON_PATHS = {
     <rect x="14" y="14" width="7" height="7" />
     <rect x="3" y="14" width="7" height="7" />
   </>,
+  eye: <>
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+    <circle cx="12" cy="12" r="3" />
+  </>,
+  'eye-off': <>
+    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+    <path d="M6.61 6.61C3.06 8.65 2 12 2 12s3.5 7 10 7a9.5 9.5 0 0 0 5.39-1.61" />
+    <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+    <line x1="2" y1="2" x2="22" y2="22" />
+  </>,
 };
 
 export function Icon({ name, size = 16, className = '' }) {
@@ -1228,7 +1238,7 @@ export function TextInput(props) {
         <button type="button" className="pw-eye" tabIndex={-1}
           aria-label={showPw ? 'Hide password' : 'Show password'}
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => setShowPw((v) => !v)}>{showPw ? '🙈' : '👁'}</button>
+          onClick={() => setShowPw((v) => !v)}><Icon name={showPw ? 'eye-off' : 'eye'} size={17} /></button>
       </div>
     );
   }

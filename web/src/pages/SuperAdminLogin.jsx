@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, setSession } from '../api';
+import { Icon } from '../ui';
 
 export default function SuperAdminLogin() {
   const nav = useNavigate();
@@ -64,7 +65,8 @@ export default function SuperAdminLogin() {
             <input className="input" type={showPw ? 'text' : 'password'} value={password}
               onChange={(e) => setPassword(e.target.value)} required />
             <button type="button" className="pw-eye" tabIndex={-1} aria-label={showPw ? 'Hide password' : 'Show password'}
-              onClick={() => setShowPw((v) => !v)}>{showPw ? '🙈' : '👁'}</button>
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setShowPw((v) => !v)}><Icon name={showPw ? 'eye-off' : 'eye'} size={17} /></button>
           </div>
         </label>
         <button className="btn btn-primary btn-block" disabled={busy}>
