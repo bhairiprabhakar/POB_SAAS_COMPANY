@@ -180,6 +180,7 @@ function CreateDivision({ open, onClose, onDone }) {
             <Field label="Division name" required><TextInput value={f.name || ''} onChange={set('name')} required /></Field>
             <Field label="Division code" hint="Optional — auto-generated if blank. This is the login slug.">
               <TextInput value={f.code || ''} onChange={set('code')} placeholder="e.g. CARDIO" />
+              <div className="warning-text">Choose carefully — this becomes the division's permanent sign-in link and cannot be changed later.</div>
               {f.code
                 ? <small className="field-hint">Sign-in link: <code>{loginUrl(String(f.code).toUpperCase())}</code></small>
                 : <small className="field-hint">Leave blank to auto-generate — the sign-in link appears after creating.</small>}
@@ -222,6 +223,7 @@ function CreateDivision({ open, onClose, onDone }) {
           <div className="review-list">
             <h4>Division</h4>
             <p><strong>{f.name}</strong> {f.code ? `(${String(f.code).toUpperCase()})` : '(auto code)'}</p>
+            <div className="warning-text">This code is permanent — double-check it before creating.</div>
             {f.description && <p>{f.description}</p>}
             {(f.contact_person || f.contact_email || f.contact_mobile) && (
               <p className="muted">{f.contact_person || '—'} · {f.contact_email || '—'} · {f.contact_mobile || '—'}</p>
