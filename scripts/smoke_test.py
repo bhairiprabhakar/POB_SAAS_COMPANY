@@ -234,6 +234,14 @@ def main():
         check("campaign shows up under changes_required with note",
               any(c["id"] == sb_campaign_id and c.get("changes_required_note") for c in cr_items),
               f"{r.status_code} {cr_items}")
+        r = client.put(f"{BASE}/campaigns/{sb_campaign_id}", headers=ADM, json={"status": "draft"})
+        check("division admin edits a changes_required campaign back to draft", r.status_code == 200,
+              f"{r.status_code} {r.text[:200]}")
+        r = client.get(f"{BASE}/campaigns/{sb_campaign_id}", headers=ADM)
+        check("editing back to draft clears the stale changes_required_note immediately",
+              r.status_code == 200 and r.json().get("status") == "draft"
+              and not r.json().get("changes_required_note"),
+              f"{r.status_code} {r.text[:300]}")
         r = client.post(f"{BASE}/campaigns/{sb_campaign_id}/request-changes", headers=ADM, json={"reason": "x"})
         check("division admin cannot call request-changes (platform-only)", r.status_code in (403, 404, 405),
               f"{r.status_code}")

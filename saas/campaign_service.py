@@ -805,6 +805,17 @@ def update_campaign(conn, actor: dict, cid: int, body: dict, request=None) -> No
             if f.startswith("eligible_"):
                 val = val or []
             params.append(val)
+    # Editing a rejected/changes_required campaign back to draft (the only way
+    # to leave those states from the edit form -- Status only offers
+    # draft/completed/paused) left the old rejection/changes-required note
+    # stored indefinitely, since editing never touched those columns; only an
+    # actual resubmit did. Clear them here too so the note doesn't linger
+    # confusingly until the next submit.
+    if body.get("status") == "draft" and before.get("status") != "draft":
+        sets.extend([
+            "rejected_at=NULL", "rejected_by=NULL", "rejection_note=NULL",
+            "changes_requested_at=NULL", "changes_requested_by=NULL", "changes_required_note=NULL",
+        ])
     # brand_ids column is stored as a comma-separated string; also keep the
     # primary brand_id in sync so joins/reports keep working.
     if "brand_ids" in body or "brand_id" in body:
