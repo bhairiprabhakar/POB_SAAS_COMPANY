@@ -2069,4 +2069,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_field_templates_key
 -- {field_key: value} for whatever templates are active in that campaign's
 -- division at save time. A file-type value is {"path","filename","url"}.
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS custom_fields JSONB DEFAULT '{}';
+
+-- Ties a role to the ONE hierarchy level it normally sits at (nullable --
+-- roles that aren't part of the reporting chain, e.g. distributor/finance/
+-- verifier, stay NULL and are never validated). Lets create_user/update_user
+-- catch a role/level mismatch (e.g. role=mr but hierarchy_level=ASM) without
+-- hardcoding level names, since a company can rename its hierarchy freely.
+ALTER TABLE roles ADD COLUMN IF NOT EXISTS default_hierarchy_level_id INTEGER REFERENCES hierarchy_levels(id);
+-- Backfill only where the (renameable) role name and level name already
+-- match the out-of-the-box convention -- never guesses for a customized setup.
+UPDATE roles r SET default_hierarchy_level_id = hl.id
+FROM hierarchy_levels hl
+WHERE r.default_hierarchy_level_id IS NULL AND lower(r.name) = lower(hl.name);
 """

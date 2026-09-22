@@ -218,6 +218,8 @@ def main():
     MR_ROLE = cur.fetchone()[0]
     cur.execute("SELECT id FROM roles WHERE name='verifier'")
     VF_ROLE = cur.fetchone()[0]
+    cur.execute("SELECT id FROM roles WHERE name='psr'")
+    PSR_ROLE = cur.fetchone()[0]
     conn.commit()
     conn.close()
 
@@ -849,6 +851,82 @@ def main():
     check("existing campaign's stored value for the deactivated field survives",
           ok(r) and j(r).get("custom_fields", {}).get("ref_doc", {}).get("filename") == "reference.png",
           f"{r.status_code} {j(r)}")
+
+    section("25. Role / hierarchy-level consistency validation")
+    r = client.get("/api/v1/hierarchy/levels", headers=T1)
+    check("list hierarchy levels", ok(r), f"{r.status_code} {j(r)}")
+    lv_by_name = {lv["name"]: lv["id"] for lv in j(r).get("items", [])}
+    MR_LEVEL = lv_by_name.get("MR")
+    ASM_LEVEL = lv_by_name.get("ASM")
+    check("MR and ASM levels resolved", bool(MR_LEVEL and ASM_LEVEL), lv_by_name)
+
+    r = client.get("/api/v1/roles", headers=T1)
+    mr_role_row = next((x for x in j(r).get("items", []) if x["id"] == MR_ROLE), None)
+    check("fresh tenant's 'mr' role auto-backfilled to the MR level",
+          mr_role_row and mr_role_row.get("default_hierarchy_level_id") == MR_LEVEL,
+          mr_role_row)
+
+    r = client.post("/api/v1/users", headers=T1, json={
+        "username": "mismatch_mr", "password": PASSWD, "full_name": "Mismatch MR",
+        "role_id": MR_ROLE, "hierarchy_level_id": ASM_LEVEL, "division_id": admin_div,
+    })
+    check("create user with role=mr at level=ASM is rejected -> 400", r.status_code == 400, f"{r.status_code} {j(r)}")
+
+    r = client.post("/api/v1/users", headers=T1, json={
+        "username": "matched_mr", "password": PASSWD, "full_name": "Matched MR",
+        "role_id": MR_ROLE, "hierarchy_level_id": MR_LEVEL, "division_id": admin_div,
+    })
+    check("create user with role=mr at level=MR succeeds", ok(r), f"{r.status_code} {j(r)}")
+    MATCHED_MR_ID = j(r).get("id")
+
+    r = client.put(f"/api/v1/users/{MATCHED_MR_ID}", headers=T1, json={"hierarchy_level_id": ASM_LEVEL})
+    check("editing that user's level to ASM is rejected -> 400", r.status_code == 400, f"{r.status_code} {j(r)}")
+    r = client.put(f"/api/v1/users/{MATCHED_MR_ID}", headers=T1, json={"mobile": "9998887777"})
+    check("editing an unrelated field on that user still works", ok(r), f"{r.status_code} {j(r)}")
+
+    check("PSR_ROLE has no default level, so any level is allowed", PSR_ROLE is not None, PSR_ROLE)
+    r = client.post("/api/v1/users", headers=T1, json={
+        "username": "psr_any_level", "password": PASSWD, "full_name": "PSR Any Level",
+        "role_id": PSR_ROLE, "hierarchy_level_id": ASM_LEVEL, "division_id": admin_div,
+    })
+    check("a role with no default_hierarchy_level_id is never blocked", ok(r), f"{r.status_code} {j(r)}")
+
+    # A pre-existing bad row (created directly in the DB, bypassing the API --
+    # mirrors how a legacy/misconfigured record like the one that surfaced
+    # this bug would already look) must stay editable for unrelated fields.
+    conn = provision_pool_conn(tenant_db1)
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO users (username, password, full_name, role_id, hierarchy_level_id, division_id, status) "
+        "VALUES (%s,%s,%s,%s,%s,%s,'active') RETURNING id",
+        ("legacy_mismatch", "x", "Legacy Mismatch", MR_ROLE, ASM_LEVEL, admin_div),
+    )
+    LEGACY_ID = cur.fetchone()[0]
+    conn.commit()
+    conn.close()
+    r = client.put(f"/api/v1/users/{LEGACY_ID}", headers=T1, json={"email": "legacy@test.local"})
+    check("a pre-existing mismatched row stays editable for unrelated fields", ok(r), f"{r.status_code} {j(r)}")
+    r = client.put(f"/api/v1/users/{LEGACY_ID}", headers=T1, json={"hierarchy_level_id": ASM_LEVEL})
+    check("re-submitting the same bad level on that legacy row is still rejected", r.status_code == 400, f"{r.status_code} {j(r)}")
+    r = client.put(f"/api/v1/users/{LEGACY_ID}", headers=T1, json={"hierarchy_level_id": MR_LEVEL})
+    check("fixing the legacy row's level to match its role succeeds", ok(r), f"{r.status_code} {j(r)}")
+
+    r = client.post("/api/v1/roles", headers=T1, json={
+        "name": f"custom_role_{UUID}", "permissions": [], "default_hierarchy_level_id": ASM_LEVEL,
+    })
+    check("create a role with an explicit default_hierarchy_level_id", ok(r), f"{r.status_code} {j(r)}")
+    CUSTOM_ROLE_ID = j(r).get("id")
+    r = client.get("/api/v1/roles", headers=T1)
+    custom_row = next((x for x in j(r).get("items", []) if x["id"] == CUSTOM_ROLE_ID), None)
+    check("new role's default level round-trips", custom_row and custom_row.get("default_hierarchy_level_id") == ASM_LEVEL, custom_row)
+
+    r = client.put(f"/api/v1/roles/{CUSTOM_ROLE_ID}", headers=T1, json={"default_hierarchy_level_id": None})
+    check("clearing a role's default level succeeds", ok(r), f"{r.status_code} {j(r)}")
+    r = client.post("/api/v1/users", headers=T1, json={
+        "username": "custom_role_any_level", "password": PASSWD, "full_name": "Custom Role Any Level",
+        "role_id": CUSTOM_ROLE_ID, "hierarchy_level_id": MR_LEVEL, "division_id": admin_div,
+    })
+    check("after clearing the default level, any hierarchy level is accepted", ok(r), f"{r.status_code} {j(r)}")
 
     return finish(keep)
 

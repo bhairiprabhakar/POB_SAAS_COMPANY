@@ -35,7 +35,9 @@ log = logging.getLogger("saas.migrations")
 # 3.18.0: grant chemist.classification.view to ho/nsm/zsm/sm/rsm/asm (missed
 # when the permission was first introduced).
 # 3.19.0: field_templates table + campaigns.custom_fields -- Template Studio.
-SCHEMA_VERSION = "3.19.0"
+# 3.20.0: roles.default_hierarchy_level_id -- role/hierarchy-level consistency
+# validation on user create/update.
+SCHEMA_VERSION = "3.20.0"
 
 # RLock: ensure_migrated re-enters via get_tenant_pool → _try_migrate path.
 _lock = threading.RLock()

@@ -51,8 +51,8 @@ def create_role(body: dict, ctx: TenantContext = Depends(require_permission("set
     c.execute("SELECT id FROM roles WHERE name=%s", (name,))
     if c.fetchone():
         raise HTTPException(409, "role already exists")
-    c.execute("INSERT INTO roles (name, description, data_entry) VALUES (%s,%s,%s) RETURNING id",
-              (name, body.get("description"), bool(body.get("data_entry", False))))
+    c.execute("INSERT INTO roles (name, description, data_entry, default_hierarchy_level_id) VALUES (%s,%s,%s,%s) RETURNING id",
+              (name, body.get("description"), bool(body.get("data_entry", False)), body.get("default_hierarchy_level_id")))
     rid = c.fetchone()[0]
     _set_permissions(conn, rid, body.get("permissions") or [])
     log_action(conn, ctx.user["id"], "role.create", "role", rid, {"name": name},
@@ -73,6 +73,9 @@ def update_role(rid: int, body: dict, ctx: TenantContext = Depends(require_permi
     elif "data_entry" in body:
         c.execute("UPDATE roles SET data_entry=%s WHERE id=%s",
                   (bool(body["data_entry"]), rid))
+    if "default_hierarchy_level_id" in body:
+        c.execute("UPDATE roles SET default_hierarchy_level_id=%s WHERE id=%s",
+                  (body["default_hierarchy_level_id"], rid))
     if "permissions" in body:
         _set_permissions(conn, rid, body["permissions"])
     conn.commit()
@@ -109,6 +112,38 @@ def _set_permissions(conn, rid, perms):
             (rid, p),
         )
     conn.commit()
+
+
+def _validate_role_hierarchy_level(conn, role_id, hierarchy_level_id):
+    """Reject a role/hierarchy-level combination that disagrees with the
+    role's configured default level (Role controls permissions, Hierarchy
+    Level controls reporting position -- see tenant_schema.py's users table
+    comment -- and nothing else ties them together, so a wrong pick in
+    either dropdown otherwise saves silently).
+
+    Skipped entirely when the role has no default_hierarchy_level_id set
+    (e.g. distributor/finance/verifier aren't part of the reporting chain,
+    and a fresh/renamed role starts with no mapping until one is set on the
+    role itself) -- this never blocks roles outside the sales hierarchy.
+    """
+    if not role_id or hierarchy_level_id is None:
+        return
+    c = conn.cursor()
+    c.execute("SELECT name, default_hierarchy_level_id FROM roles WHERE id=%s", (role_id,))
+    role = c.fetchone()
+    if not role or role[1] is None or role[1] == hierarchy_level_id:
+        return
+    c.execute("SELECT name, label FROM hierarchy_levels WHERE id=%s", (role[1],))
+    expected = c.fetchone()
+    c.execute("SELECT name, label FROM hierarchy_levels WHERE id=%s", (hierarchy_level_id,))
+    got = c.fetchone()
+    exp_txt = f"{expected[0]} ({expected[1]})" if expected else "an unknown level"
+    got_txt = f"{got[0]} ({got[1]})" if got else "an unknown level"
+    raise HTTPException(
+        400,
+        f"Role '{role[0]}' is normally at hierarchy level {exp_txt}, not {got_txt}. "
+        "If this is intentional, update the role's default level first.",
+    )
 
 
 # ── Dynamic hierarchy ───────────────────────────────────────────────────────
@@ -342,6 +377,7 @@ def create_user(body: dict, ctx: TenantContext = Depends(require_permission("use
         if not row:
             raise HTTPException(400, "invalid division_id")
         division = row[0]
+    _validate_role_hierarchy_level(conn, body.get("role_id"), body.get("hierarchy_level_id"))
     c.execute(
         """INSERT INTO users (username, password, full_name, email, mobile, employee_id,
            division, division_id, hierarchy_level_id, role_id, parent_id, region, area, territory, status)
@@ -404,6 +440,7 @@ def update_user(uid: int, body: dict, ctx: TenantContext = Depends(require_permi
     if not row:
         raise HTTPException(404, "user not found")
     current_role_id = row.get("role_id")
+    current_hierarchy_level_id = row.get("hierarchy_level_id")
     if body.get("division_id"):
         c.execute("SELECT name FROM divisions WHERE id=%s", (body["division_id"],))
         row = c.fetchone()
@@ -445,6 +482,14 @@ def update_user(uid: int, body: dict, ctx: TenantContext = Depends(require_permi
             raise HTTPException(400, "invalid role_id")
         if div and _is_global_role(conn, body["role_id"]) and body["role_id"] != current_role_id:
             raise HTTPException(403, "You are not authorized to assign that role")
+    if "role_id" in body or "hierarchy_level_id" in body:
+        # Only re-validate when one of the two fields is actually being
+        # touched by this request -- an already-inconsistent legacy row must
+        # still be editable for unrelated fields (email, mobile, ...)
+        # without being retroactively blocked by this check.
+        effective_role_id = body["role_id"] if "role_id" in body else current_role_id
+        effective_level_id = body["hierarchy_level_id"] if "hierarchy_level_id" in body else current_hierarchy_level_id
+        _validate_role_hierarchy_level(conn, effective_role_id, effective_level_id)
     if div and body.get("parent_id") is not None:
         c.execute("SELECT division_id FROM users WHERE id=%s", (body["parent_id"],))
         prow = c.fetchone()
@@ -623,6 +668,11 @@ async def bulk_upload_users(file: UploadFile = File(...),
                 errors.append(f"row {i}: unknown hierarchy_level '{col(d, 'hierarchy_level')}' (use MR/ASM/RSM/SM/ZSM/NSM/HO)")
             if d.get("role") and not role_id:
                 errors.append(f"row {i}: unknown role '{col(d, 'role')}'")
+            try:
+                _validate_role_hierarchy_level(conn, role_id, level_id)
+            except HTTPException as exc:
+                errors.append(f"row {i}: {exc.detail}")
+                continue
             act_div = division_scope(conn, ctx)
             uploaded_div_id = _resolve_division_id(conn, d.get("division")) if col(d, "division") else None
             if col(d, "division") and not uploaded_div_id:
