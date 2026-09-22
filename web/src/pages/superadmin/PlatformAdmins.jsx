@@ -12,7 +12,8 @@ const ROLE_LABELS = {
   campaign_admin: 'Campaign Admin · campaign approvals',
   finance_admin: 'Finance Admin · gratification & payments',
   verification_admin: 'Verification Admin · POB verification',
-  platform_division_admin: 'Division Admin · create & manage divisions',
+  platform_division_admin: 'Platform Division Admin · create & manage divisions',
+  co_owner: 'Co-Owner · full access, founder-managed',
 };
 
 // 'full' is intentionally left out here -- it's a legacy unrestricted role the
@@ -23,10 +24,11 @@ const ROLE_OPTIONS = [
   { value: 'campaign_admin', label: 'Campaign Admin' },
   { value: 'finance_admin', label: 'Finance Admin' },
   { value: 'verification_admin', label: 'Verification Admin' },
-  { value: 'platform_division_admin', label: 'Division Admin' },
+  { value: 'platform_division_admin', label: 'Platform Division Admin (create & manage divisions)' },
 ];
 
-const TONES = { full: 'blue', campaign_admin: 'teal', finance_admin: 'green', verification_admin: 'amber', platform_division_admin: 'teal' };
+const TONES = { full: 'blue', campaign_admin: 'teal', finance_admin: 'green', verification_admin: 'amber', platform_division_admin: 'teal', co_owner: 'red' };
+const MAX_CO_OWNERS = 3;
 
 export default function PlatformAdmins() {
   const me = saRole();
@@ -37,6 +39,8 @@ export default function PlatformAdmins() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ role: 'campaign_admin', status: 'active', username: '', password: '', full_name: '', email: '' });
   const [busy, setBusy] = useState(false);
+  const [promoting, setPromoting] = useState(null);
+  const [revoking, setRevoking] = useState(null);
 
   const resetForm = () => setForm({ role: 'campaign_admin', status: 'active', username: '', password: '', full_name: '', email: '' });
 
@@ -87,6 +91,8 @@ export default function PlatformAdmins() {
       (a.full_name || '').toLowerCase().includes(n) || a.id === Number(n));
   }, [data, q]);
 
+  const coOwnerCount = (data?.items || []).filter((a) => a.role === 'co_owner').length;
+
   const cols = [
     { key: 'id', label: 'ID', render: (r) => <strong>#{r.id}</strong> },
     { key: 'username', label: 'Username' },
@@ -98,16 +104,28 @@ export default function PlatformAdmins() {
       <Badge tone={r.status === 'active' ? 'green' : 'red'}>{r.status}</Badge> },
     { key: 'last_login', label: 'Last login', render: (r) => r.last_login ? String(r.last_login).slice(0, 16).replace('T', ' ') : '—' },
     {
-      key: '_actions', label: '', render: (r) => r.role === 'owner' ? (
-        <span className="muted">—</span>
-      ) : (
-        <span className="row-actions">
-          <button className="btn btn-sm" onClick={() => startEdit(r)}>Edit</button>
-          <button className={`btn btn-sm ${r.status === 'active' ? 'btn-danger' : ''}`} onClick={() => toggleStatus(r)}>
-            {r.status === 'active' ? 'Suspend' : 'Reactivate'}
-          </button>
-        </span>
-      ),
+      key: '_actions', label: '', render: (r) => {
+        if (r.role === 'owner') return <span className="muted">—</span>;
+        // Only the founder may edit/suspend a co-owner row (matches the
+        // backend's require_founder guard) -- a co-owner viewing another
+        // co-owner (or their own row) gets no controls here, avoiding a
+        // dead-end 403 click.
+        if (r.role === 'co_owner' && me !== 'owner') return <span className="muted">—</span>;
+        return (
+          <span className="row-actions">
+            <button className="btn btn-sm" onClick={() => startEdit(r)}>Edit</button>
+            <button className={`btn btn-sm ${r.status === 'active' ? 'btn-danger' : ''}`} onClick={() => toggleStatus(r)}>
+              {r.status === 'active' ? 'Suspend' : 'Reactivate'}
+            </button>
+            {me === 'owner' && r.role === 'co_owner' && (
+              <button className="btn btn-sm" onClick={() => setRevoking(r)}>Revoke co-owner</button>
+            )}
+            {me === 'owner' && r.role !== 'co_owner' && coOwnerCount < MAX_CO_OWNERS && (
+              <button className="btn btn-sm" onClick={() => setPromoting(r)}>Make co-owner</button>
+            )}
+          </span>
+        );
+      },
     },
   ];
 
@@ -132,7 +150,8 @@ export default function PlatformAdmins() {
       <div className="stats-grid compact">
         <StatCard label="Total admins" value={(data?.items || []).length} />
         <StatCard label="Owners" value={owners} tone="red" />
-        <StatCard label="Specialised roles" value={(data?.items || []).filter((a) => !['owner', 'full'].includes(a.role)).length} tone="blue" />
+        <StatCard label="Co-owners" value={`${coOwnerCount} / ${MAX_CO_OWNERS}`} tone="red" />
+        <StatCard label="Specialised roles" value={(data?.items || []).filter((a) => !['owner', 'full', 'co_owner'].includes(a.role)).length} tone="blue" />
       </div>
       {rows.length
         ? <Table cols={cols} rows={rows} keyOf={(r) => r.id}
@@ -178,6 +197,77 @@ export default function PlatformAdmins() {
           </Field>
         )}
       </Modal>
+
+      <PromoteCoOwnerModal admin={promoting} onClose={() => setPromoting(null)}
+        onDone={() => { setPromoting(null); run(); }} />
+      <RevokeCoOwnerModal admin={revoking} onClose={() => setRevoking(null)}
+        onDone={() => { setRevoking(null); run(); }} />
     </div>
+  );
+}
+
+function PromoteCoOwnerModal({ admin, onClose, onDone }) {
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  if (!admin) return null;
+  const confirm = async () => {
+    if (!password) { toast('Enter your current password to confirm', 'error'); return; }
+    setBusy(true);
+    try {
+      await api(`/api/v1/superadmin/platform-admins/${admin.id}/co-owner`, { method: 'POST', body: { password } });
+      toast(`${admin.full_name || admin.username} is now a co-owner`, 'success');
+      setPassword(''); onDone();
+    } catch (e) { toast(e.message, 'error'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal open onClose={onClose} title={`Make ${admin.full_name || admin.username} a co-owner`}
+      footer={<>
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" onClick={confirm} disabled={busy}>{busy ? 'Confirming…' : 'Promote to co-owner'}</button>
+      </>}>
+      <p className="muted">
+        A co-owner gets full platform access, including managing the other specialised admins —
+        exactly like you, except only you (the founder) can ever edit, suspend, or revoke a
+        co-owner. Confirm with your own password to continue.
+      </p>
+      <Field label="Your password" required>
+        <TextInput type="password" value={password} placeholder="••••••"
+          onChange={(e) => setPassword(e.target.value)} />
+      </Field>
+    </Modal>
+  );
+}
+
+function RevokeCoOwnerModal({ admin, onClose, onDone }) {
+  const [password, setPassword] = useState('');
+  const [fallbackRole, setFallbackRole] = useState('campaign_admin');
+  const [busy, setBusy] = useState(false);
+  if (!admin) return null;
+  const confirm = async () => {
+    if (!password) { toast('Enter your current password to confirm', 'error'); return; }
+    setBusy(true);
+    try {
+      await api(`/api/v1/superadmin/platform-admins/${admin.id}/co-owner/revoke`,
+        { method: 'POST', body: { password, fallback_role: fallbackRole } });
+      toast(`Co-owner access revoked for ${admin.full_name || admin.username}`, 'success');
+      setPassword(''); onDone();
+    } catch (e) { toast(e.message, 'error'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal open onClose={onClose} title={`Revoke co-owner access for ${admin.full_name || admin.username}`}
+      footer={<>
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn btn-danger" onClick={confirm} disabled={busy}>{busy ? 'Confirming…' : 'Revoke co-owner'}</button>
+      </>}>
+      <Field label="Fall back to role" required>
+        <Select value={fallbackRole} onChange={(e) => setFallbackRole(e.target.value)} options={ROLE_OPTIONS} placeholder={false} />
+      </Field>
+      <Field label="Your password" required hint="Confirm with your own password to continue.">
+        <TextInput type="password" value={password} placeholder="••••••"
+          onChange={(e) => setPassword(e.target.value)} />
+      </Field>
+    </Modal>
   );
 }

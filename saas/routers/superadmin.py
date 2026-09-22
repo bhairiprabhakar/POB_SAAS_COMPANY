@@ -16,10 +16,10 @@ from openpyxl import Workbook
 from .. import platform_db, provision, storage
 from ..audit import log_action
 from ..db_utils import fetchall_dict, fetchone_dict
-from ..deps import require_owner, require_sa_roles, require_superadmin
+from ..deps import require_founder, require_owner, require_sa_roles, require_superadmin
 from ..upload_validation import IMAGE_KINDS, UploadValidationError, validate_upload
 from ..pagination import PageLimit, PageOffset
-from saas.passwords import hash_pw
+from saas.passwords import hash_pw, verify_pw
 
 log = logging.getLogger("saas.superadmin")
 
@@ -2715,11 +2715,14 @@ PLATFORM_ROLES = (
     "finance_admin",
     "verification_admin",
     "platform_division_admin",
+    "co_owner",
 )
 # 'full' is a legacy unrestricted role kept only so existing accounts that
-# already hold it keep working; the console no longer lets anyone assign it
-# to a new or existing admin -- delegate one of the specialised roles instead.
-_ASSIGNABLE_PLATFORM_ROLES = tuple(r for r in PLATFORM_ROLES if r != "full")
+# already hold it keep working; 'co_owner' is only ever reached through the
+# dedicated promote/revoke endpoints below (step-up password + founder-only).
+# Neither is offered on the ordinary create/edit-admin role field.
+_ASSIGNABLE_PLATFORM_ROLES = tuple(r for r in PLATFORM_ROLES if r not in ("full", "co_owner"))
+_MAX_CO_OWNERS = 3
 
 
 def _platform_admin_row(row):
@@ -2757,7 +2760,8 @@ def create_platform_admin(body: dict, claims=Depends(require_owner)):
         raise HTTPException(400, "Password must be at least 6 characters")
     if role not in _ASSIGNABLE_PLATFORM_ROLES:
         raise HTTPException(400, "Invalid platform role" if role not in PLATFORM_ROLES else
-                             "Full-access admins can no longer be created — assign a specialised role instead")
+                             "Full-access and co-owner admins can't be created directly — assign a "
+                             "specialised role, then use 'Make co-owner' if needed")
     conn = platform_db.get_db()
     try:
         c = conn.cursor()
@@ -2791,11 +2795,19 @@ def update_platform_admin(aid: int, body: dict, request: Request = None,
         target = _platform_admin_row(row)
         if target["owner"]:
             raise HTTPException(403, "The company owner account cannot be edited")
+        if target["role"] == "co_owner" and (claims.get("sa_role") or "full") != "owner":
+            # A co-owner can manage the specialised admins but never another
+            # owner-tier account -- only the founder may touch a co-owner row,
+            # which is also what keeps co-owners from turning on each other.
+            raise HTTPException(403, "Only the founder can modify a co-owner account")
         role = str(body.get("role") or target["role"]).strip()
         if role not in PLATFORM_ROLES:
             raise HTTPException(400, "Invalid platform role")
         if role == "full" and target["role"] != "full":
             raise HTTPException(400, "Full-access admins can no longer be assigned — choose a specialised role instead")
+        if role == "co_owner" and target["role"] != "co_owner":
+            raise HTTPException(400, "Co-owner status can only be granted via 'Make co-owner' "
+                                      "(requires the founder's password)")
         status = str(body.get("status") or target["status"]).strip()
         if status not in ("active", "suspended"):
             raise HTTPException(400, "Invalid status")
@@ -2812,6 +2824,72 @@ def update_platform_admin(aid: int, body: dict, request: Request = None,
         _audit(conn, claims, "platform_admin.update", "super_admin", aid,
                {"role": role, "status": status, "full_name": full_name})
         return {"ok": True, "id": aid, "role": role, "status": status}
+    finally:
+        conn.close()
+
+
+def _verify_founder_password(conn, claims, password: str) -> None:
+    """Step-up confirmation for granting/revoking co-owner status: the
+    founder must re-enter their own current password, not just hold a live
+    session token."""
+    if not password:
+        raise HTTPException(400, "Your current password is required to confirm this")
+    c = conn.cursor()
+    c.execute("SELECT password FROM super_admins WHERE id=%s", (claims.get("sub"),))
+    row = c.fetchone()
+    if not row or not verify_pw(row[0], password):
+        raise HTTPException(401, "Incorrect password")
+
+
+@router.post("/platform-admins/{aid}/co-owner", dependencies=[Depends(require_founder)])
+def promote_co_owner(aid: int, body: dict, claims=Depends(require_founder)):
+    """Grant co-owner status to an existing specialised admin. Founder-only,
+    step-up password required, capped at _MAX_CO_OWNERS."""
+    conn = platform_db.get_db()
+    try:
+        _verify_founder_password(conn, claims, str(body.get("password") or ""))
+        c = conn.cursor()
+        c.execute("SELECT id, role, owner_flag FROM super_admins WHERE id=%s", (aid,))
+        row = c.fetchone()
+        if not row:
+            raise HTTPException(404, "Platform admin not found")
+        if row[2] or row[1] in ("owner", "co_owner"):
+            raise HTTPException(400, "This account already holds owner-tier access")
+        if row[1] not in _ASSIGNABLE_PLATFORM_ROLES:
+            raise HTTPException(400, "Only a specialised admin can be promoted to co-owner")
+        c.execute("SELECT COUNT(*) FROM super_admins WHERE role='co_owner'")
+        if c.fetchone()[0] >= _MAX_CO_OWNERS:
+            raise HTTPException(400, f"Co-owner limit reached ({_MAX_CO_OWNERS})")
+        c.execute("UPDATE super_admins SET role='co_owner' WHERE id=%s", (aid,))
+        conn.commit()
+        _audit(conn, claims, "platform_admin.promote_co_owner", "super_admin", aid)
+        return {"ok": True, "id": aid, "role": "co_owner"}
+    finally:
+        conn.close()
+
+
+@router.post("/platform-admins/{aid}/co-owner/revoke", dependencies=[Depends(require_founder)])
+def revoke_co_owner(aid: int, body: dict, claims=Depends(require_founder)):
+    """Revoke co-owner status back to a specialised role. Founder-only,
+    step-up password required."""
+    conn = platform_db.get_db()
+    try:
+        _verify_founder_password(conn, claims, str(body.get("password") or ""))
+        fallback_role = str(body.get("fallback_role") or "").strip()
+        if fallback_role not in _ASSIGNABLE_PLATFORM_ROLES:
+            raise HTTPException(400, "A valid fallback role is required")
+        c = conn.cursor()
+        c.execute("SELECT id, role FROM super_admins WHERE id=%s", (aid,))
+        row = c.fetchone()
+        if not row:
+            raise HTTPException(404, "Platform admin not found")
+        if row[1] != "co_owner":
+            raise HTTPException(400, "This account is not a co-owner")
+        c.execute("UPDATE super_admins SET role=%s WHERE id=%s", (fallback_role, aid))
+        conn.commit()
+        _audit(conn, claims, "platform_admin.revoke_co_owner", "super_admin", aid,
+               {"fallback_role": fallback_role})
+        return {"ok": True, "id": aid, "role": fallback_role}
     finally:
         conn.close()
 

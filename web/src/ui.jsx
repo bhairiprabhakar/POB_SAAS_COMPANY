@@ -305,6 +305,7 @@ const SA_ROLE_LABELS = {
   campaign_admin: 'Campaign Admin',
   finance_admin: 'Finance Admin',
   verification_admin: 'Verification Admin',
+  platform_division_admin: 'Platform Division Admin',
 };
 
 function saRoleLabel(role) {

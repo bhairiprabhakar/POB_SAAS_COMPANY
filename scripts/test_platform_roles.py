@@ -224,6 +224,110 @@ def main():
                    json={"full_name": "Hacked"})
     check("cannot edit owner account", r.status_code == 403, f"{r.status_code}")
 
+    # ── 2b. Co-owner: founder-controlled backup owner ────────────────────────
+    section("2b. Co-owner (founder-controlled backup owner)")
+
+    # Dedicated admins for this section only -- never touches created_admins,
+    # which later sections rely on still holding their original roles.
+    co_src = {}
+    for role in ("campaign_admin", "finance_admin"):
+        r = client.post(f"{BASE}/platform-admins", headers=OA, json={
+            "username": f"co_src_{role}", "password": PASSWD,
+            "full_name": f"Co Src {role}", "role": role,
+        })
+        check(f"seed {role} for co-owner tests", ok(r), f"{r.status_code} {j(r)}")
+        co_src[role] = j(r).get("id")
+
+    promote_url = f"{BASE}/platform-admins/{co_src['campaign_admin']}/co-owner"
+
+    r = client.post(promote_url, headers=OA, json={"password": "wrong-password"})
+    check("promote with wrong founder password -> 401", r.status_code == 401, f"{r.status_code} {j(r)}")
+
+    r = client.post(promote_url, headers=OA, json={"password": PASSWD})
+    check("founder promotes campaign_admin to co-owner", ok(r), f"{r.status_code} {j(r)}")
+    check("promote response role=co_owner", j(r).get("role") == "co_owner", j(r))
+
+    r = client.get(f"{BASE}/platform-admins", headers=OA)
+    row = next((a for a in j(r)["items"] if a["id"] == co_src["campaign_admin"]), None)
+    check("co-owner shows role=co_owner in list", row and row["role"] == "co_owner", row)
+
+    r = client.post("/api/v1/auth/superadmin/login",
+                     json={"username": "co_src_campaign_admin", "password": PASSWD})
+    check("co-owner can login", ok(r), f"{r.status_code}")
+    co_token = j(r).get("access_token")
+    COA = {"Authorization": f"Bearer {co_token}"}
+
+    # Co-owner has full operational power -- same as owner/full -- exercised
+    # against a functional cross-division endpoint gated by require_sa_roles()
+    # (owner/full/co_owner only): listing every division's users.
+    r = client.get(f"{BASE}/divisions/{division_id}/users", headers=COA) if division_id else None
+    if division_id:
+        check("co-owner has full operational access (division users)", ok(r), f"{r.status_code} {j(r)}")
+
+    # Co-owner CAN manage the specialised admins, same as owner.
+    r = client.post(f"{BASE}/platform-admins", headers=COA, json={
+        "username": "co_owner_made_this", "password": PASSWD,
+        "full_name": "Made By Co-Owner", "role": "verification_admin",
+    })
+    check("co-owner can create a specialised admin", ok(r), f"{r.status_code} {j(r)}")
+    made_by_co_owner_id = j(r).get("id")
+
+    # Co-owner CANNOT touch the founder.
+    r = client.put(f"{BASE}/platform-admins/{owner_id}", headers=COA, json={"full_name": "Hacked"})
+    check("co-owner cannot edit the founder -> 403", r.status_code == 403, f"{r.status_code}")
+
+    # Seed a second co-owner to prove co-owners can't touch each other.
+    r = client.post(promote_url.replace(str(co_src["campaign_admin"]), str(co_src["finance_admin"])),
+                     headers=OA, json={"password": PASSWD})
+    check("founder promotes a second co-owner", ok(r), f"{r.status_code} {j(r)}")
+    r = client.put(f"{BASE}/platform-admins/{co_src['finance_admin']}", headers=COA,
+                   json={"full_name": "Hacked by peer co-owner"})
+    check("co-owner cannot edit another co-owner -> 403", r.status_code == 403, f"{r.status_code}")
+
+    # Co-owner cannot promote/revoke co-owner status themselves (founder-only).
+    r = client.post(f"{BASE}/platform-admins/{made_by_co_owner_id}/co-owner", headers=COA,
+                     json={"password": PASSWD})
+    check("co-owner cannot promote another admin to co-owner -> 403", r.status_code == 403, f"{r.status_code}")
+    r = client.post(f"{BASE}/platform-admins/{co_src['finance_admin']}/co-owner/revoke", headers=COA,
+                     json={"password": PASSWD, "fallback_role": "finance_admin"})
+    check("co-owner cannot revoke co-owner status -> 403", r.status_code == 403, f"{r.status_code}")
+
+    # Co-owner cap: 2 co-owners already exist: seed + promote 2 more distinct
+    # specialised admins to hit the cap of 3, then confirm a 4th is rejected.
+    cap_admins = []
+    for i in range(2):
+        r = client.post(f"{BASE}/platform-admins", headers=OA, json={
+            "username": f"co_cap_{i}", "password": PASSWD,
+            "full_name": f"Co Cap {i}", "role": "verification_admin",
+        })
+        cap_admins.append(j(r).get("id"))
+    r = client.post(f"{BASE}/platform-admins/{cap_admins[0]}/co-owner", headers=OA, json={"password": PASSWD})
+    check("promote 3rd co-owner (at cap)", ok(r), f"{r.status_code} {j(r)}")
+    r = client.post(f"{BASE}/platform-admins/{cap_admins[1]}/co-owner", headers=OA, json={"password": PASSWD})
+    check("promoting a 4th co-owner is rejected -> 400", r.status_code == 400, f"{r.status_code} {j(r)}")
+
+    # Revoke: wrong password rejected, then correct password reverts the role
+    # and the account loses the operational co-owner bypass.
+    revoke_url = f"{BASE}/platform-admins/{co_src['campaign_admin']}/co-owner/revoke"
+    r = client.post(revoke_url, headers=OA, json={"password": "wrong", "fallback_role": "campaign_admin"})
+    check("revoke with wrong founder password -> 401", r.status_code == 401, f"{r.status_code} {j(r)}")
+
+    r = client.post(revoke_url, headers=OA, json={"password": PASSWD, "fallback_role": "campaign_admin"})
+    check("founder revokes co-owner status", ok(r), f"{r.status_code} {j(r)}")
+    check("revoke response role=campaign_admin", j(r).get("role") == "campaign_admin", j(r))
+
+    # Access tokens carry sa_role as a static claim baked in at login (not
+    # re-checked against the DB per request -- a pre-existing property of
+    # every superadmin role, not specific to co-owner), so proving the
+    # revocation actually took effect means logging in fresh rather than
+    # reusing the old co-owner-era token.
+    r = client.post("/api/v1/auth/superadmin/login",
+                     json={"username": "co_src_campaign_admin", "password": PASSWD})
+    check("revoked account can still login", ok(r), f"{r.status_code}")
+    fresh_token = j(r).get("access_token")
+    r = client.get(f"{BASE}/platform-admins", headers={"Authorization": f"Bearer {fresh_token}"})
+    check("fresh login after revoke loses platform-admins access -> 403", r.status_code == 403, f"{r.status_code}")
+
     # ── 3. Role login returns correct role ────────────────────────────────────
     section("3. Role-based login and token claims")
     role_tokens = {}

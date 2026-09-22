@@ -74,11 +74,17 @@ def require_superadmin(claims: dict = Depends(get_claims)) -> dict:
 #   platform_division_admin -> create and manage divisions (tenant lifecycle)
 #     (named to avoid colliding with the unrelated tenant-level "division_admin"
 #     role, which lives inside each tenant's own database)
-_FULL_ROLES = {"owner", "full"}
+#   co_owner              -> founder-designated backup owner (up to 3): full
+#     operational power identical to owner/full, PLUS the ability to manage
+#     the specialised admins above. Deliberately NOT in _FULL_ROLES' sibling
+#     "who can manage other platform admins" gate alone -- see require_founder
+#     -- so a co-owner can never touch the founder's account or another
+#     co-owner's, only the founder (owner) can grant/revoke co-owner status.
+_FULL_ROLES = {"owner", "full", "co_owner"}
 
 
 def require_sa_roles(*roles: str):
-    """Restrict a super-admin route to the given roles (owner/full always pass)."""
+    """Restrict a super-admin route to the given roles (owner/full/co_owner always pass)."""
     allowed = set(roles)
 
     def _dep(claims: dict = Depends(require_superadmin)) -> dict:
@@ -94,9 +100,20 @@ def require_sa_roles(*roles: str):
 
 
 def require_owner(claims: dict = Depends(require_superadmin)) -> dict:
-    """Only the company main person (owner) may manage platform admins."""
-    if (claims.get("sa_role") or "full") != "owner":
+    """The company main person (owner) or a founder-designated co-owner may
+    manage the specialised platform admins."""
+    if (claims.get("sa_role") or "full") not in ("owner", "co_owner"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Owner access required")
+    return claims
+
+
+def require_founder(claims: dict = Depends(require_superadmin)) -> dict:
+    """Only the original founding owner account -- never a co-owner -- may
+    grant/revoke co-owner status or touch another owner-tier account. This is
+    what keeps a co-owner from ever expanding the co-owner roster or locking
+    out the founder or a peer co-owner."""
+    if (claims.get("sa_role") or "full") != "owner":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Founder access required")
     return claims
 
 
