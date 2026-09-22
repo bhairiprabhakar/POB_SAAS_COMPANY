@@ -9,7 +9,7 @@ import {
 
 const BLANK = {
   name: '', shop_name: '', owner_name: '', mobile: '', alternate_mobile: '', email: '',
-  gst: '', dl_number: '', upi_id: '', ocid: '', doctor_name: '', category: '', area: '',
+  gst: '', dl_number: '', ocid: '', doctor_name: '', category: '', area: '',
   address: '', city: '', district: '', state: '', pin: '', latitude: '', longitude: '',
   attachment_type: '', potential_category: '', institution_name: '', institution_type: '',
   institution_department: '', institution_contact_person: '', institution_address: '',
@@ -27,7 +27,6 @@ const REG_FIELDS = [
   { name: 'email', label: 'Email', type: 'email' },
   { name: 'gst', label: 'GST' },
   { name: 'dl_number', label: 'DL number' },
-  { name: 'upi_id', label: 'UPI ID' },
   { name: 'ocid', label: 'OCID' },
   { name: 'doctor_name', label: 'Doctor' },
   { name: 'category', label: 'Category' },
@@ -331,7 +330,7 @@ function ChemistProfile({ data }) {
           {d.owner_name && <div className="fact-pill"><span>Owner</span><strong>{d.owner_name}</strong></div>}
           {d.visit_frequency && <div className="fact-pill"><span>Visit</span><strong>{d.visit_frequency}</strong></div>}
           {visits.count > 0 && <div className="fact-pill"><span>Visits</span><strong>{visits.count}{visits.last_visit ? ` · ${fmtDate(visits.last_visit)}` : ''}</strong></div>}
-          {d.upi_id && <div className="fact-pill"><span>UPI</span><strong>{d.upi_id}</strong></div>}
+          {d.upi_id && <div className="fact-pill"><span>UPI</span><strong>{d.upi_id}</strong> {d.upi_confirmed ? <Badge tone="green">confirmed</Badge> : <Badge tone="amber">not confirmed</Badge>}</div>}
         </div>
       </div>
 
@@ -359,11 +358,19 @@ function ChemistProfile({ data }) {
       <div className="detail-grid">
         {[['Name', d.name], ['Shop name', d.shop_name], ['Owner', d.owner_name],
           ['Mobile', d.mobile], ['Alt mobile', d.alternate_mobile], ['Email', d.email],
-          ['GST', d.gst], ['DL number', d.dl_number], ['UPI', d.upi_id],
+          ['GST', d.gst], ['DL number', d.dl_number],
           ['OCID', d.ocid], ['Doctor', d.doctor_name], ['Category', d.category],
           ['Area', d.area]].map(([k, v]) => (
           <div className="detail-item" key={k}><span className="detail-label">{k}</span><span className="detail-value">{v || '—'}</span></div>
         ))}
+        <div className="detail-item">
+          <span className="detail-label">UPI</span>
+          <span className="detail-value">
+            {d.upi_id
+              ? <>{d.upi_id} {d.upi_confirmed ? <Badge tone="green">confirmed</Badge> : <Badge tone="amber">not confirmed</Badge>}</>
+              : '—'}
+          </span>
+        </div>
       </div>
 
       <h4 className="section-title">Address &amp; location</h4>
@@ -914,6 +921,11 @@ function RegisterModal({ row, onClose, onSaved }) {
             </Field>
           ))}
         </div>
+        <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+          UPI / gratification payout number isn't captured here — use <strong>Scan UPI</strong> on
+          this chemist's row to scan their QR code (or enter the VPA manually), so it's verified
+          against their name before any payout can use it.
+        </p>
 
         <h4 className="section-title" style={{ marginTop: 18 }}>Address & location</h4>
         <div className="grid-2">

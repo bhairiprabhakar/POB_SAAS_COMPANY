@@ -5,7 +5,7 @@ import { Field, Modal, PageHeader, Select, TextInput, toast } from '../../ui';
 
 const BLANK = {
   name: '', shop_name: '', owner_name: '', mobile: '', alternate_mobile: '', email: '',
-  gst: '', dl_number: '', upi_id: '', ocid: '', doctor_name: '', category: '', area: '',
+  gst: '', dl_number: '', ocid: '', doctor_name: '', category: '', area: '',
   address: '', city: '', district: '', state: '', pin: '', latitude: '', longitude: '',
   attachment_type: '', potential_category: '', institution_name: '', institution_type: '',
   institution_department: '', institution_contact_person: '', institution_address: '',
@@ -25,7 +25,6 @@ const FIELDS = [
   { name: 'email', label: 'Email', type: 'email' },
   { name: 'gst', label: 'GST number' },
   { name: 'dl_number', label: 'Drug licence number' },
-  { name: 'upi_id', label: 'UPI / gratification number' },
   { name: 'ocid', label: 'Doctor OCID' },
   { name: 'doctor_name', label: 'Referring doctor' },
   { name: 'category', label: 'Category' },
@@ -268,6 +267,11 @@ export default function RegisterChemist({ demo }) {
                   </Field>
                 ))}
               </div>
+              <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                UPI / gratification payout number isn't captured here — once this chemist is saved,
+                use <strong>Scan UPI</strong> on their record to scan their QR code (or enter the VPA
+                manually), so it's verified against their name before any payout can use it.
+              </p>
             </>
           )}
 
