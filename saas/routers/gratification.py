@@ -323,15 +323,24 @@ def approve_cashback(gid: int, body: dict, ctx: TenantContext = Depends(require_
     c = conn.cursor()
     if g["type_code"] not in ("cashback", "upi", "reward_points"):
         raise HTTPException(400, "only cashback/upi/reward-points gratifications can be approved")
-    upi_id = body.get("upi_id") or g.get("upi_id")
-    if g["type_code"] in ("cashback", "upi") and not upi_id:
-        # Fall back to the chemist's confirmed UPI captured via the QR flow,
-        # so approval carries the same verified address payout will use.
+    upi_id = None
+    if g["type_code"] in ("cashback", "upi"):
+        # Payout always uses the chemist's own confirmed UPI -- captured by
+        # scanning their QR (or manual entry) on the chemist record, never a
+        # free-typed address at approval time. That's what stops anyone with
+        # approve rights from silently redirecting a cashback payout to an
+        # address never verified against this chemist's identity.
         c.execute("SELECT ch.upi_id FROM pob_activities pa "
                   "JOIN chemists ch ON ch.id=pa.chemist_id "
                   "WHERE pa.id=%s AND ch.upi_id IS NOT NULL AND ch.upi_confirmed", (g["pob_id"],))
         row = c.fetchone()
-        upi_id = (row[0] if row else None) or upi_id
+        upi_id = row[0] if row else None
+        if not upi_id:
+            raise HTTPException(
+                409,
+                "This chemist has no confirmed UPI on file yet -- scan or enter their UPI QR "
+                "on the chemist record first, then approve this gratification.",
+            )
     if upi_id:
         c.execute("UPDATE gratifications SET status='approved', upi_id=%s WHERE id=%s",
                   (upi_id, gid))

@@ -340,8 +340,19 @@ def main():
         check("gratification created", r.status_code == 200 and len(r.json()["items"]) == 1)
         gid = r.json()["items"][0]["id"]
 
+        # Cashback payout must use the chemist's own confirmed UPI -- a
+        # free-typed upi_id at approval time is no longer accepted (would let
+        # anyone with approve rights silently redirect a payout to an address
+        # never verified against this chemist's identity).
         r = client.post(f"{BASE}/gratification/{gid}/approve", headers=ADM, json={"upi_id": "ashok@upi"})
-        check("cashback approved", r.status_code == 200 and r.json()["status"] == "approved", r.text[:200])
+        check("approve rejected -- chemist has no confirmed UPI yet", r.status_code == 409, f"{r.status_code} {r.text[:200]}")
+
+        r = client.post(f"{BASE}/chemists/{chemist_id}/upi", headers=MR,
+                        json={"upi_id": "ashok@upi", "source": "manual"})
+        check("MR captures + confirms the chemist's UPI", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
+
+        r = client.post(f"{BASE}/gratification/{gid}/approve", headers=ADM, json={})
+        check("cashback approved using the chemist's confirmed UPI", r.status_code == 200 and r.json()["status"] == "approved", r.text[:200])
 
         r = client.post(f"{BASE}/gratification/{gid}/pay", headers=ADM, json={"payment_ref": "UTR-123456"})
         check("cashback paid", r.status_code == 200 and r.json()["status"] == "completed", r.text[:200])

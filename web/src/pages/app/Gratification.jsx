@@ -116,7 +116,13 @@ function GratificationDetail({ gid, onClose, onDone }) {
                 <button className="btn" onClick={() => setModal('ack')}>Acknowledge &amp; complete</button>
               )}
               {perms.has('gratification.approve') && ['cashback', 'upi', 'reward_points'].includes(g.type_code) && g.status === 'eligible' && (
-                <button className="btn btn-primary" onClick={() => setModal('approve')}>Approve cashback</button>
+                <button className="btn btn-primary" onClick={() => setModal('approve')}
+                  disabled={['cashback', 'upi'].includes(g.type_code) && !g.chemist_upi_confirmed}
+                  title={['cashback', 'upi'].includes(g.type_code) && !g.chemist_upi_confirmed
+                    ? 'Scan or enter this chemist\'s UPI below first — payout only ever uses their confirmed address'
+                    : undefined}>
+                  Approve cashback
+                </button>
               )}
               {perms.has('gratification.pay') && ['cashback', 'upi', 'reward_points'].includes(g.type_code) && g.status === 'approved' && (
                 <button className="btn btn-primary" onClick={() => setModal('pay')}>Mark paid</button>
@@ -205,7 +211,7 @@ function GratificationDetail({ gid, onClose, onDone }) {
           footer={<><button className="btn" onClick={() => setModal(null)}>Cancel</button>
             <button className="btn btn-primary" form="cb-approve-form" disabled={busy}>Approve</button></>}>
           <SimpleForm id="cb-approve-form" fields={{
-            upi_id: { label: 'UPI ID' }, note: { label: 'Note' },
+            note: { label: 'Note' },
           }} onSubmit={(body) => act(() => api(`/api/v1/gratification/${gid}/approve`, { method: 'POST', body }), 'Cashback approved')} />
         </Modal>
       )}

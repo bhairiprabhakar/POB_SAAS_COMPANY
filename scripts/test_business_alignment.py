@@ -393,8 +393,32 @@ def main():
     conn.commit()
     conn.close()
 
-    r = client.post(f"/api/v1/gratification/{GID}/approve", headers=T1, json={})
-    check("cashback approval falls back to confirmed chemist UPI", ok(r), f"{r.status_code} {j(r)}")
+    r = client.post(f"/api/v1/gratification/{GID}/approve", headers=T1, json={"upi_id": "attacker@upi"})
+    check("a free-typed upi_id override is ignored -- payout still uses the confirmed chemist UPI",
+          ok(r) and j(r).get("status") == "approved", f"{r.status_code} {j(r)}")
+    r = client.get(f"/api/v1/gratification/{GID}", headers=T1)
+    check("approval did not adopt the attacker-supplied UPI",
+          j(r).get("upi_id") == "shop123@okaxis", j(r))
+
+    conn = provision_pool_conn(tenant_db1)
+    cur = conn.cursor()
+    cur.execute("""INSERT INTO chemists (name, shop_name, city, state, pin, category, division_id)
+                   VALUES ('No UPI Chemist','No UPI Shop','Pune','Maharashtra','411001','Retail',%s)
+                   RETURNING id""", (admin_div,))
+    NO_UPI_CHEM = cur.fetchone()[0]
+    cur.execute("""INSERT INTO pob_activities (user_id, campaign_id, product_id, chemist_id,
+                   quantity, ptr, mrp, invoice_amount, pob_amount, status)
+                   VALUES (%s,%s,%s,%s,10,20,25,250,250,'pending_verification') RETURNING id""",
+                (MR_ID, C1, P1, NO_UPI_CHEM))
+    NO_UPI_POB = cur.fetchone()[0]
+    cur.execute("""INSERT INTO gratifications (pob_id, user_id, campaign_id, type_code, scheme_value)
+                   VALUES (%s,%s,%s,'cashback',250) RETURNING id""", (NO_UPI_POB, MR_ID, C1))
+    NO_UPI_GID = cur.fetchone()[0]
+    conn.commit()
+    conn.close()
+    r = client.post(f"/api/v1/gratification/{NO_UPI_GID}/approve", headers=T1, json={"upi_id": "attacker@upi"})
+    check("approval is rejected when the chemist has no confirmed UPI, even with an override supplied",
+          r.status_code == 409, f"{r.status_code} {j(r)}")
 
     r = client.get(f"/api/v1/gratification/{GID}", headers=T1)
     g = j(r)
