@@ -258,6 +258,29 @@ export function Icon({ name, size = 16, className = '' }) {
   );
 }
 
+// The division console (/superadmin/divisions/:id) is a platform_division_admin
+// (+ owner/full/co_owner) management surface -- its own GET is gated that way,
+// and most of what it renders (Edit division, Activate/Suspend/Deactivate,
+// Users/Roles/Credits tabs) are actions those specialised roles can't use
+// either. Cross-division pages (Campaigns/Gratification/POB/Analytics/...)
+// still want to show which division a row belongs to, so this renders a real
+// link only when the viewer could actually open that console, and otherwise
+// falls back to the same visual as plain (non-navigating) content -- instead
+// of every such page repeating that role check and 403ing on click.
+const DIVISION_CONSOLE_ROLES = new Set(['owner', 'full', 'co_owner', 'platform_division_admin']);
+
+export function canOpenDivisionConsole() {
+  return DIVISION_CONSOLE_ROLES.has(saRole());
+}
+
+export function DivisionLink({ id, tab, className, onClick, children }) {
+  if (!canOpenDivisionConsole()) {
+    return <span className={className}>{children}</span>;
+  }
+  const to = `/superadmin/divisions/${id}${tab ? `?tab=${tab}` : ''}`;
+  return <Link to={to} className={className} onClick={onClick}>{children}</Link>;
+}
+
 const TONES = {
   active: 'green', approved: 'green', verified: 'green', delivered: 'green',
   completed: 'green', paid: 'green', redeemed: 'green', sent: 'blue',

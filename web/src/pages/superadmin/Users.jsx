@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../../api';
 import {
-  Badge, EmptyState, ErrorBox, PageHeader, SearchBox, Select,
+  Badge, DivisionLink, EmptyState, ErrorBox, PageHeader, SearchBox, Select,
   StatCard, StatSkeleton, Table, TableSkeleton, toast, useAsync,
 } from '../../ui';
 
@@ -43,8 +43,8 @@ export default function SuperUsers() {
     { key: 'full_name', label: 'Employee', render: (r) =>
       <><strong>{r.full_name}</strong> <span className="muted">@{r.username}</span></> },
     { key: 'division_name', label: 'Division', render: (r) =>
-      <Link to={`/superadmin/divisions/${r.division_id}`} onClick={(e) => e.stopPropagation()}
-        className="chip">{r.division_name}</Link> },
+      <DivisionLink id={r.division_id} onClick={(e) => e.stopPropagation()}
+        className="chip">{r.division_name}</DivisionLink> },
     { key: 'role', label: 'Role', render: (r) => <Badge tone="blue">{r.role}</Badge> },
     { key: 'region', label: 'Region', render: (r) => r.region || '—' },
     { key: 'status', label: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },

@@ -2,8 +2,8 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, downloadFile } from '../../api';
 import {
-  BarChart, Badge, DashHero, ErrorBox, MetricTile, PanelCard, PeriodSelect,
-  ProgressBar, Spinner, Table, useAsync,
+  BarChart, Badge, DashHero, DivisionLink, ErrorBox, MetricTile, PanelCard, PeriodSelect,
+  ProgressBar, Spinner, Table, canOpenDivisionConsole, useAsync,
 } from '../../ui';
 
 const PERIODS = [
@@ -85,10 +85,10 @@ export default function Costing() {
 
   const divCols = [
     { key: 'name', label: 'Division', render: (r) => (
-      <Link to={`/superadmin/divisions/${r.division_id}`} className="cell-link">
+      <DivisionLink id={r.division_id} className="cell-link">
         <strong>{r.name}</strong>
         <span className="muted cell-sub">{r.code}</span>
-      </Link>
+      </DivisionLink>
     ) },
     { key: 'calls', label: 'Calls', render: (r) => fmtNum(r.calls), thClass: 'num' },
     { key: 'input', label: 'Input tokens', render: (r) => fmtTokens(r.input_tokens), thClass: 'num' },
@@ -109,9 +109,9 @@ export default function Costing() {
         <span className="muted cell-sub">@{r.username} · {r.role}</span></div>
     ) },
     { key: 'division', label: 'Division', render: (r) => (
-      <Link to={`/superadmin/divisions/${r.division_id}`} className="cell-link">
+      <DivisionLink id={r.division_id} className="cell-link">
         {r.division_name}<span className="muted cell-sub">{r.division_code}</span>
-      </Link>
+      </DivisionLink>
     ) },
     { key: 'calls', label: 'Calls', render: (r) => fmtNum(r.calls), thClass: 'num' },
     { key: 'input', label: 'Input', render: (r) => fmtTokens(r.input_tokens), thClass: 'num' },
@@ -179,7 +179,7 @@ export default function Costing() {
 
         <PanelCard title="Cost by division" span="2"
           sub="Every division tenant's extraction spend, ranked by cost" action={
-            <Link className="btn btn-sm" to="/superadmin/divisions">Divisions</Link>}>
+            canOpenDivisionConsole() ? <Link className="btn btn-sm" to="/superadmin/divisions">Divisions</Link> : null}>
           <Table cols={divCols} rows={divisions} keyOf={(r) => r.division_id}
             empty="No extraction usage recorded yet" />
         </PanelCard>

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, saRole } from '../../api';
 import {
-  Badge, EmptyState, ErrorBox, PageHeader, StatCard, StatSkeleton,
+  Badge, DivisionLink, EmptyState, ErrorBox, PageHeader, StatCard, StatSkeleton,
   Table, TableSkeleton, Tabs, toast, useAsync,
 } from '../../ui';
 
@@ -44,8 +44,8 @@ export default function Gratification() {
   const cols = [
     { key: 'id', label: 'Grant', render: (r) => <strong>G#{r.id}</strong> },
     { key: 'division', label: 'Division', render: (r) =>
-      <Link to={`/superadmin/divisions/${r.division_id}`} onClick={(e) => e.stopPropagation()}
-        className="chip">{r.division_name}</Link> },
+      <DivisionLink id={r.division_id} onClick={(e) => e.stopPropagation()}
+        className="chip">{r.division_name}</DivisionLink> },
     { key: 'user_name', label: 'User' },
     { key: 'campaign_name', label: 'Campaign' },
     { key: 'type_code', label: 'Type', render: (r) => <Badge tone="blue">{String(r.type_code || '').replaceAll('_', ' ')}</Badge> },

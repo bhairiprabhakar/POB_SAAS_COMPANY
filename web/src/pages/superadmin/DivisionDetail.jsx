@@ -3,7 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, fmtDateTime, saRole } from '../../api';
 import {
   Badge, ErrorBox, Field, Modal, PageHeader, SearchBox, Select, Skeleton, StatCard,
-  StatSkeleton, StatusBadge, Table, TableSkeleton, Tabs, TextArea, TextInput, toast, useAsync,
+  StatSkeleton, StatusBadge, Table, TableSkeleton, Tabs, TextArea, TextInput, canOpenDivisionConsole, toast, useAsync,
 } from '../../ui';
 import { CreditsPanel } from './DivisionCredits';
 
@@ -40,7 +40,7 @@ export default function DivisionDetail() {
     return (
       <div>
         <PageHeader title="Division" subtitle="Loading details…"
-          actions={<Link className="btn" to="/superadmin/divisions">← Back to divisions</Link>} />
+          actions={<Link className="btn" to={canOpenDivisionConsole() ? '/superadmin/divisions' : '/superadmin'}>← Back</Link>} />
         <StatSkeleton n={3} />
         <div className="card" style={{ marginTop: 12 }}>
           {Array.from({ length: 5 }).map((_, i) => (
@@ -52,7 +52,19 @@ export default function DivisionDetail() {
       </div>
     );
   }
-  if (error) return <ErrorBox error={error} onRetry={run} />;
+  if (error) {
+    return (
+      <div>
+        <ErrorBox error={error} onRetry={run} />
+        {!canOpenDivisionConsole() && (
+          <p className="muted" style={{ marginTop: 8 }}>
+            This division console is only available to the platform owner and platform division
+            admins. <Link to="/superadmin">Go to your dashboard →</Link>
+          </p>
+        )}
+      </div>
+    );
+  }
 
   const c = data;
   const act = async (fn, msg) => {

@@ -2,8 +2,8 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, getSession } from '../../api';
 import {
-  DashHero, DonutChart, DonutLegend, ErrorBox, InsightList, LineChart, MetricTile,
-  PanelCard, PeriodSelect, ProgressBar, Spinner, Table, useAsync,
+  DashHero, DivisionLink, DonutChart, DonutLegend, ErrorBox, InsightList, LineChart, MetricTile,
+  PanelCard, PeriodSelect, ProgressBar, Spinner, Table, canOpenDivisionConsole, useAsync,
 } from '../../ui';
 
 const PERIODS = [
@@ -90,10 +90,10 @@ export default function SuperDashboard() {
       key: 'name',
       label: 'Division',
       render: (r) => (
-        <Link to={`/superadmin/divisions/${r.division_id}?tab=campaigns`} className="cell-link">
+        <DivisionLink id={r.division_id} tab="campaigns" className="cell-link">
           <strong>{r.name}</strong>
           <span className="muted cell-sub">{r.code}</span>
-        </Link>
+        </DivisionLink>
       ),
     },
     { key: 'users', label: 'Users', render: (r) => <>{fmtNum(r.active_users)}<span className="muted"> / {fmtNum(r.users)}</span></> },
@@ -146,7 +146,8 @@ export default function SuperDashboard() {
         </PanelCard>
 
         <PanelCard title="Value by division" sub="Share of total POB value"
-          action={<Link className="btn-link" to="/superadmin/divisions">View all →</Link>}>
+          action={canOpenDivisionConsole()
+            ? <Link className="btn-link" to="/superadmin/divisions">View all →</Link> : null}>
           {valueSegs.length ? (
             <div className="donut-panel">
               <DonutChart segments={valueSegs} size={158} thickness={22}
@@ -158,7 +159,8 @@ export default function SuperDashboard() {
 
         <PanelCard title="Division performance" span="2"
           sub="Ranked by POB value — approval bar shows verified vs decided"
-          action={<Link className="btn-link" to="/superadmin/divisions">Manage divisions →</Link>}>
+          action={canOpenDivisionConsole()
+            ? <Link className="btn-link" to="/superadmin/divisions">Manage divisions →</Link> : null}>
           <Table cols={cols} rows={rows.slice(0, 12)} keyOf={(r) => r.division_id}
             empty="No provisioned divisions yet" />
         </PanelCard>

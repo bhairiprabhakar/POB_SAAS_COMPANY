@@ -2,8 +2,8 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, saRole } from '../../api';
 import {
-  BarChart, DashHero, DonutChart, DonutLegend, ErrorBox, InsightList, MetricTile,
-  PanelCard, PeriodSelect, ProgressBar, RankList, Spinner, Table, Tabs, useAsync,
+  BarChart, DashHero, DivisionLink, DonutChart, DonutLegend, ErrorBox, InsightList, MetricTile,
+  PanelCard, PeriodSelect, ProgressBar, RankList, Spinner, Table, Tabs, canOpenDivisionConsole, useAsync,
 } from '../../ui';
 
 const PERIODS = [
@@ -112,10 +112,10 @@ export default function SuperAnalytics() {
 
   const cols = [
     { key: 'name', label: 'Division', render: (r) => (
-      <Link to={`/superadmin/divisions/${r.division_id}?tab=campaigns`} className="cell-link">
+      <DivisionLink id={r.division_id} tab="campaigns" className="cell-link">
         <strong>{r.name}</strong>
         <span className="muted cell-sub">{r.code}</span>
-      </Link>
+      </DivisionLink>
     ) },
     { key: 'users', label: 'Users', render: (r) => <>{fmtNum(r.active_users)}<span className="muted"> / {fmtNum(r.users)}</span></> },
     { key: 'pobs', label: 'POBs', render: (r) => fmtNum(r.pobs) },
@@ -161,7 +161,8 @@ export default function SuperAnalytics() {
         </PanelCard>
 
         <PanelCard title="Division health" sub="How far each division has got"
-          action={<Link className="btn btn-sm" to="/superadmin/divisions">Divisions</Link>}>
+          action={canOpenDivisionConsole()
+            ? <Link className="btn btn-sm" to="/superadmin/divisions">Divisions</Link> : null}>
           {healthSegs.length ? (
             <div className="donut-panel">
               <DonutChart segments={healthSegs} size={150} thickness={22}
@@ -298,11 +299,10 @@ export default function SuperAnalytics() {
                       <Table
                         cols={[
                           { key: 'campaign', label: 'Campaign', render: (r) => (
-                            <Link to={`/superadmin/divisions/${r.division_id}?tab=campaigns`}
-                              className="cell-link">
+                            <DivisionLink id={r.division_id} tab="campaigns" className="cell-link">
                               <strong>{r.campaign_name}</strong>
                               <span className="muted cell-sub">{r.division_code}</span>
-                            </Link>
+                            </DivisionLink>
                           ) },
                           { key: 'verdict', label: '', render: (r) => (
                             <span className={`badge badge-${r.verdict === 'profit' ? 'green' : r.verdict === 'loss' ? 'red' : 'gray'}`}

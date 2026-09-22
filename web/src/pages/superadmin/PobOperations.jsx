@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, saRole } from '../../api';
 import {
-  Badge, EmptyState, ErrorBox, Field, Modal, PageHeader, Select, StatCard,
+  Badge, DivisionLink, EmptyState, ErrorBox, Field, Modal, PageHeader, Select, StatCard,
   StatSkeleton, Table, TableSkeleton, TextArea, toast, useAsync,
 } from '../../ui';
 
@@ -50,8 +50,8 @@ export default function PobOperations() {
   const cols = [
     { key: 'id', label: 'POB', render: (r) => <strong>#{r.id}</strong> },
     { key: 'division', label: 'Division', render: (r) =>
-      <Link to={`/superadmin/divisions/${r.division_id}`} onClick={(e) => e.stopPropagation()}
-        className="chip">{r.division_name}</Link> },
+      <DivisionLink id={r.division_id} onClick={(e) => e.stopPropagation()}
+        className="chip">{r.division_name}</DivisionLink> },
     { key: 'user_name', label: 'Submitted by' },
     { key: 'campaign_name', label: 'Campaign' },
     { key: 'chemist_name', label: 'Chemist' },

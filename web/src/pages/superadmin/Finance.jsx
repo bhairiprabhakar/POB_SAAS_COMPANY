@@ -2,8 +2,8 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../api';
 import {
-  Badge, BarChart, DashHero, DonutChart, DonutLegend, EmptyState, ErrorBox, InsightList,
-  MetricTile, PanelCard, PeriodSelect, ProgressBar, Spinner, Table, useAsync,
+  Badge, BarChart, DashHero, DivisionLink, DonutChart, DonutLegend, EmptyState, ErrorBox, InsightList,
+  MetricTile, PanelCard, PeriodSelect, ProgressBar, Spinner, Table, canOpenDivisionConsole, useAsync,
 } from '../../ui';
 
 const PERIODS = [
@@ -155,10 +155,10 @@ export default function SuperFinance() {
 
   const divCols = [
     { key: 'name', label: 'Division', render: (r) => (
-      <Link to={`/superadmin/divisions/${r.division_id}?tab=gratification`} className="cell-link">
+      <DivisionLink id={r.division_id} tab="gratification" className="cell-link">
         <strong>{r.name}</strong>
         <span className="muted cell-sub">{r.code}</span>
-      </Link>
+      </DivisionLink>
     ) },
     { key: 'verified_value', label: 'Cleared claim value', render: (r) => fmtShort(r.verified_value), thClass: 'num' },
     { key: 'liability', label: 'Payout liability', render: (r) => <strong>{fmtShort(r.liability)}</strong>, thClass: 'num' },
@@ -241,7 +241,8 @@ export default function SuperFinance() {
 
         <PanelCard title="Finance by division" span="2"
           sub="How much each division has committed, paid and cleared"
-          action={<Link className="btn btn-sm" to="/superadmin/divisions">Divisions</Link>}>
+          action={canOpenDivisionConsole()
+            ? <Link className="btn btn-sm" to="/superadmin/divisions">Divisions</Link> : null}>
           {rows.length
             ? <Table cols={divCols} rows={rows} keyOf={(r) => r.division_id}
                 empty="No provisioned divisions yet" />

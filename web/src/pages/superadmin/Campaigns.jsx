@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../../api';
 import {
-  Badge, EmptyState, ErrorBox, Field, Modal, PageHeader, SearchBox,
+  Badge, DivisionLink, EmptyState, ErrorBox, Field, Modal, PageHeader, SearchBox,
   StatCard, StatSkeleton, Table, TableSkeleton, Tabs, TextArea, toast, useAsync,
 } from '../../ui';
 
@@ -102,13 +102,12 @@ export default function SuperCampaigns() {
   const cols = [
     { key: 'id', label: 'ID', render: (r) => <strong>#{r.id}</strong> },
     { key: 'name', label: 'Campaign', render: (r) =>
-      <Link to={`/superadmin/divisions/${r.division_id}`} onClick={(e) => e.stopPropagation()}
-        title="Open the division console">
+      <DivisionLink id={r.division_id} onClick={(e) => e.stopPropagation()}>
         {r.name}<br /><span className="muted">{r.brand_names?.length ? r.brand_names.join(', ') : (r.brand_name || '')}</span>
-      </Link> },
+      </DivisionLink> },
     { key: 'division_name', label: 'Division', render: (r) =>
-      <Link to={`/superadmin/divisions/${r.division_id}`} onClick={(e) => e.stopPropagation()}
-        className="chip">{r.division_name}</Link> },
+      <DivisionLink id={r.division_id} onClick={(e) => e.stopPropagation()}
+        className="chip">{r.division_name}</DivisionLink> },
     { key: 'status', label: 'Status', render: (r) => <Badge tone={r.status}>{r.status.replaceAll('_', ' ')}</Badge> },
     { key: 'product_count', label: 'Products', render: (r) => r.product_count ?? '—' },
     { key: 'pob_count', label: 'POBs', render: (r) => r.pob_count ?? '—' },
