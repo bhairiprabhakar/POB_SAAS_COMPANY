@@ -29,6 +29,10 @@ const ROLE_OPTIONS = [
 
 const TONES = { full: 'blue', campaign_admin: 'teal', finance_admin: 'green', verification_admin: 'amber', platform_division_admin: 'teal', co_owner: 'red' };
 const MAX_CO_OWNERS = 3;
+// Only a specialised admin can be promoted to co-owner -- matches the
+// backend's _ASSIGNABLE_PLATFORM_ROLES (excludes the legacy 'full' role,
+// which the promote endpoint rejects with 400).
+const PROMOTABLE_ROLES = new Set(ROLE_OPTIONS.map((o) => o.value));
 
 export default function PlatformAdmins() {
   const me = saRole();
@@ -120,7 +124,7 @@ export default function PlatformAdmins() {
             {me === 'owner' && r.role === 'co_owner' && (
               <button className="btn btn-sm" onClick={() => setRevoking(r)}>Revoke co-owner</button>
             )}
-            {me === 'owner' && r.role !== 'co_owner' && coOwnerCount < MAX_CO_OWNERS && (
+            {me === 'owner' && PROMOTABLE_ROLES.has(r.role) && coOwnerCount < MAX_CO_OWNERS && (
               <button className="btn btn-sm" onClick={() => setPromoting(r)}>Make co-owner</button>
             )}
           </span>

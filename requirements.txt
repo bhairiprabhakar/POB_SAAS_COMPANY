@@ -1,6 +1,11 @@
-fastapi>=0.115,<1.0
+fastapi>=0.115,<0.116        # pinned: 0.13x/0.14x introduced a lazy include_router() path
+                              # (fastapi.routing._IncludedRouter) that silently drops routes
+                              # registered on a router after it was first wrapped -- confirmed via
+                              # this app's own routers (e.g. superadmin.router, mfa.router) landing
+                              # 404/405 in production while working fine under TestClient. Do not
+                              # loosen this cap without re-verifying every router's route count.
 uvicorn[standard]>=0.30
-starlette>=0.38
+starlette>=0.46,<0.47         # matches the fastapi 0.115.x line's tested starlette version
 python-multipart>=0.0.9
 psycopg2-binary>=2.9
 werkzeug>=3.0               # password hashing (generate_password_hash/check_password_hash)
