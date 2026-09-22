@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import QRCode from 'qrcode';
 import { api, fmtDateTime } from '../../api';
 import {
   ErrorBox, Field, Modal, PageHeader, Select, Spinner, Tabs, TextInput,
@@ -30,6 +31,16 @@ function MfaTab() {
   const { data, loading, error, run } = useAsync(() => api('/api/v1/auth/mfa/status'));
   const [setup, setSetup] = useState(null);
   const [code, setCode] = useState('');
+  const [qrDataUrl, setQrDataUrl] = useState(null);
+
+  useEffect(() => {
+    if (!setup?.otpauth_uri) { setQrDataUrl(null); return; }
+    let cancelled = false;
+    QRCode.toDataURL(setup.otpauth_uri, { width: 220, margin: 1 })
+      .then((url) => { if (!cancelled) setQrDataUrl(url); })
+      .catch(() => { if (!cancelled) setQrDataUrl(null); });
+    return () => { cancelled = true; };
+  }, [setup?.otpauth_uri]);
 
   const enable = async (e) => {
     e.preventDefault();
@@ -69,6 +80,11 @@ function MfaTab() {
       {setup && (
         <div className="card" style={{ marginTop: 16 }}>
           <h4>Scan this QR with your authenticator app</h4>
+          {qrDataUrl && (
+            <div style={{ margin: '12px 0' }}>
+              <img src={qrDataUrl} alt="Scan with your authenticator app" width={220} height={220} />
+            </div>
+          )}
           <p className="muted">No camera handy? Enter the secret manually:</p>
           <div className="qr-uri"><code>{setup.otpauth_uri}</code></div>
           <Field label="Secret">
