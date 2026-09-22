@@ -928,6 +928,29 @@ def main():
     })
     check("after clearing the default level, any hierarchy level is accepted", ok(r), f"{r.status_code} {j(r)}")
 
+    section("26. Renaming a division propagates into its own tenant DB")
+    NEW_DIV_NAME = f"Renamed Div A {UUID}"
+    r = client.put(f"{BASE}/divisions/{div1_id}", headers=OA, json={"name": NEW_DIV_NAME})
+    check("platform admin renames the division", ok(r), f"{r.status_code} {j(r)}")
+    check("platform response reflects the new name", j(r).get("name") == NEW_DIV_NAME, j(r))
+
+    conn = provision_pool_conn(tenant_db1)
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM divisions WHERE id=%s", (admin_div,))
+    tenant_side_name = cur.fetchone()[0]
+    cur.execute("SELECT DISTINCT division FROM users WHERE division_id=%s", (admin_div,))
+    user_division_texts = {row[0] for row in cur.fetchall()}
+    conn.close()
+    check("the tenant's own internal divisions row picks up the new name",
+          tenant_side_name == NEW_DIV_NAME, tenant_side_name)
+    check("every user's denormalized division text is refreshed too",
+          user_division_texts == {NEW_DIV_NAME}, user_division_texts)
+
+    r = client.get("/api/v1/users", headers=T1)
+    check("the tenant-side Users list now shows the new division name",
+          ok(r) and all(u.get("division_name") == NEW_DIV_NAME for u in j(r).get("items", [])),
+          j(r))
+
     return finish(keep)
 
 

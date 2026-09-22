@@ -232,7 +232,8 @@ def update_division(did: int, body: dict, claims=Depends(require_sa_roles("platf
     try:
         c = conn.cursor()
         c.execute("SELECT * FROM divisions WHERE id=%s", (did,))
-        if not c.fetchone():
+        existing = fetchone_dict(c)
+        if not existing:
             raise HTTPException(404, "Division not found")
         fields = ["name", "description", "contact_person", "contact_email",
                   "contact_mobile", "status", "logo_path", "covered_regions"]
@@ -252,9 +253,38 @@ def update_division(did: int, body: dict, claims=Depends(require_sa_roles("platf
         c.execute("SELECT * FROM divisions WHERE id=%s", (did,))
         row = fetchone_dict(c)
         row["covered_regions"] = _regions(row.get("covered_regions"))
+        if "name" in body and body["name"] and existing.get("tenant_db_name"):
+            _rename_tenant_division(existing["tenant_db_name"], existing.get("code"), body["name"])
         return row
     finally:
         conn.close()
+
+
+def _rename_tenant_division(tenant_db_name, code, new_name):
+    """Renaming a division here only changes the platform's own record --
+    each tenant keeps its own separate `divisions` row (matched by `code`,
+    the one stable link between the two) that tenant-side pages actually
+    read (e.g. Users.jsx's division_name column), plus a denormalized
+    `division` text column on every user row in that division. Neither is
+    touched by the platform-side UPDATE above, so without this they'd keep
+    showing the old name indefinitely."""
+    if not code:
+        return
+    from .. import pools
+    tconn = None
+    try:
+        tconn = pools.get_tenant_conn(tenant_db_name)
+        tc = tconn.cursor()
+        tc.execute("SELECT id FROM divisions WHERE code=%s", (code,))
+        trow = tc.fetchone()
+        if not trow:
+            return
+        tc.execute("UPDATE divisions SET name=%s WHERE id=%s", (new_name, trow[0]))
+        tc.execute("UPDATE users SET division=%s WHERE division_id=%s", (new_name, trow[0]))
+        tconn.commit()
+    finally:
+        if tconn:
+            tconn.close()
 
 
 _TRANSITIONS = {
