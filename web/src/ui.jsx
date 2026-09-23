@@ -1630,11 +1630,13 @@ export function AiInvoiceCard({ fields = {}, items = [], confidence, title = 'AI
 export function ProofPane({ url, name, hint = 'Proof document', empty = 'No document attached' }) {
   const isPdf = /\.pdf$/i.test(name || '');
   const [zoom, setZoom] = useState(1);
+  const [rotation, setRotation] = useState(0);
+  const [fullscreen, setFullscreen] = useState(false);
   const [size, setSize] = useState(null);
   const bodyRef = useRef(null);
   const dragRef = useRef(null);
   const [panning, setPanning] = useState(false);
-  useEffect(() => { setZoom(1); setSize(null); }, [url]);
+  useEffect(() => { setZoom(1); setRotation(0); setFullscreen(false); setSize(null); }, [url]);
   useEffect(() => {
     if (!url || isPdf) return;
     const img = new Image();
@@ -1645,6 +1647,8 @@ export function ProofPane({ url, name, hint = 'Proof document', empty = 'No docu
   const zoomIn = () => setZoom((z) => Math.min(3, +(z + 0.25).toFixed(2)));
   const zoomOut = () => setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)));
   const zoomReset = () => setZoom(1);
+  const rotateLeft = () => setRotation((r) => (r - 90 + 360) % 360);
+  const rotateRight = () => setRotation((r) => (r + 90) % 360);
 
   const onPanStart = (e) => {
     if (e.button !== 0 || !bodyRef.current) return;
@@ -1662,8 +1666,53 @@ export function ProofPane({ url, name, hint = 'Proof document', empty = 'No docu
   };
   const onPanEnd = () => { dragRef.current = null; setPanning(false); };
 
-  const scaled = zoom > 1 && size;
+  // Panning (drag-to-scroll) only applies at zoom without rotation -- once
+  // rotated, width/height swap visually and the pixel-sized scroll body math
+  // above no longer matches the rendered box, so fall back to a plain
+  // scale+rotate transform (no drag) rather than a broken pan.
+  const scaled = rotation === 0 && zoom > 1 && size;
   const bodyStyle = scaled ? { width: size.w * zoom, height: size.h * zoom } : undefined;
+
+  const controls = (
+    <div className="proof-pane-actions">
+      {url && !isPdf && (
+        <>
+          <div className="zoom-controls">
+            <button type="button" className="btn btn-sm" onClick={zoomOut} disabled={zoom <= 0.5} title="Zoom out">−</button>
+            <button type="button" className="zoom-pct" onClick={zoomReset} title="Reset zoom">{Math.round(zoom * 100)}%</button>
+            <button type="button" className="btn btn-sm" onClick={zoomIn} disabled={zoom >= 3} title="Zoom in">+</button>
+          </div>
+          <div className="zoom-controls">
+            <button type="button" className="btn btn-sm" onClick={rotateLeft} title="Rotate left">⟲</button>
+            <button type="button" className="btn btn-sm" onClick={rotateRight} title="Rotate right">⟳</button>
+          </div>
+          <button type="button" className="btn btn-sm" onClick={() => setFullscreen(true)} title="View fullscreen">⤢</button>
+        </>
+      )}
+      {url && (
+        <a className="btn btn-sm" href={url} target="_blank" rel="noreferrer">Open original</a>
+      )}
+    </div>
+  );
+
+  const body = (
+    <div className={`proof-pane-body${scaled ? ' pannable' : ''}${panning ? ' panning' : ''}`} ref={bodyRef}
+      onMouseDown={onPanStart} onMouseMove={onPanMove} onMouseUp={onPanEnd} onMouseLeave={onPanEnd}>
+      {url ? (
+        isPdf
+          ? <iframe src={url} title={name || hint} className="proof-frame" />
+          : (
+            <img src={url} alt={name || hint} className="proof-img" loading="lazy" draggable={false}
+              style={scaled
+                ? { width: '100%', height: '100%', maxWidth: 'none', maxHeight: 'none', objectFit: 'fill' }
+                : { transform: `scale(${zoom}) rotate(${rotation}deg)` }} />
+          )
+      ) : (
+        <span className="proof-empty">{empty}</span>
+      )}
+    </div>
+  );
+
   return (
     <div className="proof-pane">
       <div className="proof-pane-head">
@@ -1671,32 +1720,20 @@ export function ProofPane({ url, name, hint = 'Proof document', empty = 'No docu
           <strong>{name || hint}</strong>
           {name && <span className="muted">{hint}</span>}
         </div>
-        <div className="proof-pane-actions">
-          {url && !isPdf && (
-            <div className="zoom-controls">
-              <button type="button" className="btn btn-sm" onClick={zoomOut} disabled={zoom <= 0.5} title="Zoom out">−</button>
-              <button type="button" className="zoom-pct" onClick={zoomReset} title="Reset zoom">{Math.round(zoom * 100)}%</button>
-              <button type="button" className="btn btn-sm" onClick={zoomIn} disabled={zoom >= 3} title="Zoom in">+</button>
+        {controls}
+      </div>
+      {!fullscreen && body}
+      {fullscreen && (
+        <Modal open full title={name || hint} onClose={() => setFullscreen(false)}>
+          <div className="proof-pane">
+            <div className="proof-pane-head">
+              <div className="proof-pane-title"><span className="muted">{hint}</span></div>
+              {controls}
             </div>
-          )}
-          {url && (
-            <a className="btn btn-sm" href={url} target="_blank" rel="noreferrer">Open original</a>
-          )}
-        </div>
-      </div>
-      <div className={`proof-pane-body${scaled ? ' pannable' : ''}${panning ? ' panning' : ''}`} ref={bodyRef}
-        onMouseDown={onPanStart} onMouseMove={onPanMove} onMouseUp={onPanEnd} onMouseLeave={onPanEnd}>
-        {url ? (
-          isPdf
-            ? <iframe src={url} title={name || hint} className="proof-frame" />
-            : (
-              <img src={url} alt={name || hint} className="proof-img" loading="lazy" draggable={false}
-                style={scaled ? { width: '100%', height: '100%', maxWidth: 'none', maxHeight: 'none', objectFit: 'fill' } : { transform: `scale(${zoom})` }} />
-            )
-        ) : (
-          <span className="proof-empty">{empty}</span>
-        )}
-      </div>
+            {body}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
