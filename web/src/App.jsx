@@ -29,6 +29,7 @@ import Masters from './pages/app/Masters';
 import Chemists from './pages/app/Chemists';
 import RegisterChemist from './pages/app/RegisterChemist';
 import Profile from './pages/app/Profile';
+import SuperAdminProfile from './pages/superadmin/Profile';
 import Onboarding from './pages/app/Onboarding';
 import Audit from './pages/app/Audit';
 import Security from './pages/app/Security';
@@ -212,7 +213,7 @@ export default function App() {
           <ProtectedSuper><AppShell kind="sa"><AiModels /></AppShell></ProtectedSuper>
         } />
         <Route path="/superadmin/profile" element={
-          <ProtectedSuper><AppShell kind="sa"><Profile /></AppShell></ProtectedSuper>
+          <ProtectedSuper><AppShell kind="sa"><SuperAdminProfile /></AppShell></ProtectedSuper>
         } />
 
         <Route path="/app/onboarding/:step" element={

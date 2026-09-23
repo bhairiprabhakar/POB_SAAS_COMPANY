@@ -122,6 +122,19 @@ def main():
         claims = _jwt.decode(token, _cfg.JWT_SECRET, algorithms=["HS256"])
         check("refresh keeps sa_role=owner", claims.get("sa_role") == "owner", claims)
 
+    # A platform-console user hitting the tenant /me endpoint (e.g. via a
+    # stale link, a shared component, or navigating to /superadmin/profile
+    # before it had its own backend) must not silently succeed with tenant
+    # data -- and must have its own equivalent endpoint instead of nothing.
+    r = client.get("/api/v1/auth/me", headers=OA)
+    check("superadmin token on the TENANT /me endpoint -> 403 Tenant access required",
+          r.status_code == 403, f"{r.status_code} {j(r)}")
+    r = client.get("/api/v1/auth/superadmin/me", headers=OA)
+    check("owner has their own /auth/superadmin/me endpoint", ok(r), f"{r.status_code} {j(r)}")
+    check("superadmin/me returns the owner's own profile",
+          j(r).get("user", {}).get("username") == "owner01" and j(r).get("role") == "owner",
+          j(r))
+
     # ── 2. Owner creates platform admins ─────────────────────────────────────
     section("2. Platform admin CRUD (owner-only)")
 
@@ -338,6 +351,10 @@ def main():
         user = j(r).get("user", {})
         check(f"  role in payload = {role}", user.get("role") == role, user)
         role_tokens[role] = j(r).get("access_token")
+
+    r = client.get("/api/v1/auth/superadmin/me", headers={"Authorization": f"Bearer {role_tokens['campaign_admin']}"})
+    check("a specialised role can also use /auth/superadmin/me (not owner-only)",
+          ok(r) and j(r).get("user", {}).get("username") == "test_campaign_admin", f"{r.status_code} {j(r)}")
 
     # ── 4. Path gating ────────────────────────────────────────────────────────
     section("4. Path gating (specialised roles restricted to own area)")

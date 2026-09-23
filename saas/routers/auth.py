@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from .. import config, platform_db, pools, security, storage
 from ..db_utils import fetchone_dict
-from ..deps import get_tenant_context
+from ..deps import get_tenant_context, require_superadmin
 from ..ratelimit import login_allowed, login_failed, login_reset, login_succeeded
 from saas.passwords import hash_pw, verify_pw
 
@@ -784,6 +784,25 @@ def _tenant_me(ctx):
         manager = fetchone_dict(c)
     return {"user": me, "hierarchy_level": level, "manager": manager, "permissions": sorted(ctx.perms),
             "role": ctx.user.get("role_name")}
+
+
+@router.get("/superadmin/me")
+def superadmin_me(claims=Depends(require_superadmin)):
+    """Platform console's own self-profile -- distinct from /me (tenant users),
+    since a super_admins row has no territory/hierarchy/reporting-line
+    concepts and lives in the platform DB, not a tenant one."""
+    conn = platform_db.get_db()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT id, username, full_name, email, status, role, owner_flag, created_at "
+                  "FROM super_admins WHERE id=%s", (claims.get("sub"),))
+        me = fetchone_dict(c)
+        if not me:
+            raise HTTPException(404, "account not found")
+        me["owner"] = bool(me.pop("owner_flag"))
+        return {"user": me, "role": claims.get("sa_role") or "full"}
+    finally:
+        conn.close()
 
 
 @router.put("/me")

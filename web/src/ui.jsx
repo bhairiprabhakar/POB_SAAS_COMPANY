@@ -335,13 +335,14 @@ function hasPerm(perms, perm) {
 const SA_ROLE_LABELS = {
   owner: 'Owner',
   full: 'Super Admin',
+  co_owner: 'Co-Owner',
   campaign_admin: 'Campaign Admin',
   finance_admin: 'Finance Admin',
   verification_admin: 'Verification Admin',
   platform_division_admin: 'Platform Division Admin',
 };
 
-function saRoleLabel(role) {
+export function saRoleLabel(role) {
   return SA_ROLE_LABELS[role] || 'Admin';
 }
 
