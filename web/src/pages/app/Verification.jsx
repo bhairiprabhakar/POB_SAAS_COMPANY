@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api, fmtDateTime, fmtMoney } from '../../api';
 import {
   DetailHero, DetailTable, ErrorBox, Field, Modal, PageHeader, ProofPane, SearchBox, Spinner,
-  SplitDetail, StatCard, StatusBadge, Table, Tabs, TextArea, TextInput, toast, useAsync, useFileUrl,
+  SplitDetail, StatCard, StatusBadge, Table, Tabs, TextArea, TextInput, roleLabel, toast, useAsync, useFileUrl,
 } from '../../ui';
 import { InvoiceProofReport, VerificationStatusBadge } from '../../InvoiceProofReport';
 
@@ -292,7 +292,7 @@ function VerificationDetail({ vid, onBack, onDone }) {
                         <span className="tl-dot" />
                         <div>
                           <strong>Step {a.step}: {a.step_name || a.status}</strong> <StatusBadge value={a.status} />
-                          {a.role_name && <div className="muted">{a.role_name}{a.comment ? ` — ${a.comment}` : ''}</div>}
+                          {a.role_name && <div className="muted">{roleLabel(a.role_name)}{a.comment ? ` — ${a.comment}` : ''}</div>}
                         </div>
                       </div>
                     ))}

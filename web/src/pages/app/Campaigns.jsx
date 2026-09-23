@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, fmtDate, fmtMoney } from '../../api';
 import {
-  ErrorBox, PageHeader, SearchBox, Spinner, StatusBadge, useAsync,
+  ErrorBox, PageHeader, SearchBox, Spinner, StatusBadge, roleLabel, useAsync,
 } from '../../ui';
 
 export default function Campaigns() {
@@ -113,7 +113,7 @@ function MemberTree({ members }) {
       <div className="member-row">
         <span className="member-name">
           {m.full_name}
-          <em>{m.level_name || m.role_name || 'member'}</em>
+          <em>{m.level_name || (m.role_name ? roleLabel(m.role_name) : 'member')}</em>
         </span>
         <span className="member-stats">
           <span className="lg-num"><b>{m.pobs || 0}</b></span>

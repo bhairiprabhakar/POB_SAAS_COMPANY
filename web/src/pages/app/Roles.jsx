@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../api';
 import {
-  Badge, ErrorBox, Field, Modal, PageHeader, Select, Spinner, Table, TextInput, toast, useAsync,
+  Badge, ErrorBox, Field, Modal, PageHeader, Select, Spinner, Table, TextInput, roleLabel, toast, useAsync,
 } from '../../ui';
 
 export default function Roles({ base = '/api/v1' }) {
@@ -17,7 +17,7 @@ export default function Roles({ base = '/api/v1' }) {
 
   const cols = [
     { key: 'id', label: 'ID', render: (r) => <strong>#{r.id}</strong> },
-    { key: 'name', label: 'Role', render: (r) => <span><strong>{r.name}</strong>{r.is_system && <Badge tone="gray">system</Badge>}</span> },
+    { key: 'name', label: 'Role', render: (r) => <span><strong>{roleLabel(r.name)}</strong>{r.is_system && <Badge tone="gray">system</Badge>}</span> },
     { key: 'data_entry', label: 'Data entry', render: (r) => r.data_entry ? <Badge tone="green">enabled</Badge> : <Badge tone="gray">no</Badge> },
     { key: 'description', label: 'Description' },
     { key: 'default_hierarchy_level_id', label: 'Hierarchy level', render: (r) => {
@@ -87,7 +87,7 @@ function RoleModal({ editing, allPerms, allLevels, isEdit, onClose, onDone, base
   };
 
   return (
-    <Modal open wide title={isEdit ? `Edit ${editing.name}` : 'New role'} onClose={onClose}
+    <Modal open wide title={isEdit ? `Edit ${roleLabel(editing.name)}` : 'New role'} onClose={onClose}
       footer={<>
         {isEdit && !editing.is_system && (
           <button className="btn btn-danger" onClick={async () => {

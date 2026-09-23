@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../api';
-import { ErrorBox, PageHeader, SearchBox, StatCard, StatSkeleton, toast, useAsync } from '../../ui';
+import { ErrorBox, PageHeader, SearchBox, StatCard, StatSkeleton, roleLabel, toast, useAsync } from '../../ui';
 
 export default function Regions() {
   const [params, setParams] = useSearchParams();
@@ -84,7 +84,7 @@ export default function Regions() {
                 {view === 'territory' && <td>{r.area || '—'}</td>}
                 <td><strong>{r.key}</strong></td>
                 <td>{r.count}</td>
-                <td className="muted">{r.designations.join(', ') || '—'}</td>
+                <td className="muted">{r.designations.map(roleLabel).join(', ') || '—'}</td>
               </tr>
             ))}
           </tbody>

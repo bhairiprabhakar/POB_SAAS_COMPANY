@@ -354,8 +354,22 @@ export function saRoleLabel(role) {
 // names → humanized to Title Case. Exported so any page rendering a raw
 // role/designation string formats it the same way instead of showing the
 // lowercase DB slug as-is.
+// These three tenant role names are easily mistaken for the platform-tier
+// finance_admin / verification_admin roles (see saas/scoping.py GLOBAL_ROLES)
+// despite being unrelated -- a division's own finance/verifier/auditor staff,
+// not a cross-division platform admin. Renaming the underlying role name
+// would ripple into GLOBAL_ROLES, every seed/migration reference and live
+// tenant data across all divisions for a purely cosmetic fix, so this
+// disambiguates the label only, wherever roleLabel() is already used.
+const AMBIGUOUS_TENANT_ROLE_LABELS = {
+  finance: 'Finance (Division)',
+  verifier: 'Verifier (Division)',
+  auditor: 'Auditor (Division)',
+};
+
 export function roleLabel(role) {
   if (!role) return '—';
+  if (AMBIGUOUS_TENANT_ROLE_LABELS[role]) return AMBIGUOUS_TENANT_ROLE_LABELS[role];
   if (/^[a-z]+$/.test(role) && role.length <= 4) return role.toUpperCase();
   return role.split('_').map((w) => w ? w[0].toUpperCase() + w.slice(1) : w).join(' ');
 }

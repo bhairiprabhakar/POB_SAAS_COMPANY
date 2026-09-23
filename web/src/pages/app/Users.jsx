@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { api, downloadFile, fmtDateTime, uploadFile } from '../../api';
 import {
   Badge, ErrorBox, Field, Modal, PageHeader, SearchBox, Select, Spinner, StatusBadge,
-  Table, TextInput, toast, useAsync,
+  Table, TextInput, roleLabel, toast, useAsync,
 } from '../../ui';
 
 export default function Users({ base = '/api/v1' }) {
@@ -39,7 +39,7 @@ export default function Users({ base = '/api/v1' }) {
   const cols = [
     { key: 'id', label: 'ID', render: (r) => <strong>#{r.id}</strong> },
     { key: 'full_name', label: 'Name', render: (r) => <span><strong>{r.full_name}</strong><br /><small className="muted">{r.username}</small></span> },
-    { key: 'role_name', label: 'Role', render: (r) => <Badge tone="blue">{r.role_name || '—'}</Badge> },
+    { key: 'role_name', label: 'Role', render: (r) => <Badge tone="blue">{r.role_name ? roleLabel(r.role_name) : '—'}</Badge> },
     ...(singleDivision ? [] : [{ key: 'division', label: 'Division', render: (r) => (r.division_id
       ? <Badge tone="green">{r.division_name || r.division || '—'}</Badge>
       : <span className="muted" title="This user cannot sign in through any division link">No division</span>) }]),
