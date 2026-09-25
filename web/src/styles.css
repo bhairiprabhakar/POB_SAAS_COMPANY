@@ -172,9 +172,16 @@ strong { font-weight: 600; }
    34px square as the brand mark, so top-aligning it keeps both flush on one
    row instead of centering the toggle against the full card height, which
    left it looking like it was floating mid-card whenever the company
-   name/subtitle wrapped to two lines. */
+   name/subtitle wrapped to two lines.
+   justify-content: space-between -- an uploaded company logo can render far
+   narrower than the card (object-fit: contain shrinks a wide/landscape
+   image down to fit the 34px height), so packing the toggle right after it
+   with just the flex gap left it stranded wherever the logo happened to
+   end -- near-dead-center for a narrow logo. Anchoring it to the card's
+   right edge instead keeps its position fixed and predictable regardless
+   of the logo's own width. */
 .brand {
-  display: flex; align-items: flex-start; gap: 10px;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
   background: var(--bg-2); border-radius: var(--radius-lg);
   padding: 10px 12px; margin: 0 2px 14px;
   box-shadow: var(--shadow);
