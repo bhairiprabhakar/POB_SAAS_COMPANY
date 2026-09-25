@@ -168,8 +168,13 @@ strong { font-weight: 600; }
 /* The brand mark sits on its own light card inset into the dark rail --
    division/company logos are made for light backgrounds, so this keeps
    them legible instead of fighting the dark surface behind them. */
+/* align-items: flex-start (not center) -- the collapse toggle is the same
+   34px square as the brand mark, so top-aligning it keeps both flush on one
+   row instead of centering the toggle against the full card height, which
+   left it looking like it was floating mid-card whenever the company
+   name/subtitle wrapped to two lines. */
 .brand {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: flex-start; gap: 10px;
   background: var(--bg-2); border-radius: var(--radius-lg);
   padding: 10px 12px; margin: 0 2px 14px;
   box-shadow: var(--shadow);
