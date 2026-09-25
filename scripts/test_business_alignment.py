@@ -551,8 +551,7 @@ def main():
     section("16. Verification agent permissions are POB-only")
     r = client.get("/api/v1/auth/me", headers=TV)
     vperms = (j(r).get("permissions") or []) if ok(r) else []
-    for forbidden in ("statement.verify", "statement.credits", "statement.view",
-                      "verification.manage", "product.manage", "campaign.manage",
+    for forbidden in ("verification.manage", "product.manage", "campaign.manage",
                       "user.manage", "gratification.manage", "gratification.approve",
                       "gratification.pay", "brand.manage", "chemist.classification.manage"):
         check(f"verifier lacks {forbidden}", forbidden not in vperms, vperms)

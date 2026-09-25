@@ -5,13 +5,11 @@ import {
   Badge, ErrorBox, Field, Modal, PageHeader, SearchBox, Select, Skeleton, StatCard,
   StatSkeleton, StatusBadge, Table, TableSkeleton, Tabs, TextArea, TextInput, canOpenDivisionConsole, toast, useAsync,
 } from '../../ui';
-import { CreditsPanel } from './DivisionCredits';
 
 const TABS = [
   { value: 'overview', label: 'Overview' },
   { value: 'users', label: 'Users' },
   { value: 'roles', label: 'Roles & hierarchy' },
-  { value: 'credits', label: 'Statement Credits' },
 ];
 
 const loginUrl = (code) => (code ? `${window.location.origin}/login/${encodeURIComponent(code)}` : null);
@@ -22,8 +20,8 @@ export default function DivisionDetail() {
   const { did } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   // platform_division_admin's backend access is limited to division
-  // lifecycle + admins (see saas/routers/superadmin.py) -- the Users/Roles/
-  // Credits tabs would just 403, so don't offer them for this role.
+  // lifecycle + admins (see saas/routers/superadmin.py) -- the Users/Roles
+  // tabs would just 403, so don't offer them for this role.
   const visibleTabs = saRole() === 'platform_division_admin'
     ? TABS.filter((t) => t.value === 'overview') : TABS;
   const requested = searchParams.get('tab');
@@ -199,7 +197,6 @@ export default function DivisionDetail() {
 
       {tab === 'users' && <UsersTab did={c.id} />}
       {tab === 'roles' && <RolesTab did={c.id} />}
-      {tab === 'credits' && <CreditsPanel did={c.id} />}
 
       {editOpen && (
         <DivisionEditModal division={c}

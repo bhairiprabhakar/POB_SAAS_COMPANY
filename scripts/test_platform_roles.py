@@ -587,8 +587,6 @@ def main():
     check("platform_division_admin GET .../roles -> 403", r.status_code == 403, f"{r.status_code}")
     r = client.get(f"{BASE}/divisions/{RBAC_DID}/hierarchy/tree", headers=ROLE_TOKENS["platform_division_admin"])
     check("platform_division_admin GET .../hierarchy/tree -> 403", r.status_code == 403, f"{r.status_code}")
-    r = client.get(f"{BASE}/divisions/{RBAC_DID}/credits", headers=ROLE_TOKENS["platform_division_admin"])
-    check("platform_division_admin GET .../credits -> 403", r.status_code == 403, f"{r.status_code}")
     for rname in ("campaign_admin", "finance_admin", "verification_admin"):
         r = client.post(f"{BASE}/divisions/{RBAC_DID}/users", headers=ROLE_TOKENS[rname], json={
             "username": f"should_not_exist_{rname}", "password": PASSWD, "full_name": "x",

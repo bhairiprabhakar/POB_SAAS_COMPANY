@@ -53,11 +53,6 @@ import ManageCampaigns from './pages/app/ManageCampaigns';
 import CampaignFieldTemplates from './pages/app/CampaignFieldTemplates';
 import Catalog from './pages/app/Catalog';
 import UserManagement from './pages/app/UserManagement';
-import Statements from './pages/app/Statements';
-import StatementsCredits from './pages/app/StatementsCredits';
-import StatementsVerify from './pages/app/StatementsVerify';
-import AiModels from './pages/superadmin/AiModels';
-import DivisionCredits from './pages/superadmin/DivisionCredits';
 
 function ProtectedTenant({ children }) {
   const s = getSession();
@@ -170,9 +165,6 @@ export default function App() {
         <Route path="/superadmin/divisions/:did" element={
           <ProtectedSuper><AppShell kind="sa"><DivisionDetail /></AppShell></ProtectedSuper>
         } />
-        <Route path="/superadmin/divisions/:did/credits" element={
-          <ProtectedSuper><AppShell kind="sa"><DivisionCredits /></AppShell></ProtectedSuper>
-        } />
         <Route path="/superadmin/analytics" element={
           <ProtectedSuper><AppShell kind="sa"><SuperAnalytics /></AppShell></ProtectedSuper>
         } />
@@ -208,9 +200,6 @@ export default function App() {
         } />
         <Route path="/superadmin/platform-settings" element={
           <ProtectedSuper><AppShell kind="sa"><PlatformSettings /></AppShell></ProtectedSuper>
-        } />
-        <Route path="/superadmin/ai-models" element={
-          <ProtectedSuper><AppShell kind="sa"><AiModels /></AppShell></ProtectedSuper>
         } />
         <Route path="/superadmin/profile" element={
           <ProtectedSuper><AppShell kind="sa"><SuperAdminProfile /></AppShell></ProtectedSuper>
@@ -261,15 +250,6 @@ export default function App() {
               ? <VerificationAgent />
               : <Verification />
           }</AppShell></ProtectedTenant>
-        } />
-        <Route path="/app/statements" element={
-          <ProtectedTenant><AppShell kind="tenant"><Statements /></AppShell></ProtectedTenant>
-        } />
-        <Route path="/app/statements/verify" element={
-          <ProtectedTenant><AppShell kind="tenant"><StatementsVerify /></AppShell></ProtectedTenant>
-        } />
-        <Route path="/app/statements/credits" element={
-          <ProtectedTenant><AppShell kind="tenant"><StatementsCredits /></AppShell></ProtectedTenant>
         } />
         <Route path="/app/gratification" element={
           <ProtectedTenant><AppShell kind="tenant"><Gratification /></AppShell></ProtectedTenant>

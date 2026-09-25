@@ -2740,12 +2740,3 @@ body {
 table.data-table .num { text-align: right; }
 table.data-table th.num { text-align: right; }
 .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
-
-/* Statement extraction pages (Batch 3) */
-.pos { color: var(--green); }
-.neg { color: var(--red); }
-.inv-in { width: 92px; padding: 4px 6px; font-size: 12.5px; }
-.inv-in.num { text-align: right; }
-.chk { width: 16px; height: 16px; accent-color: var(--primary); }
-.pricing-in { width: 110px; text-align: right; }
-.party-head { display: flex; justify-content: space-between; align-items: baseline; }

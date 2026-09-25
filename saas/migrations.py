@@ -37,7 +37,11 @@ log = logging.getLogger("saas.migrations")
 # 3.19.0: field_templates table + campaigns.custom_fields -- Template Studio.
 # 3.20.0: roles.default_hierarchy_level_id -- role/hierarchy-level consistency
 # validation on user create/update.
-SCHEMA_VERSION = "3.20.0"
+# 3.21.0: Statements / Statement Credits feature removed -- drops uploads,
+# extractions, parties, items, manual_verifications, credits,
+# credit_transactions, credit_requests and the statement.* permission codes
+# (+ their role grants) from every tenant.
+SCHEMA_VERSION = "3.21.0"
 
 # RLock: ensure_migrated re-enters via get_tenant_pool → _try_migrate path.
 _lock = threading.RLock()

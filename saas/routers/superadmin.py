@@ -1261,11 +1261,13 @@ def platform_costing(days: int = 0, division_id: int = 0, model: str = "",
     """Aggregate Gemini invoice-extraction spend (Batch 2: ai_usage_log).
 
     Reads the platform control-plane ai_usage_log -- the merged, tenant-
-    annotated ledger written by saas/ai/gemini_extraction.py -- instead of the
-    legacy per-tenant ocr_usage tables (vestigial under the merged path).
-    Reports input/output/thinking tokens, chunks, model used and computed
-    cost, summarised platform-wide, per division, per model and per (tenant)
-    user, plus the newest extraction calls. ``days=0`` means all time;
+    annotated ledger from the now-removed statement-extraction pipeline --
+    instead of the legacy per-tenant ocr_usage tables (vestigial under the
+    merged path). Historical data only: nothing writes new rows to
+    ai_usage_log since the statement-extraction feature was removed. Reports
+    input/output/thinking tokens, chunks, model used and computed cost,
+    summarised platform-wide, per division, per model and per (tenant) user,
+    plus the newest extraction calls. ``days=0`` means all time;
     ``division_id`` / ``model`` narrow the view.
     """
     import time as _time
@@ -1606,173 +1608,6 @@ def platform_costing_export(days: int = 0, division_id: int = 0, model: str = ""
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="ai_costing_report_last_{effective_days}_days.xlsx"'},
     )
-
-
-# -- AI model routing + pricing (platform-wide superadmin config) --
-
-@router.get("/ai-models")
-def sa_ai_models(claims=Depends(require_sa_roles())):
-    """Model Settings: which Gemini model handles each file category, plus the
-    editable per-model USD pricing table (see saas/ai/model_registry.py)."""
-    from ..ai import model_registry
-    return {
-        "categories": model_registry.CATEGORIES,
-        "routing": model_registry.get_routing(),
-        "env_defaults": model_registry.env_defaults(),
-        "models": model_registry.model_options(),
-        "pricing": model_registry.get_pricing_rows(),
-    }
-
-
-@router.post("/ai-models/routing")
-def sa_ai_models_routing_save(body: dict, claims=Depends(require_sa_roles())):
-    """Save the per-category model overrides. An empty choice deletes that
-    category's override so it follows .env again."""
-    from ..ai import model_registry
-    overrides = (body or {}).get("overrides")
-    if overrides is None:
-        overrides = body or {}
-    try:
-        model_registry.save_routing(overrides or {}, claims.get("sub"))
-        return {"success": True,
-                "message": "Model settings saved -- applies to the next document processed."}
-    except Exception as exc:
-        raise HTTPException(400, f"Error saving model settings: {exc}")
-
-
-@router.post("/ai-models/pricing")
-def sa_ai_models_pricing_save(body: dict, claims=Depends(require_sa_roles())):
-    """Save the pricing table rows plus an optional new-model entry. A blank
-    price falls back to default pricing."""
-    from ..ai import model_registry
-    body = body or {}
-    rows = body.get("rows") or []
-    new_model = body.get("new_model") or {}
-    saved = 0
-    try:
-        for r in rows:
-            mid = (r.get("model_id") or "").strip()
-            if mid:
-                model_registry.upsert_pricing(
-                    mid, r.get("label", ""), r.get("input"), r.get("output"))
-                saved += 1
-        nm = (new_model.get("model_id") or "").strip()
-        if nm:
-            model_registry.upsert_pricing(
-                nm, new_model.get("label", ""),
-                new_model.get("input"), new_model.get("output"))
-            saved += 1
-        return {"success": True,
-                "message": f"Pricing saved -- {saved} model(s) updated. New prices apply to the next document processed."}
-    except Exception as exc:
-        raise HTTPException(400, f"Error saving pricing: {exc}")
-
-
-@router.post("/ai-models/pricing/delete")
-def sa_ai_models_pricing_delete(body: dict, claims=Depends(require_sa_roles())):
-    """Remove a model from pricing. Refuses if the model is currently selected
-    in any routing category (see model_registry.delete_pricing)."""
-    from ..ai import model_registry
-    mid = ((body or {}).get("model_id") or "").strip()
-    if not mid:
-        raise HTTPException(400, "model_id required")
-    ok, reason = model_registry.delete_pricing(mid)
-    if not ok:
-        raise HTTPException(400, reason or "Cannot delete that model")
-    return {"success": True, "message": f"Removed '{mid}' from pricing."}
-
-
-# -- Tenant credits admin (statement wallet; superadmin review) --
-
-@router.get("/divisions/{did}/credits")
-def sa_tenant_credits(did: int, claims=Depends(require_sa_roles())):
-    """Tenant statement-credit wallet + pending requests + ledger (the merged
-    home of the legacy /superadmin/credits page)."""
-    from .. import credits
-    conn = platform_db.get_db()
-    try:
-        tconn = _tenant_conn_for(conn, did)
-        try:
-            return {
-                "division_id": did,
-                "credits": credits.get_credits(tconn),
-                "pending_requests": credits.pending_credit_requests(tconn),
-                "ledger": credits.credit_ledger(tconn, limit=50),
-                "usage_summary": credits.credit_usage_summary(tconn),
-            }
-        finally:
-            tconn.close()
-    finally:
-        conn.close()
-
-
-@router.post("/divisions/{did}/credits/allocate")
-def sa_tenant_credits_allocate(did: int, body: dict, claims=Depends(require_sa_roles())):
-    """Allocate credits to a tenant wallet (legacy /superadmin/credits/allocate)."""
-    from .. import credits
-    amount = int((body or {}).get("amount") or 0)
-    plan = ((body or {}).get("plan") or "demo").strip() or "demo"
-    if amount <= 0:
-        raise HTTPException(400, "Amount must be positive")
-    conn = platform_db.get_db()
-    try:
-        tconn = _tenant_conn_for(conn, did)
-        try:
-            wallet = credits.top_up_credits(tconn, amount, plan=plan)
-            _audit(conn, claims, "credits.allocate", "division", did,
-                   {"amount": amount, "plan": plan})
-            return {"success": True,
-                    "message": f"✓ {amount} credits allocated",
-                    "credits": wallet}
-        finally:
-            tconn.close()
-    finally:
-        conn.close()
-
-
-@router.post("/divisions/{did}/credits/requests/{rid}/approve")
-def sa_tenant_credits_approve(did: int, rid: int, body: dict = None,
-                              claims=Depends(require_sa_roles())):
-    """Approve a tenant credit request. reviewed_by stays NULL because the
-    platform superadmin is not a tenant users(id) FK; the actor is recorded in
-    platform_audit_logs by the platform-side _audit helper."""
-    from .. import credits
-    conn = platform_db.get_db()
-    try:
-        tconn = _tenant_conn_for(conn, did)
-        try:
-            req = credits.approve_credit_request(tconn, rid, reviewed_by=None)
-            if not req:
-                raise HTTPException(404, "Request not found or no longer pending")
-            _audit(conn, claims, "credits.request.approve", "division", did,
-                   {"request_id": rid, "amount": req["credits_requested"]})
-            return {"success": True,
-                    "message": f"✓ Credit request approved -- {req['credits_requested']} credits added"}
-        finally:
-            tconn.close()
-    finally:
-        conn.close()
-
-
-@router.post("/divisions/{did}/credits/requests/{rid}/reject")
-def sa_tenant_credits_reject(did: int, rid: int, body: dict = None,
-                             claims=Depends(require_sa_roles())):
-    """Reject a tenant credit request (reviewed_by=NULL; actor in audit log)."""
-    from .. import credits
-    conn = platform_db.get_db()
-    try:
-        tconn = _tenant_conn_for(conn, did)
-        try:
-            ok = credits.reject_credit_request(tconn, rid, reviewed_by=None)
-            if not ok:
-                raise HTTPException(404, "Request not found or no longer pending")
-            _audit(conn, claims, "credits.request.reject", "division", did,
-                   {"request_id": rid})
-            return {"success": True, "message": f"Credit request #{rid} rejected"}
-        finally:
-            tconn.close()
-    finally:
-        conn.close()
 
 
 # -- Platform-wide modules (campaigns / POB / gratification / users) --

@@ -22,7 +22,7 @@ from .platform_db import init_platform_db
 from .pools import start_idle_sweeper
 from .routers import (
     analytics, apikeys, audit, auth, company, dashboards, gratification, inventory, jobs,
-    masters, mfa, notifications, pob, payouts, recovery, reports, settings, statements,
+    masters, mfa, notifications, pob, payouts, recovery, reports, settings,
     storage, superadmin, upi, verification, visits, webhooks, workflows,
 )
 
@@ -83,7 +83,6 @@ app.include_router(inventory.router)
 app.include_router(payouts.router)
 app.include_router(audit.router)
 app.include_router(storage.router)
-app.include_router(statements.router)
 
 
 # ── Liveness / metrics ──────────────────────────────────────────────────────
